@@ -3,15 +3,18 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.ListData;
-import com.gto.datasynclib.datasream.data.LongData;
-import com.gto.datasynclib.datasream.data.NullData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.ListData;
+import com.gto.datasynclib.datastream.data.LongData;
+import com.gto.datasynclib.datastream.data.NullData;
 import it.unimi.dsi.fastutil.objects.Reference2LongMap;
 import it.unimi.dsi.fastutil.objects.Reference2LongMaps;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * Synchronizes a FastUtil Reference2LongMap (identity-based key comparison).
+ */
 public class Reference2LongMapAccess<K> extends AbstractFieldAccess<Reference2LongMap> {
 
     private final DataSyncCodec<K> keyCodec;
@@ -21,7 +24,7 @@ public class Reference2LongMapAccess<K> extends AbstractFieldAccess<Reference2Lo
     public Reference2LongMapAccess(DataFieldDefinition<Reference2LongMap> definition) {
         super(definition);
         if (definition.genericType.length < 1) throw new IllegalArgumentException("Map type parameters not found");
-        this.keyCodec = (DataSyncCodec<K>) definition.genericCodec[0];
+        this.keyCodec = (DataSyncCodec<K>) definition.genericCodecs[0];
         if (this.keyCodec == null)
             throw new IllegalArgumentException("Codec not found for key type " + definition.genericType[0]);
     }

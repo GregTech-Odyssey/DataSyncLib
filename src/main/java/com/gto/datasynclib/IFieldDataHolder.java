@@ -1,6 +1,6 @@
 package com.gto.datasynclib;
 
-import com.gto.datasynclib.datasream.data.StringMapData;
+import com.gto.datasynclib.datastream.data.StringMapData;
 import net.minecraft.network.FriendlyByteBuf;
 
 /**

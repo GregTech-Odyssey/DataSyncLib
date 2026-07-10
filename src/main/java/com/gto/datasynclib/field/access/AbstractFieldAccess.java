@@ -3,15 +3,36 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataField;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.ListData;
-import com.gto.datasynclib.datasream.data.NullData;
-import com.gto.datasynclib.datasream.data.StringMapData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.ListData;
+import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.data.StringMapData;
 import lombok.Getter;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+/**
+ * Base class for {@link DataField} implementations that wrap complex field types (collections, maps,
+ * arrays, and other composite structures) rather than simple primitive values.
+ *
+ * <p>Unlike {@link com.gto.datasynclib.field.AbstractField} which handles primitive value fields,
+ * this class manages access to mutable container objects. Subclasses implement the abstract methods
+ * to provide type-specific change detection, buffer writing/reading, and data serialization.</p>
+ *
+ * <p>Key behaviors:</p>
+ * <ul>
+ *   <li><strong>Instance tracking:</strong> Detects when the referenced object changes identity,
+ *       automatically marking the field as changed.</li>
+ *   <li><strong>Instance creation:</strong> When {@code createInstance} is true, handles
+ *       serialization of the container itself (not just its contents), including null-vs-value
+ *       encoding and legacy data version migration.</li>
+ *   <li><strong>Change detection:</strong> Delegates to {@link #hasChange} for content-level
+ *       change detection within the same object instance.</li>
+ * </ul>
+ *
+ * @param <T> the type of the access-managed object (e.g., {@code Collection}, {@code Map}, array)
+ */
 public abstract class AbstractFieldAccess<T> implements DataField<T> {
 
     @Getter
@@ -19,7 +40,7 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
 
     protected T instance;
 
-    protected boolean syncChange;
+    protected boolean changed;
 
     protected AbstractFieldAccess(DataFieldDefinition<T> definition) {
         this.definition = definition;
@@ -37,17 +58,17 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
 
     @Override
     public void markAsChanged(@NotNull Object source) {
-        syncChange = true;
+        changed = true;
     }
 
     @Override
     public void clearChanged(@NotNull Object source) {
-        syncChange = false;
+        changed = false;
     }
 
     @Override
     public boolean isChanged(@NotNull Object source) {
-        return syncChange;
+        return changed;
     }
 
     @Override
@@ -57,15 +78,15 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
         if (this.instance != instance) {
             this.instance = instance;
             markAsChanged(source);
-            if (instance != null && mustDetected()) hasChange(side, instance, auto);
+            if (instance != null && mustDetect()) hasChange(side, instance, auto);
             return true;
         }
-        if (instance == null) return syncChange;
+        if (instance == null) return changed;
         if (hasChange(side, instance, auto)) {
             markAsChanged(source);
             return true;
         }
-        return syncChange;
+        return changed;
     }
 
     @Override

@@ -2,15 +2,18 @@ package com.gto.datasynclib.field.access.array;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.LongArrayData;
-import com.gto.datasynclib.datasream.data.NullData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.LongArrayData;
+import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Arrays;
 
+/**
+ * Synchronizes a long[] primitive array.
+ */
 public final class LongArrayAccess extends AbstractFieldAccess<long[]> {
 
     private int hashCode;

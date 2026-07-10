@@ -2,12 +2,17 @@ package com.gto.datasynclib.field;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.NullData;
-import com.gto.datasynclib.datasream.data.ShortData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.data.ShortData;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * DataField implementation for short values. Tracks the previous value for change detection
+ * comparison, handles sync conditions via skipSync, default value filtering for persistence,
+ * and optional listener notification on value changes.
+ */
 public final class ShortField extends AbstractField<Short> {
 
     private short lastValue;
@@ -17,7 +22,7 @@ public final class ShortField extends AbstractField<Short> {
     }
 
     @Override
-    public boolean hasChanges(@NotNull LogicalSide side, Object source) {
+    public boolean hasChange(@NotNull LogicalSide side, Object source) {
         var definition = this.definition;
         var value = definition.getShort(source);
         if (definition.skipSync(side, source, value)) return false;

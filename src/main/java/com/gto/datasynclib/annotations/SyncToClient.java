@@ -40,12 +40,12 @@ public @interface SyncToClient {
     boolean autoUpdate() default true;
 
     /**
-     * conditions for synchronized
+     * Condition for synchronization.
      * Method signature: T -> boolean
      *
-     * @return the method name for conditions
+     * @return the method name for the condition check
      */
-    String conditions() default "";
+    String condition() default "";
 
     /**
      * Specifies a listener method to be called when this field receives a synchronization update.

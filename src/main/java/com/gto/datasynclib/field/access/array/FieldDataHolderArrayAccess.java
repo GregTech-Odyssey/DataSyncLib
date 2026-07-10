@@ -3,14 +3,19 @@ package com.gto.datasynclib.field.access.array;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.ListData;
-import com.gto.datasynclib.datasream.data.NullData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.ListData;
+import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import com.gto.datasynclib.util.HashUtil;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * Synchronizes an array of IFieldDataHolder instances.
+ * Uses identity-based hash for array change detection with per-element dirty flag propagation.
+ * Overrides mustDetect() for mandatory detection.
+ */
 public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IFieldDataHolder[]> {
 
     private int hashCode;
@@ -20,7 +25,7 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
     }
 
     @Override
-    public boolean mustDetected() {
+    public boolean mustDetect() {
         return true;
     }
 
@@ -35,14 +40,14 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
             }
             return true;
         }
-        boolean hasChanges = false;
+        boolean hasChange = false;
         for (var element : instance) {
             if (element != null && element.getFieldDataManager().updateFieldDirtyFlags(side, auto)) {
                 element.getFieldDataManager().markAsChanged();
-                hasChanges = true;
+                hasChange = true;
             }
         }
-        return hasChanges;
+        return hasChange;
     }
 
     @Override

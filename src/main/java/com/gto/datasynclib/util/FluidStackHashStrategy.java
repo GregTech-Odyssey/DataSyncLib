@@ -1,15 +1,16 @@
 package com.gto.datasynclib.util;
 
-import com.gto.datasynclib.DataFieldDefinition;
 import it.unimi.dsi.fastutil.Hash;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 
+/**
+ * Configurable hash/equality strategy for FluidStack comparison.
+ * Provides FLUID (identity only), FLUID_AND_TAG, and ALL comparison levels.
+ */
 public interface FluidStackHashStrategy extends Hash.Strategy<FluidStack> {
 
     FluidStackHashStrategy ALL = new FluidStackHashStrategy() {

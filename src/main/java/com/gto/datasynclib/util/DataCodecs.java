@@ -1,7 +1,7 @@
 package com.gto.datasynclib.util;
 
-import com.gto.datasynclib.datasream.codec.DataCodec;
-import com.gto.datasynclib.datasream.data.*;
+import com.gto.datasynclib.datastream.codec.DataCodec;
+import com.gto.datasynclib.datastream.data.*;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import lombok.experimental.UtilityClass;
 import net.minecraft.core.BlockPos;
@@ -16,6 +16,10 @@ import org.jetbrains.annotations.NotNull;
 import java.util.ArrayList;
 import java.util.HashMap;
 
+/**
+ * Pre-registered DataCodec instances for Minecraft types including
+ * ResourceLocation, BlockPos, CompoundTag, ItemStack, FluidStack, and Component.
+ */
 @UtilityClass
 public class DataCodecs {
 
@@ -111,7 +115,7 @@ public class DataCodecs {
                 case Data.BYTE_ARRAY -> new ByteArrayTag(data.getByteArray());
                 case Data.INT_ARRAY -> new IntArrayTag(data.getIntArray());
                 case Data.LONG_ARRAY -> new LongArrayTag(data.getLongArray());
-                default -> throw new MatchException(null, null);
+                default -> throw new MatchException("Unknown Data type id for Tag conversion: " + data.getId(), null);
             };
         }
 

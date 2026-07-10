@@ -2,6 +2,9 @@ package com.gto.datasynclib.util.holder;
 
 import lombok.NoArgsConstructor;
 
+/**
+ * Mutable wrapper for double values.
+ */
 @NoArgsConstructor
 public class DoubleHolder {
 

@@ -9,10 +9,15 @@ import java.lang.invoke.MethodType;
 import java.lang.invoke.VarHandle;
 import java.lang.reflect.*;
 
+/**
+ * Reflection utility methods for field access and MethodHandle creation.
+ * Provides adapted getters, setters, and method handles that bridge between
+ * reflective objects and the MethodHandle API for high-performance field access.
+ */
 @UtilityClass
 public final class ReflectUtil {
 
-    public IllegalArgumentException fieldNotFoundException(String fieldName) {
+    public IllegalArgumentException createFieldNotFoundException(String fieldName) {
         return new IllegalArgumentException("Field[" + fieldName + "] not found");
     }
 

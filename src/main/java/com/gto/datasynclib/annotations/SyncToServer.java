@@ -30,12 +30,12 @@ public @interface SyncToServer {
     boolean notifyUpdate() default false;
 
     /**
-     * conditions for synchronized
+     * Condition for synchronization.
      * Method signature: T -> boolean
      *
-     * @return the method name for conditions
+     * @return the method name for the condition check
      */
-    String conditions() default "";
+    String condition() default "";
 
     /**
      * Determines whether the field should be automatically updated.

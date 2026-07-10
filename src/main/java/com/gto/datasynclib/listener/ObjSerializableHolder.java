@@ -3,14 +3,19 @@ package com.gto.datasynclib.listener;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.NullData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.util.holder.ObjHolder;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Objects;
 
+/**
+ * Mutable object holder with codec-based serialization support.
+ * Implements IDataSerializable using a DataSyncCodec for encoding/decoding.
+ * Supports nullable values with null-vs-value boolean prefix encoding.
+ */
 public class ObjSerializableHolder<T> extends ObjHolder<T> implements IDataSerializable {
 
     public static <T> ObjSerializableHolder<T> create(DataSyncCodec<T> codec) {
@@ -23,7 +28,7 @@ public class ObjSerializableHolder<T> extends ObjHolder<T> implements IDataSeria
 
     protected T lastValue;
     protected int lastHash;
-    private boolean syncChange;
+    private boolean changed;
 
     protected final DataSyncCodec<T> codec;
 
@@ -38,17 +43,17 @@ public class ObjSerializableHolder<T> extends ObjHolder<T> implements IDataSeria
 
     @Override
     public void markAsChanged() {
-        syncChange = true;
+        changed = true;
     }
 
     @Override
     public void clearChanged() {
-        syncChange = false;
+        changed = false;
     }
 
     @Override
     public boolean isChanged() {
-        return syncChange;
+        return changed;
     }
 
     @Override
@@ -62,7 +67,7 @@ public class ObjSerializableHolder<T> extends ObjHolder<T> implements IDataSeria
     }
 
     @Override
-    public void writeBuf(LogicalSide side, @NotNull FriendlyByteBuf data) {
+    public void writeBuffer(LogicalSide side, @NotNull FriendlyByteBuf data) {
         if (value == null) {
             data.writeBoolean(false);
         } else {
@@ -73,7 +78,7 @@ public class ObjSerializableHolder<T> extends ObjHolder<T> implements IDataSeria
     }
 
     @Override
-    public void readBuf(LogicalSide side, @NotNull FriendlyByteBuf data) {
+    public void readBuffer(LogicalSide side, @NotNull FriendlyByteBuf data) {
         if (data.readBoolean()) {
             value = codec.streamReader.decode(data);
         } else {

@@ -3,6 +3,9 @@ package com.gto.datasynclib.util.cache;
 import java.util.HashMap;
 import java.util.function.Function;
 
+/**
+ * HashMap-backed implementation of MapCache.
+ */
 public class HashMapCache<K, V> extends HashMap<K, V> implements MapCache<K, V> {
 
     protected final Function<K, V> mapFunction;
@@ -17,7 +20,7 @@ public class HashMapCache<K, V> extends HashMap<K, V> implements MapCache<K, V> 
     }
 
     @Override
-    public V getCacheRecursion(K k) {
+    public V getCacheNonAtomic(K k) {
         var v = super.get(k);
         if (v != null) return v;
         v = mapFunction.apply(k);

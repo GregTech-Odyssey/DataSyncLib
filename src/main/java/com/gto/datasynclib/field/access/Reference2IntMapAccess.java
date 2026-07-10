@@ -3,15 +3,18 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.ListData;
-import com.gto.datasynclib.datasream.data.LongData;
-import com.gto.datasynclib.datasream.data.NullData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.IntData;
+import com.gto.datasynclib.datastream.data.ListData;
+import com.gto.datasynclib.datastream.data.NullData;
 import it.unimi.dsi.fastutil.objects.Reference2IntMap;
 import it.unimi.dsi.fastutil.objects.Reference2IntMaps;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * Synchronizes a FastUtil Reference2IntMap (identity-based key comparison).
+ */
 public class Reference2IntMapAccess<K> extends AbstractFieldAccess<Reference2IntMap> {
 
     private final DataSyncCodec<K> keyCodec;
@@ -21,7 +24,7 @@ public class Reference2IntMapAccess<K> extends AbstractFieldAccess<Reference2Int
     public Reference2IntMapAccess(DataFieldDefinition<Reference2IntMap> definition) {
         super(definition);
         if (definition.genericType.length < 1) throw new IllegalArgumentException("Map type parameters not found");
-        this.keyCodec = (DataSyncCodec<K>) definition.genericCodec[0];
+        this.keyCodec = (DataSyncCodec<K>) definition.genericCodecs[0];
         if (this.keyCodec == null)
             throw new IllegalArgumentException("Codec not found for key type " + definition.genericType[0]);
     }
@@ -41,7 +44,7 @@ public class Reference2IntMapAccess<K> extends AbstractFieldAccess<Reference2Int
         data.writeVarInt(instance.size());
         Reference2IntMaps.fastForEach(instance, e -> {
             keyCodec.streamWriter.encode(data, (K) e.getKey());
-            data.writeLong(e.getIntValue());
+            data.writeInt(e.getIntValue());
         });
     }
 
@@ -62,7 +65,7 @@ public class Reference2IntMapAccess<K> extends AbstractFieldAccess<Reference2Int
         var list = new ListData();
         Reference2IntMaps.fastForEach(instance, e -> {
             list.add(keyCodec.dataWriter.encode((K) e.getKey()));
-            list.add(LongData.valueOf(e.getIntValue()));
+            list.add(IntData.valueOf(e.getIntValue()));
         });
         return list;
     }

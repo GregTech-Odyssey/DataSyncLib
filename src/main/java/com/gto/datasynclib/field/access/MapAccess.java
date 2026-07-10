@@ -3,14 +3,19 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.ListData;
-import com.gto.datasynclib.datasream.data.NullData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.ListData;
+import com.gto.datasynclib.datastream.data.NullData;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Map;
 
+/**
+ * Synchronizes a generic java.util.Map with separate codecs for keys and values.
+ * Change detection uses hashCode() comparison.
+ * Entries are written as alternating key-value pairs.
+ */
 public final class MapAccess<K, V> extends AbstractFieldAccess<Map> {
 
     private final DataSyncCodec<K> keyCodec;
@@ -21,8 +26,8 @@ public final class MapAccess<K, V> extends AbstractFieldAccess<Map> {
     public MapAccess(DataFieldDefinition<Map> definition) {
         super(definition);
         if (definition.genericType.length < 2) throw new IllegalArgumentException("Map type parameters not found");
-        this.keyCodec = (DataSyncCodec<K>) definition.genericCodec[0];
-        this.valueCodec = (DataSyncCodec<V>) definition.genericCodec[1];
+        this.keyCodec = (DataSyncCodec<K>) definition.genericCodecs[0];
+        this.valueCodec = (DataSyncCodec<V>) definition.genericCodecs[1];
         if (this.keyCodec == null)
             throw new IllegalArgumentException("Codec not found for key type " + definition.genericType[0]);
         if (this.valueCodec == null)

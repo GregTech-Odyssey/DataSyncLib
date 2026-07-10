@@ -2,10 +2,14 @@ package com.gto.datasynclib.field.object;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.DataSyncCodec;
-import com.gto.datasynclib.datasream.data.Data;
+import com.gto.datasynclib.datastream.data.Data;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * Object field that uses a provided {@link com.gto.datasynclib.DataSyncCodec} for all
+ * serialization and deserialization, independent of the field definition's own codec.
+ */
 public class CustomObjCodecField<T> extends ObjField<T> {
 
     private final DataSyncCodec<T> codec;

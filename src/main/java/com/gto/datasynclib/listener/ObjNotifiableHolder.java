@@ -9,6 +9,11 @@ import org.jetbrains.annotations.NotNull;
 
 @Setter
 @Accessors(chain = true)
+/**
+ * Mutable object holder with integrated sync notification support.
+ * Extends ObjectSerializableHolder to add listener notification on sync events.
+ * Implements both IDataSerializable and ISyncNotifiable.
+ */
 public final class ObjNotifiableHolder<T> extends ObjSerializableHolder<T> implements ISyncNotifiable<ObjNotifiableHolder, ObjSyncListener<T>> {
 
     public static <T> ObjNotifiableHolder<T> create(DataSyncCodec<T> codec) {
@@ -31,7 +36,7 @@ public final class ObjNotifiableHolder<T> extends ObjSerializableHolder<T> imple
     }
 
     @Override
-    public void writeBuf(LogicalSide side, @NotNull FriendlyByteBuf data) {
+    public void writeBuffer(LogicalSide side, @NotNull FriendlyByteBuf data) {
         if (value == null) {
             data.writeBoolean(false);
         } else {
@@ -43,7 +48,7 @@ public final class ObjNotifiableHolder<T> extends ObjSerializableHolder<T> imple
     }
 
     @Override
-    public void readBuf(LogicalSide side, @NotNull FriendlyByteBuf data) {
+    public void readBuffer(LogicalSide side, @NotNull FriendlyByteBuf data) {
         var oldValue = value;
         if (data.readBoolean()) {
             value = codec.streamReader.decode(data);

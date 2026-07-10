@@ -1,6 +1,6 @@
 package com.gto.datasynclib.util;
 
-import com.gto.datasynclib.datasream.codec.ByteStreamCodec;
+import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import lombok.experimental.UtilityClass;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Registry;
@@ -11,6 +11,10 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fluids.FluidStack;
 
+/**
+ * Pre-registered ByteStreamCodec instances for Minecraft types including
+ * ResourceLocation, BlockPos, CompoundTag, ItemStack, FluidStack, and Component.
+ */
 @UtilityClass
 public class StreamCodecs {
 

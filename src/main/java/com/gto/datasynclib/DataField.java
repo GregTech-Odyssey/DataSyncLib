@@ -1,6 +1,6 @@
 package com.gto.datasynclib;
 
-import com.gto.datasynclib.datasream.data.Data;
+import com.gto.datasynclib.datastream.data.Data;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
@@ -31,7 +31,13 @@ public interface DataField<T> {
 
     void readFromData(@NotNull Object source, @NotNull Data data, int dataVersion);
 
-    default boolean mustDetected() {
+    /**
+     * Indicates whether this field requires change detection even when not explicitly marked as changed.
+     * When {@code true}, the field's {@link #detectChange} method will always be called during dirty flag updates.
+     *
+     * @return {@code true} if change detection is mandatory, {@code false} by default
+     */
+    default boolean mustDetect() {
         return false;
     }
 

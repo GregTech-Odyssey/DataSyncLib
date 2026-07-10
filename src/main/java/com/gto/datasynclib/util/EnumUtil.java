@@ -8,12 +8,17 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.function.Predicate;
 
+/**
+ * Enum utility methods for serialized name lookup and caching.
+ * Supports the 'fixed enum' concept for types whose constant set
+ * should not be modified after registration.
+ */
 @UtilityClass
 public class EnumUtil {
 
     private final ArrayList<Predicate<Class<? extends Enum<?>>>> FIXED_ENUM_PREDICATES = new ArrayList<>();
 
-    private final ConcurrentHashMapCache<Class<? extends Enum<?>>, Boolean> FIXED_ENUM_CACHE = new ConcurrentHashMapCache<>(t -> {
+    private final ConcurrentHashMapCache<Class<? extends Enum<?>>, Boolean> FIXED_ENUM_NAME_CACHE = new ConcurrentHashMapCache<>(t -> {
         for (var p : FIXED_ENUM_PREDICATES) {
             if (p.test(t)) {
                 return true;
@@ -22,23 +27,23 @@ public class EnumUtil {
         return false;
     });
 
-    private final ConcurrentHashMapCache<Class<? extends Enum<?>>, HashMap<String, Enum<?>>> SERIALIZED_CACHE = new ConcurrentHashMapCache<>(t -> {
+    private final ConcurrentHashMapCache<Class<? extends Enum<?>>, HashMap<String, Enum<?>>> SERIALIZED_NAME_CACHE = new ConcurrentHashMapCache<>(t -> {
         var map = new HashMap<String, Enum<?>>();
         for (var value : t.getEnumConstants()) {
             map.put(getSerializedName(value), value);
         }
         return map;
     });
-    private final ConcurrentHashMapCache<Class<? extends Enum<?>>, HashMap<String, Enum<?>>> CACHE = new ConcurrentHashMapCache<>(t -> {
+    private final ConcurrentHashMapCache<Class<? extends Enum<?>>, HashMap<String, Enum<?>>> NAME_CACHE = new ConcurrentHashMapCache<>(t -> {
         var map = new HashMap<String, Enum<?>>();
         for (var value : t.getEnumConstants()) {
-            map.put(getName(value), value);
+            map.put(value.name(), value);
         }
         return map;
     });
 
     public void addFixedEnum(Class<? extends Enum<?>> type) {
-        FIXED_ENUM_CACHE.put(type, true);
+        FIXED_ENUM_NAME_CACHE.put(type, true);
     }
 
     public void addFixedEnum(Predicate<Class<? extends Enum<?>>> predicate) {
@@ -48,19 +53,11 @@ public class EnumUtil {
     }
 
     public boolean isFixed(Class<? extends Enum<?>> type) {
-        return FIXED_ENUM_CACHE.getCache(type);
-    }
-
-    public String getName(Enum<?> enumValue) {
-        if (enumValue instanceof StringRepresentable provider) {
-            return provider.getSerializedName();
-        } else {
-            return enumValue.name();
-        }
+        return FIXED_ENUM_NAME_CACHE.getCache(type);
     }
 
     public <T extends Enum<T>> T getEnum(Class<T> type, String name) {
-        return (T) CACHE.getCache(type).get(name);
+        return (T) NAME_CACHE.getCache(type).get(name);
     }
 
     public String getSerializedName(Enum<?> enumValue) {
@@ -72,6 +69,6 @@ public class EnumUtil {
     }
 
     public <T extends Enum<T>> T getSerializedEnum(Class<T> type, String name) {
-        return (T) SERIALIZED_CACHE.getCache(type).get(name);
+        return (T) SERIALIZED_NAME_CACHE.getCache(type).get(name);
     }
 }

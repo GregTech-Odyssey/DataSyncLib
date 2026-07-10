@@ -17,6 +17,20 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.*;
 
+/**
+ * Central registry and cache for {@link DataFieldDefinition} instances discovered from annotated classes.
+ *
+ * <p>Scans class fields for {@code @SaveToDisk}, {@code @SyncToClient}, and {@code @SyncToServer} annotations,
+ * constructing {@link DataFieldDefinition} entries that drive the field synchronization and persistence
+ * lifecycle managed by {@link FieldDataManager}.</p>
+ *
+ * <p>Supports a pluggable factory system for field types ({@link #registerFactory}),
+ * access types ({@link #registerAccessFactory}), and generic types ({@link #registerGenericFactory}),
+ * allowing custom {@link DataField} implementations for different field categories.</p>
+ *
+ * <p>Strategy registration ({@link #registerStrategy}) allows custom hash/equality functions
+ * for change detection on complex types.</p>
+ */
 public final class FieldDefinitionStorage {
 
     private static final ArrayList<DataField.CustomGenericFactory<?>> GENERIC_FIELDS = new ArrayList<>();
@@ -113,21 +127,22 @@ public final class FieldDefinitionStorage {
         }
     }
 
-    final Reference2ReferenceOpenHashMap<Class<?>, List<DataFieldDefinition<?>>> typeDefinition = new Reference2ReferenceOpenHashMap<>();
-    final LinkedHashMap<String, DataFieldDefinition<?>> allDefinition;
+    final Reference2ReferenceOpenHashMap<Class<?>, List<DataFieldDefinition<?>>> typeDefinitions = new Reference2ReferenceOpenHashMap<>();
+    final LinkedHashMap<String, DataFieldDefinition<?>> allDefinitions;
     final DataFieldDefinition<?>[] saveDefinitions;
     final DataFieldDefinition<?>[] syncToClientDefinitions;
     final DataFieldDefinition<?>[] syncToServerDefinitions;
 
     private FieldDefinitionStorage(ArrayList<DataFieldDefinition<?>> fields) {
         fields.sort(DataFieldDefinition.COMPARATOR);
-        allDefinition = new LinkedHashMap<>(fields.size());
+        allDefinitions = new LinkedHashMap<>(fields.size());
         var saveList = new ArrayList<DataFieldDefinition<?>>();
         var syncToClientList = new ArrayList<DataFieldDefinition<?>>();
         var syncToServerList = new ArrayList<DataFieldDefinition<?>>();
         fields.forEach(d -> {
-            if (allDefinition.put(d.key, d) != null) throw new RuntimeException("Duplicate sync field key: " + d.key);
-            typeDefinition.computeIfAbsent(d.field.getType(), k -> new ArrayList<>()).add(d);
+            if (allDefinitions.put(d.key, d) != null)
+                throw new RuntimeException("Duplicate sync field key: " + d.key + " in class " + d.field.getDeclaringClass().getName());
+            typeDefinitions.computeIfAbsent(d.field.getType(), k -> new ArrayList<>()).add(d);
             if (d.isSave) saveList.add(d);
             if (d.isSyncToClient) syncToClientList.add(d);
             if (d.isSyncToServer) syncToServerList.add(d);
@@ -138,14 +153,14 @@ public final class FieldDefinitionStorage {
     }
 
     public DataFieldDefinition<?> getFieldDefinition(Field field) {
-        for (var definition : typeDefinition.getOrDefault(field.getType(), Collections.emptyList())) {
+        for (var definition : typeDefinitions.getOrDefault(field.getType(), Collections.emptyList())) {
             if (definition.field == field) return definition;
         }
         return null;
     }
 
     private FieldDefinitionStorage() {
-        allDefinition = new LinkedHashMap<>(0);
+        allDefinitions = new LinkedHashMap<>(0);
         saveDefinitions = new DataFieldDefinition[0];
         syncToClientDefinitions = new DataFieldDefinition[0];
         syncToServerDefinitions = new DataFieldDefinition[0];
@@ -160,7 +175,7 @@ public final class FieldDefinitionStorage {
     private static FieldDefinitionStorage of(Class<?> clazz, FieldDefinitionStorage storage) {
         var definitions = new ArrayList<DataFieldDefinition<?>>();
         scanFields(clazz, definitions, DataFieldDefinition.SOURCE);
-        definitions.addAll(storage.allDefinition.values());
+        definitions.addAll(storage.allDefinitions.values());
         return new FieldDefinitionStorage(definitions);
     }
 
@@ -172,13 +187,13 @@ public final class FieldDefinitionStorage {
             if (sc != null && sc != Object.class) {
                 var sh = get(sc);
                 storage = of(clazz, sh);
-                if (storage.allDefinition.size() == sh.allDefinition.size()) {
+                if (storage.allDefinitions.size() == sh.allDefinitions.size()) {
                     storage = sh;
                 }
             }
             if (storage == null) {
                 storage = of(clazz);
-                if (storage.allDefinition.isEmpty()) storage = EMPTY;
+                if (storage.allDefinitions.isEmpty()) storage = EMPTY;
             }
             CACHE.put(clazz, storage);
         }
@@ -208,12 +223,12 @@ public final class FieldDefinitionStorage {
             var syncToServer = field.getAnnotation(SyncToServer.class);
             if (savetoDisk == null && syncToClient == null && syncToServer == null && field.getAnnotation(AddToManager.class) == null)
                 continue;
-            var definition = createFieldDefinition(field, source, new FieldAnnotations(clazz, field, savetoDisk, syncToClient, syncToServer));
+            var definition = createFieldDefinition(field, source, new FieldAnnotationMetadata(clazz, field, savetoDisk, syncToClient, syncToServer));
             if (definition != null) definitions.add(definition);
         }
     }
 
-    private static DataFieldDefinition<?> createFieldDefinition(Field field, Function<Object, Object> source, FieldAnnotations annotations) {
+    private static DataFieldDefinition<?> createFieldDefinition(Field field, Function<Object, Object> source, FieldAnnotationMetadata annotations) {
         try {
             Class<?>[] genericType;
             field.setAccessible(true);
@@ -239,17 +254,17 @@ public final class FieldDefinitionStorage {
         }
     }
 
-    private static DataFieldDefinition<?> createAccessFieldDefinition(Field field, Function<Object, Object> source, FieldAnnotations annotations, Class<?>[] genericType, boolean isFinal) {
+    private static DataFieldDefinition<?> createAccessFieldDefinition(Field field, Function<Object, Object> source, FieldAnnotationMetadata annotations, Class<?>[] genericType, boolean isFinal) {
         var factory = ACCESS_CACHE.getCache(field.getType());
         return new DataFieldDefinition<>(field, factory, source, annotations, genericType, isFinal, annotations.createAccessInstance(), STRATEGIES);
     }
 
-    private static DataFieldDefinition<?> createGenericFieldDefinition(Field field, Function<Object, Object> source, FieldAnnotations annotations, Class<?>[] genericType, boolean isFinal) {
+    private static DataFieldDefinition<?> createGenericFieldDefinition(Field field, Function<Object, Object> source, FieldAnnotationMetadata annotations, Class<?>[] genericType, boolean isFinal) {
         var factory = GENERIC_FIELDS_CACHE.getCache(field.getType()).getCache(HashUtil.arrayIdentityWrapper(genericType));
         return new DataFieldDefinition<>(field, factory, source, annotations, genericType, isFinal, true, STRATEGIES);
     }
 
-    private static DataFieldDefinition<?> createFieldDefinition(Field field, Function<Object, Object> source, FieldAnnotations annotations, Class<?>[] genericType, boolean isFinal) {
+    private static DataFieldDefinition<?> createFieldDefinition(Field field, Function<Object, Object> source, FieldAnnotationMetadata annotations, Class<?>[] genericType, boolean isFinal) {
         var type = field.getType();
         try {
             var factory = FIELDS_CACHE.getCache(type);

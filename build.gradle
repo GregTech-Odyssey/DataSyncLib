@@ -1,8 +1,10 @@
 plugins {
     id 'eclipse'
     id 'idea'
+    id 'maven-publish'
     id 'net.minecraftforge.gradle' version '[6.0.16,6.2)'
     id "io.freefair.lombok" version "8.11"
+    id "com.gto.gtopublishgradleplugin" version "1.0.22"
 }
 
 
@@ -156,6 +158,15 @@ dependencies {
 
     compileOnly('org.projectlombok:lombok:1.18.42')
     annotationProcessor('org.projectlombok:lombok:1.18.42')
+
+    // Test dependencies
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testImplementation 'org.mockito:mockito-core:5.10.0'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.10.0'
+}
+
+test {
+    useJUnitPlatform()
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.
@@ -194,4 +205,38 @@ tasks.named('jar', Jar).configure {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8' // Use the UTF-8 charset for Java compilation
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            groupId = mod_group_id
+            artifactId = mod_id
+        }
+    }
+    repositories {
+        maven {
+            name = 'gtodysseyRepository'
+            url = 'https://maven.gtodyssey.com/releases'
+            credentials {
+                username = findProperty('gtodysseyRepositoryUsername') ?: ''
+                password = findProperty('gtodysseyRepositoryPassword') ?: ''
+            }
+        }
+    }
+}
+
+
+gtoPublish {
+    publishMaven      = true        // 默认 true
+    publishGithub     = false       // 默认 false
+    publishCurseforge = false       // 默认 false
+    mavenRepoName     = 'gtodysseyRepository'  // 默认值
+    mavenRepoUrl      = 'releases'  // 必填，可选值: 'releases' 或 'private'
+    minecraftVersion  = '1.20.1'      // 必填，Minecraft 版本号
+    modLoader         = 'Forge'  // 必填，模组加载器（NeoForge, Forge, Fabric 等）
+    githubRepo        = 'owner/repo-name'      // GitHub 仓库（启用 GitHub 发布时必填）
+    curseforgeProjectId   = '123456'    // CurseForge 项目 ID（启用 CurseForge 时必填）
+    curseforgeJavaVersion = 'Java 21'   // Java 版本（启用 CurseForge 时必填，如 Java 8, Java 17, Java 21, Java 25）
 }

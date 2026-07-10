@@ -2,14 +2,19 @@ package com.gto.datasynclib.listener;
 
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.FloatData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.FloatData;
 import com.gto.datasynclib.util.holder.FloatHolder;
 import lombok.Setter;
 import lombok.experimental.Accessors;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * Mutable float holder with integrated sync notification support.
+ * Implements both IDataSerializable (for codec-based serialization) and ISyncNotifiable (for the listener pattern).
+ * Supports sender/receiver listener callbacks for sync lifecycle events.
+ */
 public final class FloatNotifiableHolder extends FloatHolder implements IDataSerializable, ISyncNotifiable<FloatNotifiableHolder, FloatSyncListener> {
 
     public static FloatNotifiableHolder create() {
@@ -28,7 +33,7 @@ public final class FloatNotifiableHolder extends FloatHolder implements IDataSer
     private FloatSyncListener senderListener = FloatSyncListener.EMPTY;
 
     private float lastValue;
-    private boolean syncChange;
+    private boolean changed;
 
     private FloatNotifiableHolder() {
     }
@@ -39,17 +44,17 @@ public final class FloatNotifiableHolder extends FloatHolder implements IDataSer
 
     @Override
     public void markAsChanged() {
-        syncChange = true;
+        changed = true;
     }
 
     @Override
     public void clearChanged() {
-        syncChange = false;
+        changed = false;
     }
 
     @Override
     public boolean isChanged() {
-        return syncChange;
+        return changed;
     }
 
     @Override
@@ -58,14 +63,14 @@ public final class FloatNotifiableHolder extends FloatHolder implements IDataSer
     }
 
     @Override
-    public void writeBuf(LogicalSide side, @NotNull FriendlyByteBuf data) {
+    public void writeBuffer(LogicalSide side, @NotNull FriendlyByteBuf data) {
         data.writeFloat(value);
         senderListener.onSync(side, lastValue, value);
         lastValue = value;
     }
 
     @Override
-    public void readBuf(LogicalSide side, @NotNull FriendlyByteBuf data) {
+    public void readBuffer(LogicalSide side, @NotNull FriendlyByteBuf data) {
         var oldValue = value;
         value = data.readFloat();
         receiverListener.onSync(side, oldValue, value);

@@ -12,7 +12,7 @@ public final class LazyFieldDataManager {
 
     private final IFieldDataHolder holder;
 
-    private volatile FieldDataManager fieldDataManager;
+    private FieldDataManager fieldDataManager;
 
     public LazyFieldDataManager(IFieldDataHolder holder) {
         this.holder = holder;

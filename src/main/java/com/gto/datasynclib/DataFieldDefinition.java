@@ -1,6 +1,6 @@
 package com.gto.datasynclib;
 
-import com.gto.datasynclib.datasream.data.Data;
+import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.util.ReflectUtil;
 import it.unimi.dsi.fastutil.Hash;
 import net.minecraft.network.FriendlyByteBuf;
@@ -11,8 +11,23 @@ import java.util.Comparator;
 import java.util.Map;
 import java.util.function.Function;
 
+/**
+ * Defines the metadata, accessors, and serialization behavior for a single field managed by the
+ * {@link FieldDataManager}. Each instance is created from a class field annotated with
+ * {@code @SaveToDisk}, {@code @SyncToClient}, or {@code @SyncToServer}.
+ *
+ * <p>Provides typed getters/setters for all primitive types plus Object, change-detection
+ * strategies, skip-sync/save condition handling, and encoding/decoding via both network buffers
+ * ({@link FriendlyByteBuf}) and persistent {@link Data} objects.</p>
+ *
+ * @param <T> the declared type of the underlying field
+ */
 public final class DataFieldDefinition<T> {
 
+    /**
+     * Default fallback strategy using standard {@link Object#hashCode()} and {@link Object#equals(Object)}.
+     * Handles null safely for both hash and equality checks.
+     */
     public static final Hash.Strategy OBJECT_STRATEGY = new Hash.Strategy<>() {
 
         @Override
@@ -27,34 +42,79 @@ public final class DataFieldDefinition<T> {
         }
     };
 
+    /**
+     * Identity function used as the top-level source extractor for the root object.
+     */
     static Function<Object, Object> SOURCE = Function.identity();
+    /**
+     * Sorts definitions by their key for deterministic ordering.
+     */
     static final Comparator<DataFieldDefinition<?>> COMPARATOR = Comparator.comparing(d -> d.key);
 
+    /**
+     * The reflected Java field.
+     */
     public final Field field;
+    /**
+     * Whether the field is declared {@code final}.
+     */
     public final boolean isFinal;
+    /**
+     * Whether the access layer should create a new instance on read (vs. mutate in-place).
+     */
     public final boolean createInstance;
+    /**
+     * The hash/equality strategy for change detection. Defaults to {@link #OBJECT_STRATEGY}.
+     */
     public final Hash.Strategy<T> strategy;
+    /**
+     * Generic type arguments of the field, if any.
+     */
     public final Class<?>[] genericType;
-    public final DataSyncCodec<?>[] genericCodec;
+    /**
+     * Codecs resolved for each generic type argument.
+     */
+    public final DataSyncCodec<?>[] genericCodecs;
+    /**
+     * Factory that creates the {@link DataField} implementation for this definition.
+     */
     public final DataField.Factory<T> factory;
+    /**
+     * Function that extracts the owning object from the root holder. Supports nested {@code @AdditionalHolder}.
+     */
     public final Function<Object, Object> source;
+    /**
+     * Whether this field is persisted to disk (annotated with {@code @SaveToDisk}).
+     */
     public final boolean isSave;
+    /**
+     * The storage key for this field (annotation value or field name).
+     */
     public final String key;
+    /**
+     * Whether null values should be persisted to disk.
+     */
     public final boolean saveNull;
+    /**
+     * Whether this field syncs from server to client.
+     */
     public final boolean isSyncToClient;
+    /**
+     * Whether this field syncs from client to server.
+     */
     public final boolean isSyncToServer;
 
     private final Object defaultValue;
     private final MethodHandle defaultValueHandle;
 
-    private final MethodHandle saveConditions;
-    private final MethodHandle syncToClientConditions;
-    private final MethodHandle syncToServerConditions;
+    private final MethodHandle saveCondition;
+    private final MethodHandle syncToClientCondition;
+    private final MethodHandle syncToServerCondition;
 
     private final boolean notifyClientUpdate;
     private final boolean notifyServerUpdate;
-    private final boolean autoServerUpdate;
-    private final boolean autoClientUpdate;
+    private final boolean autoSyncToClient;
+    private final boolean autoSyncToServer;
 
     private final DataSyncCodec<T> codec;
     private final MethodHandle writeToData;
@@ -67,7 +127,7 @@ public final class DataFieldDefinition<T> {
     private final MethodHandle serverListenerHandle;
 
     @SuppressWarnings("unchecked")
-    DataFieldDefinition(Field field, DataField.Factory<T> factory, Function<Object, Object> source, FieldAnnotations fieldAnnotations, Class<?>[] genericType, boolean isFinal, boolean createInstance, Map<Class<?>, Hash.Strategy<?>> strategys) {
+    DataFieldDefinition(Field field, DataField.Factory<T> factory, Function<Object, Object> source, FieldAnnotationMetadata fieldAnnotations, Class<?>[] genericType, boolean isFinal, boolean createInstance, Map<Class<?>, Hash.Strategy<?>> strategies) {
         this.field = field;
         this.factory = factory;
         this.source = source;
@@ -79,16 +139,16 @@ public final class DataFieldDefinition<T> {
         this.isSyncToServer = fieldAnnotations.isSyncToServer();
         this.notifyClientUpdate = fieldAnnotations.notifyClientUpdate();
         this.notifyServerUpdate = fieldAnnotations.notifyServerUpdate();
-        this.autoServerUpdate = fieldAnnotations.autoServerUpdate();
-        this.autoClientUpdate = fieldAnnotations.autoClientUpdate();
+        this.autoSyncToClient = fieldAnnotations.autoSyncToClient();
+        this.autoSyncToServer = fieldAnnotations.autoSyncToServer();
         this.createInstance = createInstance;
         this.codec = (isFinal || !createInstance) ? null : fieldAnnotations.dataCodec() != null ? DataSyncCodec.of(fieldAnnotations.streamCodec(), fieldAnnotations.dataCodec()) : (DataSyncCodec<T>) DataSyncCodec.get(field.getType());
         this.genericType = genericType;
-        this.genericCodec = new DataSyncCodec[genericType.length];
+        this.genericCodecs = new DataSyncCodec[genericType.length];
         this.isFinal = isFinal;
-        this.strategy = fieldAnnotations.strategy() != null ? fieldAnnotations.strategy() : (Hash.Strategy<T>) strategys.getOrDefault(field.getType(), OBJECT_STRATEGY);
+        this.strategy = fieldAnnotations.strategy() != null ? fieldAnnotations.strategy() : (Hash.Strategy<T>) strategies.getOrDefault(field.getType(), OBJECT_STRATEGY);
         for (int i = 0; i < genericType.length; i++) {
-            this.genericCodec[i] = DataSyncCodec.get(genericType[i]);
+            this.genericCodecs[i] = DataSyncCodec.get(genericType[i]);
         }
 
         this.defaultValueHandle = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.defaultValueGetter());
@@ -103,9 +163,9 @@ public final class DataFieldDefinition<T> {
 
         this.clientListenerHandle = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.clientUpdateListener());
         this.serverListenerHandle = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.serverUpdateListener());
-        this.saveConditions = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.saveConditions(), boolean.class);
-        this.syncToClientConditions = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.syncToClientConditions(), boolean.class);
-        this.syncToServerConditions = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.syncToServerConditions(), boolean.class);
+        this.saveCondition = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.saveCondition(), boolean.class);
+        this.syncToClientCondition = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.syncToClientCondition(), boolean.class);
+        this.syncToServerCondition = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.syncToServerCondition(), boolean.class);
     }
 
     public boolean hasDefaultValue() {
@@ -212,8 +272,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, boolean value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerConditions : this.syncToClientConditions;
-        if (conditions == null) return true;
+        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -222,8 +282,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, byte value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerConditions : this.syncToClientConditions;
-        if (conditions == null) return true;
+        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -232,8 +292,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, short value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerConditions : this.syncToClientConditions;
-        if (conditions == null) return true;
+        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -242,8 +302,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, int value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerConditions : this.syncToClientConditions;
-        if (conditions == null) return true;
+        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -252,8 +312,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, long value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerConditions : this.syncToClientConditions;
-        if (conditions == null) return true;
+        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -262,8 +322,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, float value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerConditions : this.syncToClientConditions;
-        if (conditions == null) return true;
+        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -272,8 +332,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, double value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerConditions : this.syncToClientConditions;
-        if (conditions == null) return true;
+        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -282,8 +342,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, char value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerConditions : this.syncToClientConditions;
-        if (conditions == null) return true;
+        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -292,8 +352,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, T value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerConditions : this.syncToClientConditions;
-        if (conditions == null) return true;
+        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -302,8 +362,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSave(Object source, boolean value) {
-        var conditions = this.saveConditions;
-        if (conditions == null) return true;
+        var conditions = this.saveCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -312,8 +372,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSave(Object source, byte value) {
-        var conditions = this.saveConditions;
-        if (conditions == null) return true;
+        var conditions = this.saveCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -322,8 +382,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSave(Object source, short value) {
-        var conditions = this.saveConditions;
-        if (conditions == null) return true;
+        var conditions = this.saveCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -332,8 +392,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSave(Object source, int value) {
-        var conditions = this.saveConditions;
-        if (conditions == null) return true;
+        var conditions = this.saveCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -342,8 +402,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSave(Object source, long value) {
-        var conditions = this.saveConditions;
-        if (conditions == null) return true;
+        var conditions = this.saveCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -352,8 +412,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSave(Object source, float value) {
-        var conditions = this.saveConditions;
-        if (conditions == null) return true;
+        var conditions = this.saveCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -362,8 +422,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSave(Object source, double value) {
-        var conditions = this.saveConditions;
-        if (conditions == null) return true;
+        var conditions = this.saveCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -372,8 +432,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSave(Object source, char value) {
-        var conditions = this.saveConditions;
-        if (conditions == null) return true;
+        var conditions = this.saveCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -382,8 +442,8 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSave(Object source, T value) {
-        var conditions = this.saveConditions;
-        if (conditions == null) return true;
+        var conditions = this.saveCondition;
+        if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
         } catch (Throwable e) {
@@ -546,7 +606,7 @@ public final class DataFieldDefinition<T> {
     }
 
     boolean autoUpdate(LogicalSide side) {
-        return side == LogicalSide.CLIENT ? autoClientUpdate : autoServerUpdate;
+        return side == LogicalSide.CLIENT ? autoSyncToServer : autoSyncToClient;
     }
 
     public Data encode(Object source, T obj) {

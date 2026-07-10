@@ -3,14 +3,19 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.ListData;
-import com.gto.datasynclib.datasream.data.NullData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.ListData;
+import com.gto.datasynclib.datastream.data.NullData;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
 
+/**
+ * Synchronizes a generic java.util.Collection with element-level codec support.
+ * Change detection uses hashCode() comparison.
+ * Each element is individually encoded/decoded with null support.
+ */
 public final class CollectionAccess<E> extends AbstractFieldAccess<Collection> {
 
     private final DataSyncCodec<E> elementCodec;
@@ -19,8 +24,8 @@ public final class CollectionAccess<E> extends AbstractFieldAccess<Collection> {
     @SuppressWarnings("unchecked")
     public CollectionAccess(DataFieldDefinition<Collection> definition) {
         super(definition);
-        if (definition.genericCodec.length == 0) throw new IllegalArgumentException("Collection type not found");
-        this.elementCodec = (DataSyncCodec<E>) definition.genericCodec[0];
+        if (definition.genericCodecs.length == 0) throw new IllegalArgumentException("Collection type not found");
+        this.elementCodec = (DataSyncCodec<E>) definition.genericCodecs[0];
         if (this.elementCodec == null)
             throw new IllegalArgumentException("Codec not found for type " + definition.genericType[0]);
     }

@@ -2,12 +2,17 @@ package com.gto.datasynclib.field;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.FloatData;
-import com.gto.datasynclib.datasream.data.NullData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.FloatData;
+import com.gto.datasynclib.datastream.data.NullData;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * DataField implementation for float values. Tracks the previous value for change detection
+ * comparison, handles sync conditions via skipSync, default value filtering for persistence,
+ * and optional listener notification on value changes.
+ */
 public final class FloatField extends AbstractField<Float> {
 
     private float lastValue;
@@ -17,7 +22,7 @@ public final class FloatField extends AbstractField<Float> {
     }
 
     @Override
-    public boolean hasChanges(@NotNull LogicalSide side, Object source) {
+    public boolean hasChange(@NotNull LogicalSide side, Object source) {
         var definition = this.definition;
         var value = definition.getFloat(source);
         if (definition.skipSync(side, source, value)) return false;

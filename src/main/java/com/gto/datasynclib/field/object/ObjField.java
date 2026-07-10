@@ -2,12 +2,18 @@ package com.gto.datasynclib.field.object;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.NullData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.field.AbstractField;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * Abstract base class for object-type fields. Uses a two-tier change detection strategy: first
+ * compares hashCode() for quick mismatch detection, then falls back to the definition's
+ * strategy.equals() for full equality comparison. Handles null-vs-value encoding in both
+ * buffer and data serialization.
+ */
 public abstract class ObjField<T> extends AbstractField<T> {
 
     protected T lastValue;
@@ -18,7 +24,7 @@ public abstract class ObjField<T> extends AbstractField<T> {
     }
 
     @Override
-    public final boolean hasChanges(@NotNull LogicalSide side, Object source) {
+    public final boolean hasChange(@NotNull LogicalSide side, Object source) {
         var definition = this.definition;
         var value = definition.get(source);
         if (definition.skipSync(side, source, value)) return false;

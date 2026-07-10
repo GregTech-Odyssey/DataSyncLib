@@ -2,6 +2,9 @@ package com.gto.datasynclib.util.holder;
 
 import lombok.NoArgsConstructor;
 
+/**
+ * Mutable wrapper for long values.
+ */
 @NoArgsConstructor
 public class LongHolder {
 

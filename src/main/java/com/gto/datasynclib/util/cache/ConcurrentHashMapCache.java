@@ -3,6 +3,9 @@ package com.gto.datasynclib.util.cache;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 
+/**
+ * ConcurrentHashMap-backed implementation of MapCache for thread-safe caching.
+ */
 public class ConcurrentHashMapCache<K, V> extends ConcurrentHashMap<K, V> implements MapCache<K, V> {
 
     protected final Function<K, V> mapFunction;
@@ -17,7 +20,7 @@ public class ConcurrentHashMapCache<K, V> extends ConcurrentHashMap<K, V> implem
     }
 
     @Override
-    public V getCacheRecursion(K k) {
+    public V getCacheNonAtomic(K k) {
         var v = super.get(k);
         if (v != null) return v;
         v = mapFunction.apply(k);

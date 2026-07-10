@@ -1,10 +1,14 @@
 package com.gto.datasynclib.field.object;
 
 import com.gto.datasynclib.DataFieldDefinition;
-import com.gto.datasynclib.datasream.data.Data;
+import com.gto.datasynclib.datastream.data.Data;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * Object field that delegates serialization to the DataFieldDefinition's built-in encode/decode
+ * methods.
+ */
 public class ObjCodecField<T> extends ObjField<T> {
 
     public ObjCodecField(DataFieldDefinition<T> definition) {

@@ -23,12 +23,12 @@ public @interface SaveToDisk {
     String key() default "";
 
     /**
-     * conditions for persisted to disk
+     * Condition for persisting to disk.
      * Method signature: T -> boolean
      *
-     * @return the method name for conditions
+     * @return the method name for the condition check
      */
-    String conditions() default "";
+    String condition() default "";
 
     /**
      * Whether to write null values, empty collections, or empty arrays to disk.

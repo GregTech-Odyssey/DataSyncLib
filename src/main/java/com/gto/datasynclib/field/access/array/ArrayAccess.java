@@ -3,15 +3,20 @@ package com.gto.datasynclib.field.access.array;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.ListData;
-import com.gto.datasynclib.datasream.data.NullData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.ListData;
+import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Arrays;
 
+/**
+ * Synchronizes a generic object array with element codec support.
+ * Change detection uses Arrays.hashCode().
+ * Null elements are encoded with boolean prefix.
+ */
 public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
 
     private final DataSyncCodec<T> elementCodec;
@@ -48,7 +53,11 @@ public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
     protected void readBuffer(@NotNull LogicalSide side, T @NotNull [] instance, @NotNull FriendlyByteBuf data) {
         var length = instance.length;
         for (int i = 0; i < length; i++) {
-            if (data.readBoolean()) instance[i] = elementCodec.streamReader.decode(data);
+            if (data.readBoolean()) {
+                instance[i] = elementCodec.streamReader.decode(data);
+            } else {
+                instance[i] = null;
+            }
         }
     }
 

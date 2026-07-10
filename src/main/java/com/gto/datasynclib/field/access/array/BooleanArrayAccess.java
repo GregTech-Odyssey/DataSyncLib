@@ -2,15 +2,18 @@ package com.gto.datasynclib.field.access.array;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.codec.DataCodec;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.NullData;
+import com.gto.datasynclib.datastream.codec.DataCodec;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Arrays;
 
+/**
+ * Synchronizes a boolean[] primitive array.
+ */
 public final class BooleanArrayAccess extends AbstractFieldAccess<boolean[]> {
 
     private int hashCode;

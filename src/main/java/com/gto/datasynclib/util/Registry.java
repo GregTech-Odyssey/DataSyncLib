@@ -1,7 +1,7 @@
 package com.gto.datasynclib.util;
 
-import com.gto.datasynclib.datasream.codec.ByteStreamCodec;
-import com.gto.datasynclib.datasream.codec.DataCodec;
+import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
+import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.util.holder.IntObjectHolder;
 import com.mojang.serialization.Codec;
 import it.unimi.dsi.fastutil.HashCommon;
@@ -15,6 +15,11 @@ import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
+/**
+ * Generic registry mapping comparable keys to values with automatic integer ID assignment.
+ * Supports freeze/unfreeze lifecycle, ID-to-value and key-to-value lookup,
+ * and provides built-in ByteStreamCodec and DataCodec for serialization.
+ */
 public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
 
     @Getter
@@ -22,7 +27,7 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
     protected final LinkedHashMap<K, V> keyValues = new LinkedHashMap<>();
     protected final IdMap<V, K> valueKeys = new IdMap<>();
     protected final ReferenceArrayList<V> idValues = new ReferenceArrayList<>();
-    protected final ByteStreamCodec<V> streamCodec = ByteStreamCodec.of((buf, obj) -> buf.writeVarInt(valueKeys.get(obj).number), buf -> idValues.get(buf.readVarInt()));
+    protected final ByteStreamCodec<V> streamCodec = ByteStreamCodec.of((buf, obj) -> buf.writeVarInt(valueKeys.get(obj).priority), buf -> idValues.get(buf.readVarInt()));
 
     @Getter
     protected volatile boolean frozen = true;
@@ -32,13 +37,13 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
     }
 
     @SuppressWarnings("BooleanMethodIsAlwaysInverted")
-    public boolean checkContext() {
+    public boolean isContextValid() {
         return true;
     }
 
     public void unfreeze() {
         if (!frozen) throw new IllegalStateException("Registry %s is already unfrozen!".formatted(name));
-        if (!checkContext())
+        if (!isContextValid())
             throw new IllegalStateException("Registry %s cannot be set to unfrozen state in current context!".formatted(name));
         clear();
         this.frozen = false;
@@ -46,7 +51,7 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
 
     public void freeze() {
         if (frozen) throw new IllegalStateException("Registry %s is already frozen!".formatted(name));
-        if (!checkContext())
+        if (!isContextValid())
             throw new IllegalStateException("Registry %s cannot be set to frozen state in current context!".formatted(name));
         frozen = true;
         build();
@@ -74,8 +79,8 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
     }
 
     public <T extends V> T register(K key, T value) {
-        if (frozen) throw new IllegalStateException("Registry %s has been frozen".formatted(name));
         synchronized (this) {
+            if (frozen) throw new IllegalStateException("Registry %s has been frozen".formatted(name));
             if (keyValues.put(key, value) != null)
                 throw new IllegalStateException("Registry %s contains key %s already".formatted(name, key));
         }
@@ -83,8 +88,8 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
     }
 
     public <T extends V> T replace(K key, T value) {
-        if (frozen) throw new IllegalStateException("Registry %s has been frozen".formatted(name));
         synchronized (this) {
+            if (frozen) throw new IllegalStateException("Registry %s has been frozen".formatted(name));
             if (keyValues.put(key, value) == null) {
                 throw new IllegalStateException("Couldn't find key %s in registry %s".formatted(name, key));
             }
@@ -92,11 +97,11 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
         return value;
     }
 
-    public final boolean containKey(K key) {
+    public final boolean containsKey(K key) {
         return keyValues.containsKey(key);
     }
 
-    public final boolean containValue(V value) {
+    public final boolean containsValue(V value) {
         return valueKeys.containsKey(value);
     }
 
@@ -114,11 +119,15 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
     }
 
     public final int getId(V value) {
-        return valueKeys.get(value).number;
+        var entry = valueKeys.get(value);
+        if (entry == null) throw new NullPointerException("Value not found in registry: " + value);
+        return entry.priority;
     }
 
     public K getKey(V value) {
-        return valueKeys.get(value).obj;
+        var entry = valueKeys.get(value);
+        if (entry == null) throw new NullPointerException("Value not found in registry: " + value);
+        return entry.value;
     }
 
     public Set<V> values() {

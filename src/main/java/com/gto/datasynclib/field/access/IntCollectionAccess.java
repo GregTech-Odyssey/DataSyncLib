@@ -2,13 +2,18 @@ package com.gto.datasynclib.field.access;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.IntArrayData;
-import com.gto.datasynclib.datasream.data.NullData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.IntArrayData;
+import com.gto.datasynclib.datastream.data.NullData;
 import it.unimi.dsi.fastutil.ints.IntCollection;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * Synchronizes a FastUtil IntCollection (primitive int collection).
+ * Change detection uses hashCode() comparison.
+ * Data serialization uses IntArrayData.
+ */
 public final class IntCollectionAccess extends AbstractFieldAccess<IntCollection> {
 
     private int hashCode;

@@ -6,12 +6,17 @@ import com.gto.datasynclib.LogicalSide;
 import lombok.Getter;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * Abstract base class for primitive value field implementations. Provides common change tracking
+ * (markAsChanged/clearChanged/isChanged) backed by a boolean flag. Subclasses implement
+ * {@link #hasChange(LogicalSide, Object)} to provide type-specific value comparison.
+ */
 public abstract class AbstractField<T> implements DataField<T> {
 
     @Getter
     protected final DataFieldDefinition<T> definition;
 
-    protected boolean syncChange;
+    protected boolean changed;
 
     protected AbstractField(DataFieldDefinition<T> definition) {
         this.definition = definition;
@@ -19,23 +24,23 @@ public abstract class AbstractField<T> implements DataField<T> {
 
     @Override
     public final void markAsChanged(@NotNull Object source) {
-        syncChange = true;
+        changed = true;
     }
 
     @Override
     public void clearChanged(@NotNull Object source) {
-        syncChange = false;
+        changed = false;
     }
 
     @Override
     public boolean isChanged(@NotNull Object source) {
-        return syncChange;
+        return changed;
     }
 
     @Override
     public final boolean detectChange(@NotNull LogicalSide side, @NotNull Object source, boolean auto) {
-        return syncChange = hasChanges(side, source);
+        return changed = hasChange(side, source);
     }
 
-    protected abstract boolean hasChanges(@NotNull LogicalSide side, Object source);
+    protected abstract boolean hasChange(@NotNull LogicalSide side, Object source);
 }

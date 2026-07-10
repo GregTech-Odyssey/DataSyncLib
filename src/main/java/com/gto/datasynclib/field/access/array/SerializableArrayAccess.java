@@ -3,10 +3,10 @@ package com.gto.datasynclib.field.access.array;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.ListData;
-import com.gto.datasynclib.datasream.data.NullData;
-import com.gto.datasynclib.datasream.data.StringMapData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.ListData;
+import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.data.StringMapData;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import com.gto.datasynclib.util.HashUtil;
 import net.minecraft.network.FriendlyByteBuf;
@@ -14,6 +14,11 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.Map;
 
+/**
+ * Synchronizes an array of IDataSerializable instances.
+ * Uses identity-based hash with per-element detectChange() propagation.
+ * Supports legacy data version migration.
+ */
 public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSerializable[]> {
 
     private int hashCode;
@@ -32,14 +37,14 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
             }
             return true;
         }
-        boolean hasChanges = false;
+        boolean hasChange = false;
         for (var element : instance) {
             if (element != null && element.detectChange()) {
                 element.markAsChanged();
-                hasChanges = true;
+                hasChange = true;
             }
         }
-        return hasChanges;
+        return hasChange;
     }
 
     @Override
@@ -49,7 +54,7 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
                 data.writeBoolean(false);
             } else {
                 data.writeBoolean(true);
-                element.writeBuf(side, data);
+                element.writeBuffer(side, data);
             }
         }
     }
@@ -58,7 +63,7 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
     protected void readBuffer(@NotNull LogicalSide side, IDataSerializable @NotNull [] instance, @NotNull FriendlyByteBuf data) {
         for (var element : instance) {
             if (data.readBoolean()) {
-                if (element != null) element.readBuf(side, data);
+                if (element != null) element.readBuffer(side, data);
             }
         }
     }

@@ -8,8 +8,8 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Objects;
 
 /**
- * A configurable generator of hashing strategies, allowing for consideration of select properties of ItemStacks when
- * considering equality.
+ * Configurable hash/equality strategy for ItemStack comparison.
+ * Provides ITEM, ITEM_AND_TAG, and ALL comparison levels.
  */
 public interface ItemStackHashStrategy extends Hash.Strategy<ItemStack> {
 

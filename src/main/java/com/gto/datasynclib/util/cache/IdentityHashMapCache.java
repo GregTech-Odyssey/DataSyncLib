@@ -7,6 +7,9 @@ import java.util.function.Function;
 
 import static it.unimi.dsi.fastutil.HashCommon.arraySize;
 
+/**
+ * Identity-based cache backed by FastUtil Reference2ReferenceOpenHashMap.
+ */
 public class IdentityHashMapCache<K, V> extends Reference2ReferenceOpenHashMap<K, V> implements MapCache<K, V> {
 
     protected final Function<K, V> mapFunction;
@@ -45,7 +48,7 @@ public class IdentityHashMapCache<K, V> extends Reference2ReferenceOpenHashMap<K
     }
 
     @Override
-    public V getCacheRecursion(K k) {
+    public V getCacheNonAtomic(K k) {
         var v = super.get(k);
         if (v != null) return v;
         v = mapFunction.apply(k);

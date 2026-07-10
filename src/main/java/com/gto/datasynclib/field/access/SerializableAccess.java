@@ -3,10 +3,14 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
+import com.gto.datasynclib.datastream.data.Data;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * Accessor for objects implementing IDataSerializable.
+ * Delegates all change detection and serialization to the IDataSerializable instance itself.
+ */
 public final class SerializableAccess extends AbstractFieldAccess<IDataSerializable> {
 
     public SerializableAccess(DataFieldDefinition<IDataSerializable> definition) {
@@ -15,7 +19,7 @@ public final class SerializableAccess extends AbstractFieldAccess<IDataSerializa
 
     @Override
     public void markAsChanged(@NotNull Object source) {
-        syncChange = true;
+        changed = true;
         var instance = getInstance(source);
         if (instance == null) return;
         instance.markAsChanged();
@@ -23,7 +27,7 @@ public final class SerializableAccess extends AbstractFieldAccess<IDataSerializa
 
     @Override
     public void clearChanged(@NotNull Object source) {
-        syncChange = false;
+        changed = false;
         var instance = getInstance(source);
         if (instance == null) return;
         instance.clearChanged();
@@ -32,8 +36,8 @@ public final class SerializableAccess extends AbstractFieldAccess<IDataSerializa
     @Override
     public boolean isChanged(@NotNull Object source) {
         var instance = getInstance(source);
-        if (instance == null) return syncChange;
-        return syncChange || instance.isChanged();
+        if (instance == null) return changed;
+        return changed || instance.isChanged();
     }
 
     @Override
@@ -43,12 +47,12 @@ public final class SerializableAccess extends AbstractFieldAccess<IDataSerializa
 
     @Override
     protected void writeBuffer(@NotNull LogicalSide side, @NotNull IDataSerializable instance, @NotNull FriendlyByteBuf data, boolean force) {
-        instance.writeBuf(side, data);
+        instance.writeBuffer(side, data);
     }
 
     @Override
     protected void readBuffer(@NotNull LogicalSide side, @NotNull IDataSerializable instance, @NotNull FriendlyByteBuf data) {
-        instance.readBuf(side, data);
+        instance.readBuffer(side, data);
     }
 
     @Override

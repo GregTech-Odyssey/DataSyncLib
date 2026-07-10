@@ -6,6 +6,12 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Arrays;
 import java.util.function.Supplier;
 
+/**
+ * Hash utility methods for array identity comparison.
+ * Provides ArrayWrapper and ArrayIdentityWrapper as Supplier implementations
+ * that delegate to Arrays.hashCode/equals or identity-based comparison,
+ * suitable for use as cache keys.
+ */
 @UtilityClass
 public class HashUtil {
 

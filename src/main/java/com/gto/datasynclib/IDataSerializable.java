@@ -1,6 +1,6 @@
 package com.gto.datasynclib;
 
-import com.gto.datasynclib.datasream.data.Data;
+import com.gto.datasynclib.datastream.data.Data;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
@@ -45,7 +45,7 @@ public interface IDataSerializable {
      * @param side the logical side (client or server) performing the write
      * @param buf  the network buffer to write to, must not be null
      */
-    void writeBuf(LogicalSide side, @NotNull FriendlyByteBuf buf);
+    void writeBuffer(LogicalSide side, @NotNull FriendlyByteBuf buf);
 
     /**
      * Reads the data from a network buffer during synchronization.
@@ -53,7 +53,7 @@ public interface IDataSerializable {
      * @param side the logical side (client or server) performing the read
      * @param buf  the network buffer to read from, must not be null
      */
-    void readBuf(LogicalSide side, @NotNull FriendlyByteBuf buf);
+    void readBuffer(LogicalSide side, @NotNull FriendlyByteBuf buf);
 
     /**
      * Writes the data to a {@link Data} object for persistent storage.

@@ -1,8 +1,8 @@
 package com.gto.datasynclib;
 
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.NullData;
-import com.gto.datasynclib.datasream.data.StringMapData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.data.StringMapData;
 import com.gto.datasynclib.util.ReflectUtil;
 import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
@@ -13,34 +13,64 @@ import org.jetbrains.annotations.NotNull;
 import java.util.Collections;
 import java.util.Map;
 
+/**
+ * Per-instance manager that drives the field synchronization and persistence lifecycle for a single
+ * {@link IFieldDataHolder} object.
+ *
+ * <p>Each holder receives a {@code FieldDataManager} (typically via {@link LazyFieldDataManager}) that:
+ * <ul>
+ *   <li><strong>Discovers fields</strong> — reads the class-level metadata from {@link FieldDefinitionStorage}</li>
+ *   <li><strong>Creates DataField instances</strong> — instantiates the appropriate {@link DataField}
+ *       implementation for each managed field</li>
+ *   <li><strong>Detects changes</strong> — via {@link #updateFieldDirtyFlags(LogicalSide, boolean)},
+ *       which iterates sync fields and calls {@link DataField#detectChange} on each</li>
+ *   <li><strong>Serializes for network</strong> — via {@link #writeToNetworkBuffer(LogicalSide, boolean)}
+ *       and {@link #readFromNetworkBuffer(LogicalSide, byte[])}, using an index-addressing protocol
+ *       where only changed fields are written (each prefixed by a VarInt field index)</li>
+ *   <li><strong>Serializes for disk</strong> — via {@link #writeToData()} and
+ *       {@link #readFromData(com.gto.datasynclib.datastream.data.Data, int)} using {@link com.gto.datasynclib.datastream.data.StringMapData}</li>
+ * </ul>
+ *
+ * <p><strong>Re-entrancy guards:</strong> The {@code updating} and {@code writing} volatile flags
+ * prevent recursive calls that could occur if a listener or condition method triggers another
+ * update/write cycle during the same operation.
+ *
+ * <p><strong>Network wire format:</strong> Custom sync data is written first (via
+ * {@link IFieldDataHolder#writeCustomSyncData}), followed by a sequence of (VarInt fieldIndex,
+ * fieldPayload) pairs for each dirty field. The receiver reads entries until the buffer is exhausted.
+ *
+ * @see FieldDefinitionStorage
+ * @see DataField
+ * @see LazyFieldDataManager
+ */
 public final class FieldDataManager {
 
     public final IFieldDataHolder holder;
     public final FieldDefinitionStorage storage;
-    private final Reference2ReferenceOpenHashMap<DataFieldDefinition<?>, DataField<?>> allField;
+    private final Reference2ReferenceOpenHashMap<DataFieldDefinition<?>, DataField<?>> allFields;
     private final DataField<?>[] syncToClientFields;
     private final DataField<?>[] syncToServerFields;
     private final DataField<?>[] saveFields;
-    private boolean syncChange;
-    private volatile boolean updateing;
-    private volatile boolean writeing;
+    private boolean changed;
+    private volatile boolean updating;
+    private volatile boolean writing;
 
     public FieldDataManager(IFieldDataHolder holder) {
         this.holder = holder;
         this.storage = FieldDefinitionStorage.get(holder.getClass());
-        this.allField = new Reference2ReferenceOpenHashMap<>(storage.allDefinition.size());
-        storage.allDefinition.values().forEach(d -> allField.put(d, d.factory.create(d)));
+        this.allFields = new Reference2ReferenceOpenHashMap<>(storage.allDefinitions.size());
+        storage.allDefinitions.values().forEach(d -> allFields.put(d, d.factory.create(d)));
         syncToClientFields = new DataField[storage.syncToClientDefinitions.length];
         for (int i = 0; i < syncToClientFields.length; i++) {
-            syncToClientFields[i] = allField.get(storage.syncToClientDefinitions[i]);
+            syncToClientFields[i] = allFields.get(storage.syncToClientDefinitions[i]);
         }
         syncToServerFields = new DataField[storage.syncToServerDefinitions.length];
         for (int i = 0; i < syncToServerFields.length; i++) {
-            syncToServerFields[i] = allField.get(storage.syncToServerDefinitions[i]);
+            syncToServerFields[i] = allFields.get(storage.syncToServerDefinitions[i]);
         }
         saveFields = new DataField[storage.saveDefinitions.length];
         for (int i = 0; i < saveFields.length; i++) {
-            saveFields[i] = allField.get(storage.saveDefinitions[i]);
+            saveFields[i] = allFields.get(storage.saveDefinitions[i]);
         }
     }
 
@@ -49,7 +79,7 @@ public final class FieldDataManager {
     }
 
     public DataFieldDefinition<?> getFieldDefinition(Class<?> type, Object fieldObject) {
-        for (var definition : storage.typeDefinition.getOrDefault(type, Collections.emptyList())) {
+        for (var definition : storage.typeDefinitions.getOrDefault(type, Collections.emptyList())) {
             try {
                 if (definition.get(definition.source.apply(holder)) == fieldObject) return definition;
             } catch (Throwable ignored) {
@@ -58,12 +88,12 @@ public final class FieldDataManager {
         return null;
     }
 
-    public boolean hasSyncField(LogicalSide side) {
+    public boolean hasSyncFields(LogicalSide side) {
         var fields = side.isServer() ? syncToClientFields : syncToServerFields;
         return fields.length > 0;
     }
 
-    public boolean hasSaveField() {
+    public boolean hasSaveFields() {
         return saveFields.length > 0;
     }
 
@@ -74,11 +104,11 @@ public final class FieldDataManager {
      */
     public void markFieldsForSync(@NotNull DataFieldDefinition<?>... fields) {
         for (var field : fields) {
-            var f = allField.get(field);
+            var f = allFields.get(field);
             if (f != null) {
                 f.markAsChanged(field.source.apply(holder));
             } else {
-                throw ReflectUtil.fieldNotFoundException(field.field.getName());
+                throw ReflectUtil.createFieldNotFoundException(field.field.getName());
             }
         }
     }
@@ -90,34 +120,34 @@ public final class FieldDataManager {
      */
     public void markFieldsForSync(@NotNull String... fields) {
         for (var field : fields) {
-            var d = storage.allDefinition.get(field);
+            var d = storage.allDefinitions.get(field);
             if (d != null) {
-                var f = allField.get(d);
+                var f = allFields.get(d);
                 if (f != null) {
                     f.markAsChanged(d.source.apply(holder));
                 } else {
-                    throw ReflectUtil.fieldNotFoundException(field);
+                    throw ReflectUtil.createFieldNotFoundException(field);
                 }
             } else {
-                throw ReflectUtil.fieldNotFoundException(field);
+                throw ReflectUtil.createFieldNotFoundException(field);
             }
         }
     }
 
-    public void clearAllFieldMark() {
-        allField.values().forEach(f -> f.clearChanged(f.getDefinition().source.apply(holder)));
+    public void clearAllChangeMarks() {
+        allFields.values().forEach(f -> f.clearChanged(f.getDefinition().source.apply(holder)));
     }
 
     public void markAsChanged() {
-        syncChange = true;
+        changed = true;
     }
 
     public void clearChanged() {
-        syncChange = false;
+        changed = false;
     }
 
     public boolean isChanged() {
-        return syncChange;
+        return changed;
     }
 
     /**
@@ -128,25 +158,25 @@ public final class FieldDataManager {
      * @return true if any changes were detected
      */
     public boolean updateFieldDirtyFlags(LogicalSide side, boolean auto) {
-        if (updateing) return false;
-        updateing = true;
+        if (updating) return false;
+        updating = true;
         try {
             final var fields = side.isServer() ? syncToClientFields : syncToServerFields;
-            boolean hasChanges = false;
+            boolean hasChange = false;
             for (DataField<?> field : fields) {
                 var d = field.getDefinition();
                 var source = d.source.apply(holder);
-                if (!field.mustDetected() && field.isChanged(source)) {
-                    hasChanges = true;
+                if (!field.mustDetect() && field.isChanged(source)) {
+                    hasChange = true;
                 } else {
                     if ((!auto || d.autoUpdate(side)) && field.detectChange(side, d.source.apply(holder), auto)) {
-                        hasChanges = true;
+                        hasChange = true;
                     }
                 }
             }
-            return syncChange = hasChanges || syncChange;
+            return changed = hasChange || changed;
         } finally {
-            updateing = false;
+            updating = false;
         }
     }
 
@@ -158,9 +188,9 @@ public final class FieldDataManager {
      * @return byte array containing the serialized data
      */
     public byte @NotNull [] writeToNetworkBuffer(LogicalSide side, boolean force) {
-        if (writeing) return ArrayUtils.EMPTY_BYTE_ARRAY;
-        writeing = true;
-        syncChange = false;
+        if (writing) return ArrayUtils.EMPTY_BYTE_ARRAY;
+        writing = true;
+        changed = false;
         var buf = Unpooled.buffer();
         var wrapper = new FriendlyByteBuf(buf);
         try {
@@ -182,7 +212,7 @@ public final class FieldDataManager {
             return data;
         } finally {
             buf.release();
-            writeing = false;
+            writing = false;
         }
     }
 
@@ -201,7 +231,11 @@ public final class FieldDataManager {
                 holder.readCustomSyncData(wrapper);
                 boolean update = false;
                 while (buf.readableBytes() > 0) {
-                    var f = fields[wrapper.readVarInt()];
+                    var index = wrapper.readVarInt();
+                    if (index < 0 || index >= fields.length) {
+                        throw new IndexOutOfBoundsException("Field index " + index + " out of bounds. Expected 0-" + (fields.length - 1) + " for holder " + holder.getClass().getName());
+                    }
+                    var f = fields[index];
                     var d = f.getDefinition();
                     f.readFromBuffer(side, d.source.apply(holder), wrapper);
                     if (d.notifyUpdate(side)) {
@@ -217,42 +251,42 @@ public final class FieldDataManager {
 
     @NotNull
     public Data writeFieldToData(String field) {
-        var d = storage.allDefinition.get(field);
+        var d = storage.allDefinitions.get(field);
         if (d != null) {
-            var f = allField.get(d);
+            var f = allFields.get(d);
             if (f != null) return f.writeToData(d.source.apply(holder));
         }
-        throw ReflectUtil.fieldNotFoundException(field);
+        throw ReflectUtil.createFieldNotFoundException(field);
     }
 
     public void readFieldFromData(@NotNull Data data, int dataVersion, String field) {
-        var d = storage.allDefinition.get(field);
+        var d = storage.allDefinitions.get(field);
         if (d != null) {
-            var f = allField.get(d);
+            var f = allFields.get(d);
             if (f != null) {
                 f.readFromData(d.source.apply(holder), data, dataVersion);
                 return;
             }
         }
-        throw ReflectUtil.fieldNotFoundException(field);
+        throw ReflectUtil.createFieldNotFoundException(field);
     }
 
     @NotNull
     public Data writeFieldsToData(String... fields) {
         StringMapData data = new StringMapData();
         for (var field : fields) {
-            var d = storage.allDefinition.get(field);
+            var d = storage.allDefinitions.get(field);
             if (d != null) {
-                var f = allField.get(d);
+                var f = allFields.get(d);
                 if (f != null) {
                     var result = f.writeToData(d.source.apply(holder));
                     if (result == NullData.NONE) continue;
                     if (result != NullData.INSTANCE || d.saveNull) data.put(d.key, result);
                 } else {
-                    throw ReflectUtil.fieldNotFoundException(field);
+                    throw ReflectUtil.createFieldNotFoundException(field);
                 }
             } else {
-                throw ReflectUtil.fieldNotFoundException(field);
+                throw ReflectUtil.createFieldNotFoundException(field);
             }
         }
         return data.isEmpty() ? NullData.INSTANCE : data;
@@ -261,19 +295,19 @@ public final class FieldDataManager {
     public void readFieldsFromData(@NotNull Data data, int dataVersion, String... fields) {
         if (data instanceof StringMapData(Map<String, Data> map)) {
             for (var field : fields) {
-                var d = storage.allDefinition.get(field);
+                var d = storage.allDefinitions.get(field);
                 if (d != null) {
                     var tag = map.get(d.key);
                     if (tag != null) {
-                        var f = allField.get(d);
+                        var f = allFields.get(d);
                         if (f != null) {
                             f.readFromData(d.source.apply(holder), tag, dataVersion);
                         } else {
-                            throw ReflectUtil.fieldNotFoundException(field);
+                            throw ReflectUtil.createFieldNotFoundException(field);
                         }
                     }
                 } else {
-                    throw ReflectUtil.fieldNotFoundException(field);
+                    throw ReflectUtil.createFieldNotFoundException(field);
                 }
             }
         }

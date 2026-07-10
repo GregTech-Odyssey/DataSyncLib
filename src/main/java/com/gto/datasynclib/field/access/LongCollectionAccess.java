@@ -2,13 +2,18 @@ package com.gto.datasynclib.field.access;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
-import com.gto.datasynclib.datasream.data.LongArrayData;
-import com.gto.datasynclib.datasream.data.NullData;
+import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.data.LongArrayData;
+import com.gto.datasynclib.datastream.data.NullData;
 import it.unimi.dsi.fastutil.longs.LongCollection;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * Synchronizes a FastUtil LongCollection (primitive long collection).
+ * Change detection uses hashCode() comparison.
+ * Data serialization uses LongArrayData.
+ */
 public final class LongCollectionAccess extends AbstractFieldAccess<LongCollection> {
 
     private int hashCode;

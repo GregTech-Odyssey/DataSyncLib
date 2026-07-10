@@ -3,10 +3,15 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datasream.data.Data;
+import com.gto.datasynclib.datastream.data.Data;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * Accessor for IFieldDataHolder implementations.
+ * Delegates all synchronization and persistence to the holder's own FieldDataManager.
+ * Overrides mustDetect() to return true for mandatory change detection.
+ */
 public final class FieldDataHolderAccess extends AbstractFieldAccess<IFieldDataHolder> {
 
     public FieldDataHolderAccess(DataFieldDefinition<IFieldDataHolder> definition) {
@@ -14,13 +19,13 @@ public final class FieldDataHolderAccess extends AbstractFieldAccess<IFieldDataH
     }
 
     @Override
-    public boolean mustDetected() {
+    public boolean mustDetect() {
         return true;
     }
 
     @Override
     public void markAsChanged(@NotNull Object source) {
-        syncChange = true;
+        changed = true;
         var instance = getInstance(source);
         if (instance == null) return;
         instance.getFieldDataManager().markAsChanged();
@@ -28,7 +33,7 @@ public final class FieldDataHolderAccess extends AbstractFieldAccess<IFieldDataH
 
     @Override
     public void clearChanged(@NotNull Object source) {
-        syncChange = false;
+        changed = false;
         var instance = getInstance(source);
         if (instance == null) return;
         instance.getFieldDataManager().clearChanged();
@@ -37,8 +42,8 @@ public final class FieldDataHolderAccess extends AbstractFieldAccess<IFieldDataH
     @Override
     public boolean isChanged(@NotNull Object source) {
         var instance = getInstance(source);
-        if (instance == null) return syncChange;
-        return syncChange || instance.getFieldDataManager().isChanged();
+        if (instance == null) return changed;
+        return changed || instance.getFieldDataManager().isChanged();
     }
 
     @Override
