@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DataSyncLib - Minecraft Forge 数据同步库</title>
+<style>
+:root {
+    --bg: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #21262d;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-secondary: #8b949e;
+    --accent: #58a6ff;
+    --accent-hover: #79c0ff;
+    --green: #3fb950;
+    --orange: #d2991d;
+    --red: #f85149;
+    --purple: #a371f7;
+    --code-bg: #1c2128;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+}
+.sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0; width: 280px;
+    background: var(--bg-secondary); border-right: 1px solid var(--border);
+    overflow-y: auto; padding: 24px; z-index: 10;
+}
+.sidebar h2 { font-size: 1.1rem; color: var(--accent); margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.sidebar nav a { display: block; color: var(--text-secondary); text-decoration: none; padding: 5px 0; font-size: 0.88rem; transition: color 0.15s; }
+.sidebar nav a:hover { color: var(--accent-hover); }
+.sidebar nav .sub { padding-left: 14px; font-size: 0.82rem; }
+.sidebar .nav-section { margin-top: 14px; }
+.sidebar .nav-section-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); margin-bottom: 4px; }
+.main { margin-left: 280px; padding: 40px 60px; max-width: 1040px; }
+h1 { font-size: 2.4rem; margin-bottom: 8px; }
+h1 .version { font-size: 1rem; color: var(--text-secondary); font-weight: 400; margin-left: 12px; }
+h2 { font-size: 1.6rem; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+h3 { font-size: 1.2rem; margin: 32px 0 12px; color: var(--accent); }
+h4 { font-size: 1rem; margin: 20px 0 8px; }
+p { margin: 12px 0; color: var(--text-secondary); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.hero {
+    background: linear-gradient(135deg, #1a2332 0%, #0d1b2a 100%);
+    border: 1px solid var(--border); border-radius: 12px; padding: 40px; margin-bottom: 32px;
+}
+.hero p { font-size: 1.15rem; color: var(--text); }
+.badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+.badge {
+    display: inline-block; padding: 4px 12px; border-radius: 20px;
+    font-size: 0.8rem; font-weight: 600; background: var(--bg-tertiary); border: 1px solid var(--border);
+}
+.badge.green  { color: var(--green);  border-color: var(--green);  }
+.badge.blue   { color: var(--accent); border-color: var(--accent); }
+.badge.orange { color: var(--orange); border-color: var(--orange); }
+.badge.purple { color: var(--purple); border-color: var(--purple); }
+code {
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    font-size: 0.88em; background: var(--code-bg); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border);
+}
+pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 20px; overflow-x: auto; margin: 16px 0; font-size: 0.87rem; line-height: 1.55;
+}
+pre code { background: none; border: none; padding: 0; }
+.kw { color: var(--red); }
+.an { color: var(--orange); }
+.str { color: #a5d6ff; }
+.cmt { color: #6e7681; font-style: italic; }
+.typ { color: var(--accent); }
+table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.9rem; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+th { font-weight: 600; color: var(--text); background: var(--bg-secondary); }
+td { color: var(--text-secondary); }
+td:first-child { color: var(--text); font-family: monospace; white-space: nowrap; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 16px 0; }
+.card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+.card h4 { margin-top: 0; color: var(--accent); }
+.card p { font-size: 0.9rem; margin: 8px 0 0; }
+ul, ol { color: var(--text-secondary); padding-left: 20px; }
+li { margin: 4px 0; }
+.footer { margin-top: 64px; padding: 24px 0; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 0.85rem; }
+.note {
+    background: #1a2332; border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0;
+    padding: 12px 16px; margin: 16px 0; font-size: 0.9rem; color: var(--text);
+}
+.note.warn { border-left-color: var(--orange); }
+@media (max-width: 860px) { .sidebar { display: none; } .main { margin-left: 0; padding: 24px; } }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+    <h2>DataSyncLib</h2>
+    <nav>
+        <div class="nav-section"><div class="nav-section-title">概述</div>
+            <a href="#intro">简介</a>
+            <a href="#features">核心特性</a>
+            <a href="#quickstart">快速开始</a>
+        </div>
+        <div class="nav-section"><div class="nav-section-title">架构</div>
+            <a href="#architecture">整体架构</a>
+            <a href="#sync-workflow">同步与持久化流程</a>
+            <a href="#data-flow">数据流</a>
+        </div>
+        <div class="nav-section"><div class="nav-section-title">核心接口</div>
+            <a href="#ifield-data-holder">IFieldDataHolder</a>
+            <a href="#idata-serializable">IDataSerializable</a>
+            <a href="#datafield">DataField</a>
+            <a href="#datafield-definition">DataFieldDefinition</a>
+        </div>
+        <div class="nav-section"><div class="nav-section-title">核心组件</div>
+            <a href="#field-data-manager">FieldDataManager</a>
+            <a href="#lazy-field-data-manager">LazyFieldDataManager</a>
+            <a href="#field-definition-storage">FieldDefinitionStorage</a>
+            <a href="#datasync-network">DataSyncNetwork</a>
+            <a href="#codec">DataSyncCodec</a>
+            <a href="#datacomponent">DataComponent 系统</a>
+            <a href="#registry">Registry 工具类</a>
+            <a href="#notifiable-holder">NotifiableHolder</a>
+        </div>
+        <div class="nav-section"><div class="nav-section-title">注解参考</div>
+            <a href="#an-synctoclient">@SyncToClient</a>
+            <a href="#an-synctoserver">@SyncToServer</a>
+            <a href="#an-savetodisk">@SaveToDisk</a>
+            <a href="#an-other">其他注解</a>
+        </div>
+        <div class="nav-section"><div class="nav-section-title">使用指南</div>
+            <a href="#usage-blockentity">BlockEntity 用法</a>
+            <a href="#usage-entity">Entity 用法</a>
+            <a href="#usage-regular">普通类用法</a>
+            <a href="#usage-nested">嵌套 Holder</a>
+            <a href="#usage-auto-sync">自动同步详解</a>
+            <a href="#usage-persist">持久化详解</a>
+            <a href="#usage-codec">注册自定义 Codec</a>
+            <a href="#usage-advanced">高级特性</a>
+        </div>
+        <div class="nav-section"><div class="nav-section-title">API 参考</div>
+            <a href="#api-codecs">内置 Codec 列表</a>
+            <a href="#api-field-types">Field 实现列表</a>
+            <a href="#api-access-types">Access 实现列表</a>
+        </div>
+    </nav>
+</aside>
+
+<main class="main">
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+    <h1>DataSyncLib <span class="version">v26.7.1 for Minecraft 1.20.1</span></h1>
+    <p>基于注解的 Minecraft Forge 数据同步框架 —— 自动处理客户端-服务器之间的字段同步、变更检测与磁盘持久化。</p>
+    <div class="badge-row">
+        <span class="badge green">Minecraft 1.20.1</span>
+        <span class="badge blue">Forge 47.4.21</span>
+        <span class="badge orange">Java 21</span>
+        <span class="badge purple">LGPL 3.0</span>
+    </div>
+</div>
+
+<!-- ===== INTRO ===== -->
+<h2 id="intro">简介</h2>
+<p><strong>DataSyncLib</strong> 是专为 Minecraft Forge 模组开发设计的数据同步库。通过声明式注解（<code>@SyncToClient</code>、<code>@SyncToServer</code>、<code>@SaveToDisk</code>），自动处理客户端与服务端之间的字段同步、变更检测与磁盘持久化，大幅减少样板代码。</p>
+<p>传统 Forge 开发中，你需要手动处理 <code>FriendlyByteBuf</code> 读写、<code>CompoundTag</code> 序列化、以及 <code>getUpdateTag()</code>/<code>saveAdditional()</code> 等方法。DataSyncLib 将这些模式抽象为统一框架 —— 只需在字段上添加注解，继承提供的基类即可。</p>
+
+<!-- ===== FEATURES ===== -->
+<h2 id="features">核心特性</h2>
+<div class="card-grid">
+    <div class="card"><h4>🔁 双向同步</h4><p><code>@SyncToClient</code> 和 <code>@SyncToServer</code> 注解自动处理服务端↔客户端字段同步。支持异步调用。</p></div>
+    <div class="card"><h4>💾 自动持久化</h4><p><code>@SaveToDisk</code> 注解标记的字段自动写入/读取 NBT，支持自定义键名、条件保存和默认值排除。</p></div>
+    <div class="card"><h4>📡 增量同步</h4><p>内置 dirty flag 机制，仅传输变化的字段。网络格式使用 VarInt 索引寻址，最小化流量。</p></div>
+    <div class="card"><h4>🔧 可扩展 Codec</h4><p>统一的 <code>DataSyncCodec</code> 注册表同时支持网络流编解码和持久化数据编解码，预置 30+ 常用类型。</p></div>
+    <div class="card"><h4>📢 变更通知</h4><p>通过 <code>listener</code> 回调和 <code>NotifiableHolder</code> 系统，在字段值变化时自动触发业务逻辑。</p></div>
+    <div class="card"><h4>🧩 开箱即用</h4><p>提供 <code>FieldDataHolderBlockEntity</code> 基类，继承即可获得完整数据同步和持久化能力。</p></div>
+    <div class="card"><h4>📦 DataComponent 系统</h4><p>可选的组件化数据模型，通过 <code>DataComponentRegistry</code> + <code>DataComponentMap</code> 实现类型安全的数据组件存取与合并。</p></div>
+    <div class="card"><h4>🗂️ Registry 工具</h4><p>泛型注册表工具类，支持 freeze/unfreeze 生命周期、自动 ID 分配、内置序列化 Codec。</p></div>
+</div>
+
+<!-- ===== QUICKSTART ===== -->
+<h2 id="quickstart">快速开始</h2>
+<h3>1. 添加依赖</h3>
+<pre><code><span class="cmt">// build.gradle</span>
+<span class="kw">dependencies</span> {
+    <span class="kw">implementation</span> <span class="str">'com.gto:datasynclib:26.7.1'</span>
+}</code></pre>
+
+<h3>2. 创建 BlockEntity</h3>
+<pre><code><span class="kw">public class</span> <span class="typ">MyBlockEntity</span> <span class="kw">extends</span> <span class="typ">FieldDataHolderBlockEntity</span> {
+
+    <span class="an">@SyncToClient</span>
+    <span class="an">@SaveToDisk</span>
+    <span class="kw">private int</span> energy = <span class="str">0</span>;
+
+    <span class="an">@SyncToServer</span>
+    <span class="kw">private boolean</span> active = <span class="kw">false</span>;
+
+    <span class="kw">public</span> <span class="typ">MyBlockEntity</span>(<span class="typ">BlockPos</span> pos, <span class="typ">BlockState</span> state) {
+        <span class="kw">super</span>(<span class="typ">ModBlockEntities</span>.MY_BLOCK_ENTITY.get(), pos, state);
+    }
+
+    <span class="kw">public void</span> <span class="typ">serverTick</span>(<span class="typ">ServerLevel</span> level) {
+        <span class="cmt">// 修改字段值</span>
+        energy++;
+        setChanged();  <span class="cmt">// 标记需要保存到磁盘</span>
+        <span class="typ">DataSyncNetwork</span>.syncBlockEntityToClient(<span class="kw">this</span>, <span class="kw">false</span>, <span class="kw">true</span>);
+    }
+}</code></pre>
+<div class="note">继承 <code>FieldDataHolderBlockEntity</code> 后，框架自动处理 <code>getUpdateTag()</code> / <code>saveAdditional()</code> / <code>load()</code> 的序列化逻辑。</div>
+
+<!-- ===== ARCHITECTURE ===== -->
+<h2 id="architecture">整体架构</h2>
+<p>DataSyncLib 采用分层架构：</p>
+<table>
+    <thead><tr><th>层次</th><th>组件</th><th>职责</th></tr></thead>
+    <tbody>
+        <tr><td>注解层</td><td>@SyncToClient, @SyncToServer, @SaveToDisk 等</td><td>声明式标记字段的同步和持久化行为</td></tr>
+        <tr><td>元数据层</td><td>FieldDefinitionStorage, FieldAnnotationMetadata</td><td>扫描和缓存类级别的字段定义元数据，含字段工厂、Codec、Strategy</td></tr>
+        <tr><td>定义层</td><td>DataFieldDefinition&lt;T&gt;</td><td>封装单个字段的反射信息、getter/setter、序列化方法、条件判断</td></tr>
+        <tr><td>管理层</td><td>FieldDataManager, LazyFieldDataManager</td><td>每实例生命周期管理：变更检测、序列化、反序列化，含重入保护</td></tr>
+        <tr><td>字段层</td><td>DataField, BooleanField, IntField, ObjCodecField…</td><td>单个字段的读写、变化检测、缓冲区序列化的具体实现</td></tr>
+        <tr><td>访问层</td><td>CollectionAccess, MapAccess, SerializableAccess…</td><td>对 final 字段（集合/Map/自定义类型）的代理访问与序列化</td></tr>
+        <tr><td>编解码层</td><td>DataSyncCodec, ByteStreamCodec, DataCodec</td><td>类型级别的编解码器注册与调用，统一网络和持久化</td></tr>
+        <tr><td>传输层</td><td>DataSyncNetwork, BlockEntitySyncPacket, EntitySyncPacket</td><td>网络包发送与接收，支持 BlockEntity 和 Entity 的 C2S/S2C 双向通信</td></tr>
+    </tbody>
+</table>
+
+<!-- ===== SYNC WORKFLOW ===== -->
+<h2 id="sync-workflow">同步与持久化流程</h2>
+
+<h3>网络同步流程</h3>
+<p>字段同步需要 <strong>主动调用</strong> <code>DataSyncNetwork</code> 的静态方法触发。框架不会自动在每 tick 推送数据。</p>
+<ol>
+    <li><strong>修改字段值</strong> — 在 tick 或业务方法中修改被注解标记的字段</li>
+    <li><strong>调用同步方法</strong> — 调用 <code>DataSyncNetwork.syncBlockEntityToClient(be, forceAll, auto)</code>（服务端）或 <code>syncBlockEntityToServer(be, forceAll, auto)</code>（客户端）</li>
+    <li><strong>内部流程</strong> — 同步方法内部调用 <code>FieldDataManager.updateFieldDirtyFlags()</code> 检测变化 → <code>writeToNetworkBuffer()</code> 序列化 → 发送网络包</li>
+    <li><strong>远端接收</strong> — 收到包后调用 <code>FieldDataManager.readFromNetworkBuffer()</code> 反序列化，还原字段值</li>
+    <li><strong>更新通知</strong> — 若字段设置了 <code>notifyUpdate = true</code>，调用 <code>scheduleUpdate()</code> 通知渲染刷新</li>
+</ol>
+<div class="note"><strong>异步支持：</strong>所有 <code>DataSyncNetwork</code> 的发送方法都支持异步调用。方法内部检测到变化后，通过 <code>level.getServer().execute()</code> 或 <code>Minecraft.getInstance().execute()</code> 将实际网络发送调度到主线程。</div>
+
+<h3>持久化流程</h3>
+<ol>
+    <li><strong>调用 setChanged()</strong> — 当数据发生变化时，必须调用 BlockEntity 的 <code>setChanged()</code> 标记区块需要保存</li>
+    <li><strong>Minecraft 保存区块</strong> — 原版保存机制触发 <code>saveAdditional()</code>，框架自动将 <code>@SaveToDisk</code> 字段序列化为 NBT</li>
+    <li><strong>加载恢复</strong> — 区块加载时，<code>load()</code> 方法自动恢复持久化的字段值</li>
+</ol>
+<div class="note warn"><strong>重要：</strong>框架不会自动调用 <code>setChanged()</code>。你必须在数据变更后手动调用 <code>setChanged()</code>，否则区块不会被标记为脏，数据不会写入磁盘。</div>
+
+<h3>autoUpdate 与 markFieldsForSync</h3>
+<p><code>@SyncToClient</code> 和 <code>@SyncToServer</code> 的 <code>autoUpdate</code> 属性（默认 <code>true</code>）：</p>
+<ul>
+    <li><strong>autoUpdate = true</strong> — 每次调用 <code>updateFieldDirtyFlags()</code> 时自动调用 <code>detectChange()</code> 对比新旧值。适合基本类型和简单对象</li>
+    <li><strong>autoUpdate = false</strong> — 不会自动检测变化。必须手动调用 <code>markFieldsForSync("fieldName")</code> 标记为脏，下一次同步时才会推送。适合需要精确控制同步时机的场景</li>
+</ul>
+<p><code>markFieldsForSync</code> 方法就是专门为 <code>autoUpdate = false</code> 的字段设计的 —— 当设置为 false 时，即使字段值变了，框架也不会自动检测到，必须手动标记。</p>
+
+<!-- ===== DATA FLOW ===== -->
+<h2 id="data-flow">数据流</h2>
+<pre><code>┌──────────────────┐     修改字段值      ┌──────────────────┐
+│  你的业务代码      │ ─────────────────→  │   被注解的字段     │
+│  (tick/handler)   │                    │ (@SyncToClient)  │
+└────────┬─────────┘                    └────────┬─────────┘
+         │ setChanged()                          │
+         │ DataSyncNetwork                       │
+         │   .syncBlockEntityToClient()          │
+         ▼                                       ▼
+┌──────────────────┐                   ┌──────────────────┐
+│  Minecraft 保存   │   saveAdditional  │ FieldDataManager │
+│  (写 NBT 到磁盘)  │ ←─────────────── │  writeToData()   │
+└──────────────────┘                   │ writeToNetworkBuf│
+                                       └────────┬─────────┘
+                                                │ 网络包
+                                                ▼
+                                       ┌──────────────────┐
+                                       │   远端接收        │
+                                       │ readFromBuffer() │
+                                       │ → 还原字段值      │
+                                       │ → listener 回调  │
+                                       │ → scheduleUpdate │
+                                       └──────────────────┘</code></pre>
+
+<!-- ===== IFieldDataHolder ===== -->
+<h2 id="ifield-data-holder">IFieldDataHolder 接口</h2>
+<p><code>IFieldDataHolder</code> 是所有被管理数据持有者的核心接口。实现此接口的对象可以由 <code>FieldDataManager</code> 管理其被注解的字段。</p>
+<table>
+    <thead><tr><th>方法</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>getFieldDataManager()</td><td><strong>必须实现</strong>。返回关联的 FieldDataManager 实例</td></tr>
+        <tr><td>markFieldsForSync(String...)</td><td>便捷 default 方法，标记指定字段为脏（用于 autoUpdate=false 的字段）</td></tr>
+        <tr><td>scheduleUpdate(LogicalSide)</td><td>default 方法，字段更新通知时调用。重写以触发渲染刷新等操作</td></tr>
+        <tr><td>writeCustomSyncData(buf, force)</td><td>在标准字段同步前写入额外的自定义数据到网络包</td></tr>
+        <tr><td>readCustomSyncData(buf)</td><td>在标准字段同步前从网络包读取额外的自定义数据</td></tr>
+        <tr><td>writeCustomSaveData(data)</td><td>在标准字段持久化前写入额外的自定义数据到 StringMapData</td></tr>
+        <tr><td>readCustomSaveData(data, version)</td><td>在标准字段加载前从 StringMapData 读取额外的自定义数据</td></tr>
+    </tbody>
+</table>
+
+<!-- ===== IDataSerializable ===== -->
+<h2 id="idata-serializable">IDataSerializable 接口</h2>
+<p>当字段类型实现 <code>IDataSerializable</code> 时，框架通过 <code>SerializableAccess</code> 代理其序列化。提供完整的变化追踪和双通道序列化：</p>
+<table>
+    <thead><tr><th>方法</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>detectChange()</td><td>检测数据是否变化（对比快照或标记）。autoUpdate=true 时每轮同步调用</td></tr>
+        <tr><td>markAsChanged()</td><td>强制标记为已变化，确保纳入下次同步</td></tr>
+        <tr><td>clearChanged()</td><td>清除变化标记（同步/持久化完成后调用）</td></tr>
+        <tr><td>isChanged()</td><td>检查是否已标记为变化</td></tr>
+        <tr><td>writeBuffer(side, buf)</td><td>将数据写入 FriendlyByteBuf（网络同步）</td></tr>
+        <tr><td>readBuffer(side, buf)</td><td>从 FriendlyByteBuf 读取数据（网络同步）</td></tr>
+        <tr><td>writeData()</td><td>将数据编码为 Data 对象（磁盘持久化）</td></tr>
+        <tr><td>readData(data, dataVersion)</td><td>从 Data 对象解码数据，含版本号用于数据迁移（磁盘持久化）</td></tr>
+    </tbody>
+</table>
+<p><code>AbstractDataSerializable</code> 提供便捷基类，默认使用 boolean 标记追踪变化。需要复杂变化检测（如对比快照）的子类可重写 <code>detectChange()</code>。</p>
+
+<!-- ===== DataField ===== -->
+<h2 id="datafield">DataField 接口</h2>
+<p><code>DataField&lt;T&gt;</code> 定义单个被管理字段的操作接口。每个被注解标记的字段对应一个 DataField 实现实例，是字段值读写和序列化的执行单元。</p>
+<table>
+    <thead><tr><th>方法</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>getDefinition()</td><td>返回字段的 DataFieldDefinition 元数据</td></tr>
+        <tr><td>markAsChanged(source)</td><td>标记该字段为脏（针对特定 source 对象）</td></tr>
+        <tr><td>isChanged(source)</td><td>检查字段是否已标记为脏</td></tr>
+        <tr><td>clearChanged(source)</td><td>清除脏标记</td></tr>
+        <tr><td>detectChange(side, source, auto)</td><td>检测字段值是否发生变化，auto 参数指示是否为自动检测模式</td></tr>
+        <tr><td>writeToBuffer(side, source, buf, force)</td><td>将字段值写入网络缓冲区。force=true 时忽略脏标记强制写入</td></tr>
+        <tr><td>readFromBuffer(side, source, buf)</td><td>从网络缓冲区读取并设置字段值，同时触发 listener 回调</td></tr>
+        <tr><td>writeToData(source)</td><td>将字段值编码为 Data 对象用于持久化</td></tr>
+        <tr><td>readFromData(source, data, version)</td><td>从 Data 对象解码并还原字段值</td></tr>
+        <tr><td>mustDetect()</td><td>default false。返回 true 时即使未标记为脏也会调用 detectChange</td></tr>
+    </tbody>
+</table>
+<p>还定义了内部接口 <code>Factory&lt;T&gt;</code>、<code>CustomFactory&lt;T&gt;</code>、<code>CustomGenericFactory&lt;T&gt;</code> 用于插件化的工厂注册系统。</p>
+
+<!-- ===== DataFieldDefinition ===== -->
+<h2 id="datafield-definition">DataFieldDefinition</h2>
+<p><code>DataFieldDefinition&lt;T&gt;</code> 封装单个被管理字段的完整元数据和行为。由 <code>FieldDefinitionStorage</code> 在类扫描时创建，包含：</p>
+<ul>
+    <li><strong>反射信息</strong> — Field、isFinal、genericType[]、genericCodecs[]</li>
+    <li><strong>访问器</strong> — 通过 MethodHandle 实现高性能 getter/setter（覆盖所有基本类型 + Object）</li>
+    <li><strong>序列化代理</strong> — 支持 Codec 注解指定的自定义序列化方法，或自动从 DataSyncCodec 查找</li>
+    <li><strong>条件判断</strong> — skipSync() / skipSave() 系列方法，支持所有基本类型的条件方法分派</li>
+    <li><strong>变化策略</strong> — Hash.Strategy 用于变化检测，默认 OBJECT_STRATEGY（hashCode/equals）</li>
+    <li><strong>默认值</strong> — 支持 defaultValue 字符串解析和 defaultValueGetter 方法引用</li>
+    <li><strong>监听器</strong> — getListener(side) 返回字段更新时的回调 MethodHandle</li>
+</ul>
+
+<!-- ===== FieldDataManager ===== -->
+<h2 id="field-data-manager">FieldDataManager</h2>
+<p><code>FieldDataManager</code> 是每个 <code>IFieldDataHolder</code> 实例的核心管理器，负责被注解字段的完整生命周期。</p>
+<h3>核心职责</h3>
+<ul style="line-height: 2;">
+    <li><strong>字段发现与实例化</strong> — 从 <code>FieldDefinitionStorage</code> 读取类级元数据，为每个字段创建 DataField 实现</li>
+    <li><strong>变更检测</strong> — <code>updateFieldDirtyFlags(LogicalSide, boolean auto)</code> 遍历同步字段，调用 detectChange</li>
+    <li><strong>网络序列化</strong> — 先写自定义同步数据，然后按 (VarInt fieldIndex, fieldPayload) 格式写入每个脏字段</li>
+    <li><strong>数据持久化</strong> — 通过 <code>writeToData()</code>/<code>readFromData()</code> 使用 StringMapData 格式读写</li>
+    <li><strong>重入保护</strong> — <code>updating</code> 和 <code>writing</code> volatile 标志防止递归</li>
+    <li><strong>定向字段管理</strong> — 内部维护 syncToClientFields[]、syncToServerFields[]、saveFields[] 三个独立数组</li>
+</ul>
+
+<h3>主要方法</h3>
+<table>
+    <thead><tr><th>方法</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>updateFieldDirtyFlags(side, auto)</td><td>遍历同步字段调用 detectChange。有变化或已标记脏则返回 true</td></tr>
+        <tr><td>writeToNetworkBuffer(side, force)</td><td>序列化脏字段为 byte[]。force=true 时写入所有字段</td></tr>
+        <tr><td>readFromNetworkBuffer(side, data)</td><td>反序列化 byte[] 并还原字段值，触发 listener 和 scheduleUpdate</td></tr>
+        <tr><td>writeToData()</td><td>序列化所有 @SaveToDisk 字段为 StringMapData</td></tr>
+        <tr><td>readFromData(data, dataVersion)</td><td>从 StringMapData 反序列化还原所有持久化字段</td></tr>
+        <tr><td>markFieldsForSync(fields...)</td><td>按 DataFieldDefinition 或字段名字符串标记为脏</td></tr>
+        <tr><td>hasSyncFields(side) / hasSaveFields()</td><td>查询是否有对应类型的被管理字段</td></tr>
+    </tbody>
+</table>
+
+<!-- ===== LazyFieldDataManager ===== -->
+<h2 id="lazy-field-data-manager">LazyFieldDataManager</h2>
+<p>线程安全的 <code>FieldDataManager</code> 延迟初始化包装器。使用双重检查锁定（double-checked locking）确保 FieldDataManager 仅创建一次，减少不需要时的开销。</p>
+<pre><code><span class="kw">public class</span> <span class="typ">MyHolder</span> <span class="kw">implements</span> <span class="typ">IFieldDataHolder</span> {
+    <span class="kw">private final</span> <span class="typ">LazyFieldDataManager</span> fieldDataManager =
+        <span class="kw">new</span> <span class="typ">LazyFieldDataManager</span>(<span class="kw">this</span>);
+
+    <span class="an">@Override</span>
+    <span class="kw">public</span> <span class="typ">FieldDataManager</span> <span class="typ">getFieldDataManager</span>() {
+        <span class="kw">return</span> fieldDataManager.get();
+    }
+}</code></pre>
+
+<!-- ===== FieldDefinitionStorage ===== -->
+<h2 id="field-definition-storage">FieldDefinitionStorage</h2>
+<p>类级别的字段元数据中心注册表。首次访问某个类时扫描其所有字段，缓存到 <code>ConcurrentHashMap</code> 中。支持父类继承 —— 子类自动继承父类的字段定义。</p>
+
+<h3>工厂注册系统</h3>
+<p><code>FieldDefinitionStorage</code> 提供了多层次的工厂注册 API，用于将不同的字段类型映射到合适的 DataField 实现：</p>
+<table>
+    <thead><tr><th>注册方法</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>registerFactory(type, factory)</td><td>精确类型匹配，如 boolean.class → BooleanField</td></tr>
+        <tr><td>registerInterfaceFactory(type, factory, priority)</td><td>接口匹配，如 IDataSerializable → SerializableAccess</td></tr>
+        <tr><td>registerCustomFactory(predicate, factory, priority)</td><td>自定义谓词匹配，按 priority 降序尝试</td></tr>
+        <tr><td>registerGenericFactory(type, factory, genericTypes)</td><td>泛型类型匹配，如 Map&lt;String, Integer&gt;</td></tr>
+        <tr><td>registerCustomGenericFactory(predicate, factory, priority)</td><td>自定义泛型谓词匹配</td></tr>
+        <tr><td>registerAccessFactory / registerAccessInterfaceFactory</td><td>注册 final 字段的 Access 代理工厂</td></tr>
+        <tr><td>registerStrategy(type, strategy)</td><td>注册类型的 Hash.Strategy 用于变化检测</td></tr>
+    </tbody>
+</table>
+
+<!-- ===== DataSyncNetwork ===== -->
+<h2 id="datasync-network">DataSyncNetwork</h2>
+<p>网络同步的核心入口类（<code>@UtilityClass</code>），管理 4 个注册的网络通道：</p>
+<table>
+    <thead><tr><th>索引</th><th>方向</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>0</td><td>BlockEntity C2S</td><td>客户端推送字段变化到服务端</td></tr>
+        <tr><td>1</td><td>BlockEntity S2C</td><td>服务端推送字段变化到追踪的客户端</td></tr>
+        <tr><td>2</td><td>Entity C2S</td><td>客户端推送字段变化到服务端</td></tr>
+        <tr><td>3</td><td>Entity S2C</td><td>服务端推送字段变化到追踪的客户端</td></tr>
+    </tbody>
+</table>
+
+<h3>公共发送方法（均支持异步调用）</h3>
+<table>
+    <thead><tr><th>方法</th><th>调用侧</th><th>参数</th></tr></thead>
+    <tbody>
+        <tr><td>syncBlockEntityToClient(be, all, auto)</td><td>服务端</td><td>all: 强制全量同步; auto: 自动检测变化</td></tr>
+        <tr><td>syncBlockEntityToServer(be, all, auto)</td><td>客户端</td><td>同上</td></tr>
+        <tr><td>syncEntityToClient(entity, all, auto)</td><td>服务端</td><td>同上</td></tr>
+        <tr><td>syncEntityToServer(entity, all, auto)</td><td>客户端</td><td>同上</td></tr>
+    </tbody>
+</table>
+<div class="note"><strong>异步原理：</strong>方法内部检测变化并序列化数据后，通过 <code>level.getServer().execute()</code>（服务端）或 <code>Minecraft.getInstance().execute()</code>（客户端）将网络包发送调度到主线程，因此本身可在任意线程调用。另外，当数据由服务端→客户端同步时，接收方的 handler 会自动对 BlockEntity 调用 <code>be.setChanged()</code>。</div>
+
+<!-- ===== DataSyncCodec ===== -->
+<h2 id="codec">DataSyncCodec 编解码系统</h2>
+<p><code>DataSyncCodec&lt;T&gt;</code> 将网络流编解码器和持久化数据编解码器配对为统一单元。每个 Codec 含四个函数式组件：</p>
+<table>
+    <thead><tr><th>组件</th><th>类型</th><th>用途</th></tr></thead>
+    <tbody>
+        <tr><td>streamWriter</td><td>ByteStreamEncoder&lt;T&gt;</td><td>写入 FriendlyByteBuf（网络同步）</td></tr>
+        <tr><td>streamReader</td><td>ByteStreamDecoder&lt;T&gt;</td><td>从 FriendlyByteBuf 读取（网络同步）</td></tr>
+        <tr><td>dataWriter</td><td>DataEncoder&lt;T&gt;</td><td>编码为 Data 对象（持久化）</td></tr>
+        <tr><td>dataReader</td><td>DataDecoder&lt;T&gt;</td><td>从 Data 对象解码（持久化）</td></tr>
+    </tbody>
+</table>
+<p>特性：</p>
+<ul>
+    <li><strong>多来源构造</strong> — of(streamCodec) / of(dataCodec) / of(streamCodec, dataCodec) / of(streamCodec, mojangCodec)</li>
+    <li><strong>枚举自动生成</strong> — 所有 enum 类型首次访问时自动生成 Codec。支持固定序数枚举和序列化名枚举</li>
+    <li><strong>数组自动生成</strong> — 所有非基本类型数组首次访问时自动生成 Codec</li>
+    <li><strong>泛型支持</strong> — register() 可接受 Class&lt;?&gt;... genericTypes 参数用于泛型类型注册</li>
+    <li><strong>Minecraft 集成</strong> — 提供 register(type, Registry) 便捷方法，自动从 Minecraft 注册表创建 Codec</li>
+</ul>
+
+<!-- ===== DataComponent ===== -->
+<h2 id="datacomponent">DataComponent 系统</h2>
+<p>DataComponent 系统提供了一种可选的组件化数据模型，类似于 Minecraft 原版的 DataComponent。通过 <code>DataComponentRegistry</code> 管理带类型的 Key，用 <code>DataComponentMap</code> 存储数据，支持高效的合并语义。</p>
+
+<h3>DataComponentRegistry</h3>
+<p>继承 <code>Registry&lt;String, DataComponentKey&lt;?&gt;&gt;</code>，同时实现了 <code>ByteStreamCodec&lt;DataComponentMap&gt;</code>、<code>DataCodec&lt;DataComponentMap&gt;</code> 和 Mojang <code>Codec&lt;DataComponentMap&gt;</code>，可直接作为三种序列化通道的编解码器使用。</p>
+<pre><code><span class="cmt">// 创建注册表</span>
+<span class="typ">DataComponentRegistry</span> registry = <span class="kw">new</span> <span class="typ">DataComponentRegistry</span>(<span class="str">"my_mod"</span>);
+registry.unfreeze();
+
+<span class="cmt">// 注册组件 Key —— 方式一：直接传 Codec</span>
+<span class="kw">var</span> ENERGY = registry.register(<span class="str">"energy"</span>, <span class="typ">DataSyncCodec</span>.INT_CODEC);
+
+<span class="cmt">// 注册组件 Key —— 方式二：Builder 模式（含合并/创建函数）</span>
+<span class="kw">var</span> ITEMS = registry.register(<span class="str">"items"</span>, <span class="typ">DataComponentKey</span>
+    .collectionBuilder((<span class="typ">ArrayList</span>&lt;<span class="typ">ItemStack</span>&gt; c) -> <span class="kw">new</span> <span class="typ">ArrayList</span>&lt;&gt;(c))
+    .andThen(b -> b.codec(<span class="typ">DataSyncCodec</span>.ITEM_STACK_CODEC)));
+
+registry.freeze();</code></pre>
+
+<h3>DataComponentKey&lt;T&gt;</h3>
+<p>组件键，基于 identityHashCode 进行恒等查找。核心字段：</p>
+<ul>
+    <li><strong>name</strong> — 组件名称</li>
+    <li><strong>codec</strong> — DataSyncCodec，为 null 时该 Key 不参与直接序列化（但仍可参与合并）</li>
+    <li><strong>mixCode</strong> — System.identityHashCode(this) 混合后的哈希值，用于恒等键查找</li>
+    <li><strong>mergeFunction(T oldVal, T newVal) → T</strong> — 合并策略（如集合取并集，Map 做 putAll）</li>
+    <li><strong>createFunction(T val) → T</strong> — 存储前转换（如创建防御性副本）</li>
+</ul>
+<p>提供 100+ 静态 Builder 工厂方法覆盖 FastUtil 所有集合和 Map 类型的合并/创建策略。</p>
+
+<h3>DataComponentMap</h3>
+<p>继承 <code>AbstractDataComponentMap</code>，基于恒等键的自定义哈希表。提供类型安全的访问方法：</p>
+<pre><code><span class="typ">DataComponentMap</span> map = <span class="kw">new</span> <span class="typ">DataComponentMap</span>();
+map.put(ENERGY, <span class="str">1000</span>);
+
+<span class="cmt">// 类型安全访问</span>
+<span class="kw">int</span> e = map.getInt(ENERGY);         <span class="cmt">// 不存在返回 0</span>
+<span class="typ">Integer</span> e2 = map.getData(ENERGY);    <span class="cmt">// 不存在返回 null</span>
+<span class="kw">boolean</span> has = map.containsKey(ENERGY);
+
+<span class="cmt">// 高级操作</span>
+map.getOrCreateData(ITEMS, <span class="typ">ArrayList</span>::<span class="kw">new</span>);  <span class="cmt">// 惰性创建</span>
+map.getOrPut(ENERGY, <span class="str">500</span>);                <span class="cmt">// 不存在则放入</span>
+map.merge(ENERGY, <span class="str">200</span>);                     <span class="cmt">// 使用 Key 的 mergeFunction 合并</span>
+map.merge(otherMap);                           <span class="cmt">// 批量合并另一个 map</span></code></pre>
+<p>还提供了 <code>getBoolean</code>、<code>getLong</code>、<code>getString</code> 等类型便捷方法，Key 不存在时返回安全默认值。</p>
+
+<h3>AbstractDataComponentMap</h3>
+<p>自定义 identity-based 哈希表基类，重写 <code>Reference2ObjectOpenHashMap</code> 的 get/put/containsKey 以使用 <code>DataComponentKey.mixCode</code> 和 <code>==</code> 恒等比较。直接访问 FastUtil 内部字段（key[]、value[]、mask）以获得最大性能。</p>
+
+<!-- ===== Registry ===== -->
+<h2 id="registry">Registry 工具类</h2>
+<p><code>Registry&lt;K extends Comparable&lt;K&gt;, V&gt;</code> 是一个泛型注册表工具类，将可比较的键映射到值，并自动分配整数 ID。</p>
+<table>
+    <thead><tr><th>方法</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>register(key, value)</td><td>注册键值对（需在 unfreeze 状态下）</td></tr>
+        <tr><td>replace(key, value)</td><td>替换已有的键对应的值</td></tr>
+        <tr><td>get(key) / get(id)</td><td>O(1) 按键或整数 ID 查找值</td></tr>
+        <tr><td>getId(value) / getKey(value)</td><td>反向查找整型 ID 或键</td></tr>
+        <tr><td>containsKey(key) / containsValue(value)</td><td>存在性检查</td></tr>
+        <tr><td>unfreeze() / freeze()</td><td>生命周期管理：解冻后注册 → 冻结后锁定并构建索引</td></tr>
+        <tr><td>streamCodec()</td><td>返回基于整数 ID 的 ByteStreamCodec&lt;V&gt;</td></tr>
+        <tr><td>dataCodec(keyCodec)</td><td>返回基于键序列化的 DataCodec&lt;V&gt;</td></tr>
+        <tr><td>codec(keyCodec)</td><td>返回 Mojang Codec&lt;V&gt;</td></tr>
+    </tbody>
+</table>
+<pre><code><span class="cmt">// 使用示例</span>
+<span class="kw">var</span> reg = <span class="kw">new</span> <span class="typ">Registry</span>&lt;<span class="typ">String</span>, <span class="typ">MyType</span>&gt;(<span class="str">"my_registry"</span>);
+reg.unfreeze();
+reg.register(<span class="str">"foo"</span>, fooInstance);
+reg.register(<span class="str">"bar"</span>, barInstance);
+reg.freeze();
+
+<span class="kw">int</span> id = reg.getId(fooInstance);        <span class="cmt">// 自动分配的整数 ID<br></span><span class="cmt"></span><span class="typ">MyType</span> v = reg.get(<span class="str">"foo"</span>);              <span class="cmt">// 按键查找<br></span><span class="cmt"></span><span class="typ">ByteStreamCodec</span>&lt;<span class="typ">MyType</span>&gt; c = reg.streamCodec();  <span class="cmt">// 用于网络同步</span></code></pre>
+
+<!-- ===== NotifiableHolder ===== -->
+<h2 id="notifiable-holder">NotifiableHolder 系统</h2>
+<p>提供了带变更通知的值持有者类，用于 <code>@SyncToClient</code> / <code>@SyncToServer</code> 字段：</p>
+<table>
+    <thead><tr><th>类</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>BooleanNotifiableHolder</td><td>boolean 值持有者，变化时通知监听器</td></tr>
+        <tr><td>ByteNotifiableHolder</td><td>byte 值持有者</td></tr>
+        <tr><td>ShortNotifiableHolder</td><td>short 值持有者</td></tr>
+        <tr><td>IntNotifiableHolder</td><td>int 值持有者</td></tr>
+        <tr><td>LongNotifiableHolder</td><td>long 值持有者</td></tr>
+        <tr><td>FloatNotifiableHolder</td><td>float 值持有者</td></tr>
+        <tr><td>DoubleNotifiableHolder</td><td>double 值持有者</td></tr>
+        <tr><td>ObjNotifiableHolder&lt;T&gt;</td><td>泛型对象持有者，需提供 DataSyncCodec。支持 ReceiverListener 回调</td></tr>
+        <tr><td>ObjSerializableHolder&lt;T&gt;</td><td>实现 IDataSerializable 的对象持有者</td></tr>
+    </tbody>
+</table>
+<pre><code><span class="cmt">// ObjNotifiableHolder 使用</span>
+<span class="an">@SyncToClient</span>
+<span class="kw">private final</span> <span class="typ">ObjNotifiableHolder</span>&lt;<span class="typ">String</span>&gt; label =
+    <span class="typ">ObjNotifiableHolder</span>.create(<span class="typ">DataSyncCodec</span>.STRING_CODEC);
+
+<span class="kw">public void</span> <span class="typ">init</span>() {
+    label.setReceiverListener((source, newVal, oldVal) -> {
+        <span class="typ">LOGGER</span>.info(<span class="str">"Label changed: {} -> {}"</span>, oldVal, newVal);
+    });
+}</code></pre>
+
+<!-- ===== ANNOTATIONS ===== -->
+<h2>注解参考</h2>
+
+<h3 id="an-synctoclient">@SyncToClient</h3>
+<p>标记字段从<strong>服务端同步到客户端</strong>。内部继承了 <code>@AddToManager</code>。</p>
+<table>
+    <thead><tr><th>属性</th><th>类型</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>notifyUpdate</td><td>boolean</td><td>false</td><td>变化时是否触发 IFieldDataHolder.scheduleUpdate()</td></tr>
+        <tr><td>autoUpdate</td><td>boolean</td><td>true</td><td>是否自动检测变化（通过脏标记/值比较）。false 时需手动 markFieldsForSync</td></tr>
+        <tr><td>condition</td><td>String</td><td>""</td><td>条件方法名，签名 T→boolean，返回 false 跳过此次同步</td></tr>
+        <tr><td>listener</td><td>String</td><td>""</td><td>接收更新时的回调方法名，签名 (T newVal, T oldVal)→void</td></tr>
+    </tbody>
+</table>
+
+<h3 id="an-synctoserver">@SyncToServer</h3>
+<p>标记字段从<strong>客户端同步到服务端</strong>。属性与 <code>@SyncToClient</code> 完全相同。</p>
+
+<h3 id="an-savetodisk">@SaveToDisk</h3>
+<p>标记字段<strong>持久化到磁盘</strong>。内部继承了 <code>@AddToManager</code>。</p>
+<table>
+    <thead><tr><th>属性</th><th>类型</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>key</td><td>String</td><td>""</td><td>自定义存储键名，留空使用字段名</td></tr>
+        <tr><td>condition</td><td>String</td><td>""</td><td>持久化条件方法名</td></tr>
+        <tr><td>saveNull</td><td>boolean</td><td>false</td><td>是否写入 null/空集合/空数组</td></tr>
+        <tr><td>defaultValue</td><td>String</td><td>""</td><td>默认值（字符串形式），等于此值时跳过写入</td></tr>
+        <tr><td>defaultValueGetter</td><td>String</td><td>""</td><td>获取默认值的 getter 方法名</td></tr>
+    </tbody>
+</table>
+
+<h3 id="an-other">其他注解</h3>
+<table>
+    <thead><tr><th>注解</th><th>目标</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>@AddToManager</td><td>FIELD</td><td>元注解。标记字段纳入 FieldDataManager 管理。@SaveToDisk/@SyncToClient/@SyncToServer 均继承了此注解</td></tr>
+        <tr><td>@Access</td><td>FIELD</td><td>标记非 final 字段使用 final 字段的 Access 模式。createInstance=true 时在序列化中创建新实例</td></tr>
+        <tr><td>@Codec</td><td>FIELD</td><td>指定字段的自定义编解码器。可指定静态 DataCodec/BytestreamCodec 字段名，或实例方法名（writeToData/readFromData/writeToBuffer/readFromBuffer）</td></tr>
+        <tr><td>@Strategy</td><td>FIELD</td><td>指定变化检测的 Hash.Strategy，值为静态字段名。用于自定义类型的变化比较逻辑</td></tr>
+        <tr><td>@Generic</td><td>FIELD</td><td>标记字段使用泛型类型处理。当字段为泛型类型但自动检测失败时使用</td></tr>
+        <tr><td>@AdditionalHolder</td><td>FIELD</td><td>标记嵌套的 IFieldDataHolder 字段，其内部被注解的字段会被合并到当前类的 FieldDataManager 中管理</td></tr>
+    </tbody>
+</table>
+
+<!-- ===== USAGE ===== -->
+<h2 id="usage-blockentity">BlockEntity 用法（推荐）</h2>
+<p>参考 <code>TestBlockEntity</code>（位于 <code>com.gto.datasynclib.test</code>）获取完整示例。</p>
+<pre><code><span class="kw">public class</span> <span class="typ">MyMachineBlockEntity</span> <span class="kw">extends</span> <span class="typ">FieldDataHolderBlockEntity</span> {
+
+    <span class="an">@SyncToClient</span>(notifyUpdate = <span class="kw">true</span>)
+    <span class="an">@SaveToDisk</span>
+    <span class="kw">private int</span> progress;
+
+    <span class="an">@SyncToClient</span>
+    <span class="an">@SaveToDisk</span>(defaultValue = <span class="str">"0"</span>)
+    <span class="kw">private int</span> maxProgress = <span class="str">100</span>;
+
+    <span class="an">@SyncToServer</span>
+    <span class="kw">private boolean</span> redstoneMode;
+
+    <span class="an">@SaveToDisk</span>
+    <span class="kw">private final</span> <span class="typ">ItemStack</span>[] inventory = <span class="kw">new</span> <span class="typ">ItemStack</span>[<span class="str">9</span>];
+
+    <span class="kw">public</span> <span class="typ">MyMachineBlockEntity</span>(<span class="typ">BlockPos</span> pos, <span class="typ">BlockState</span> state) {
+        <span class="kw">super</span>(<span class="typ">ModBlockEntities</span>.MY_MACHINE.get(), pos, state);
+    }
+
+    <span class="cmt">// 服务端 tick（需在 Block 的 getTicker 中绑定）</span>
+    <span class="kw">public void</span> <span class="typ">serverTick</span>(<span class="typ">ServerLevel</span> level) {
+        <span class="kw">if</span> (progress &lt; maxProgress) {
+            progress++;
+            setChanged();  <span class="cmt">// ★ 标记需要保存到磁盘</span>
+        }
+        <span class="cmt">// 每 20 tick 同步一次到客户端</span>
+        <span class="kw">if</span> (level.getGameTime() % <span class="str">20</span> == <span class="str">0</span>) {
+            <span class="typ">DataSyncNetwork</span>.syncBlockEntityToClient(<span class="kw">this</span>, <span class="kw">false</span>, <span class="kw">true</span>);
+        }
+    }
+
+    <span class="cmt">// 客户端 tick</span>
+    <span class="kw">public void</span> <span class="typ">clientTick</span>() {
+        <span class="kw">if</span> (level.getGameTime() % <span class="str">20</span> == <span class="str">0</span>) {
+            <span class="cmt">// 将 redstoneMode 的改变发送到服务端</span>
+            <span class="typ">DataSyncNetwork</span>.syncBlockEntityToServer(<span class="kw">this</span>, <span class="kw">false</span>, <span class="kw">true</span>);
+        }
+    }
+}</code></pre>
+
+<h3>Block 注册 Ticker</h3>
+<pre><code><span class="kw">public class</span> <span class="typ">MyMachineBlock</span> <span class="kw">extends</span> <span class="typ">Block</span> <span class="kw">implements</span> <span class="typ">EntityBlock</span> {
+    <span class="an">@Override</span>
+    <span class="kw">public</span> &lt;T <span class="kw">extends</span> <span class="typ">BlockEntity</span>&gt; <span class="typ">BlockEntityTicker</span>&lt;T&gt; <span class="typ">getTicker</span>(
+            <span class="typ">Level</span> level, <span class="typ">BlockState</span> state, <span class="typ">BlockEntityType</span>&lt;T&gt; type) {
+        <span class="kw">return</span> (lvl, pos, st, be) -> {
+            <span class="kw">if</span> (lvl <span class="kw">instanceof</span> <span class="typ">ServerLevel</span> sl &amp;&amp; be <span class="kw">instanceof</span> <span class="typ">MyMachineBlockEntity</span> mbe)
+                mbe.serverTick(sl);
+            <span class="kw">else if</span> (lvl.isClientSide() &amp;&amp; be <span class="kw">instanceof</span> <span class="typ">MyMachineBlockEntity</span> mbe)
+                mbe.clientTick();
+        };
+    }
+}</code></pre>
+
+<h2 id="usage-entity">Entity 用法</h2>
+<pre><code><span class="kw">public class</span> <span class="typ">MyEntity</span> <span class="kw">extends</span> <span class="typ">Entity</span> <span class="kw">implements</span> <span class="typ">IFieldDataHolder</span> {
+
+    <span class="kw">private final</span> <span class="typ">LazyFieldDataManager</span> fieldDataManager = <span class="kw">new</span> <span class="typ">LazyFieldDataManager</span>(<span class="kw">this</span>);
+
+    <span class="an">@SyncToClient</span>
+    <span class="kw">private int</span> customValue;
+
+    <span class="an">@Override</span> <span class="kw">public</span> <span class="typ">FieldDataManager</span> <span class="typ">getFieldDataManager</span>() { <span class="kw">return</span> fieldDataManager.get(); }
+
+    <span class="an">@Override</span> <span class="kw">public void</span> <span class="typ">tick</span>() {
+        <span class="kw">if</span> (!level().isClientSide()) {
+            <span class="typ">DataSyncNetwork</span>.syncEntityToClient(<span class="kw">this</span>, <span class="kw">false</span>, <span class="kw">true</span>);
+        }
+    }
+}</code></pre>
+
+<h2 id="usage-regular">普通类用法</h2>
+<pre><code><span class="kw">public class</span> <span class="typ">MyDataHolder</span> <span class="kw">implements</span> <span class="typ">IFieldDataHolder</span> {
+
+    <span class="kw">private final</span> <span class="typ">LazyFieldDataManager</span> fieldDataManager = <span class="kw">new</span> <span class="typ">LazyFieldDataManager</span>(<span class="kw">this</span>);
+
+    <span class="an">@SyncToClient</span>
+    <span class="an">@SaveToDisk</span>
+    <span class="kw">private</span> <span class="typ">ItemStack</span> storedItem = <span class="typ">ItemStack</span>.EMPTY;
+
+    <span class="an">@SaveToDisk</span>
+    <span class="kw">private final</span> <span class="typ">Set</span>&lt;<span class="typ">String</span>&gt; tags = <span class="kw">new</span> <span class="typ">HashSet</span>&lt;&gt;();
+
+    <span class="an">@Override</span>
+    <span class="kw">public</span> <span class="typ">FieldDataManager</span> <span class="typ">getFieldDataManager</span>() {
+        <span class="kw">return</span> fieldDataManager.get();
+    }
+}</code></pre>
+
+<h2 id="usage-nested">嵌套 Holder（@AdditionalHolder）</h2>
+<pre><code><span class="kw">public class</span> <span class="typ">OuterHolder</span> <span class="kw">implements</span> <span class="typ">IFieldDataHolder</span> {
+    <span class="kw">private final</span> <span class="typ">LazyFieldDataManager</span> fieldDataManager = <span class="kw">new</span> <span class="typ">LazyFieldDataManager</span>(<span class="kw">this</span>);
+
+    <span class="an">@AdditionalHolder</span>  <span class="cmt">// InnerHolder 中被注解的字段会合并到 OuterHolder</span>
+    <span class="kw">private final</span> <span class="typ">InnerHolder</span> inner = <span class="kw">new</span> <span class="typ">InnerHolder</span>();
+
+    <span class="an">@Override</span> <span class="kw">public</span> <span class="typ">FieldDataManager</span> <span class="typ">getFieldDataManager</span>() { <span class="kw">return</span> fieldDataManager.get(); }
+}
+
+<span class="kw">class</span> <span class="typ">InnerHolder</span> <span class="kw">implements</span> <span class="typ">IFieldDataHolder</span> {
+    <span class="kw">private final</span> <span class="typ">FieldDataManager</span> fieldDataManager = <span class="kw">new</span> <span class="typ">FieldDataManager</span>(<span class="kw">this</span>);
+
+    <span class="an">@SaveToDisk</span>
+    <span class="kw">private int</span> a;
+
+    <span class="an">@SyncToClient</span>
+    <span class="kw">private final</span> <span class="typ">ObjNotifiableHolder</span>&lt;<span class="typ">String</span>&gt; c =
+        <span class="typ">ObjNotifiableHolder</span>.create(<span class="typ">DataSyncCodec</span>.STRING_CODEC);
+
+    <span class="an">@Override</span> <span class="kw">public</span> <span class="typ">FieldDataManager</span> <span class="typ">getFieldDataManager</span>() { <span class="kw">return</span> fieldDataManager; }
+}</code></pre>
+
+<h2 id="usage-auto-sync">自动同步详解</h2>
+<p>网络同步需要两步配合：</p>
+<ol>
+    <li><strong>注解配置</strong> — 字段上设置 <code>autoUpdate = true</code>（默认）时，框架自动对比新旧值检测变化；设为 <code>false</code> 时需要手动 <code>markFieldsForSync("fieldName")</code></li>
+    <li><strong>主动触发同步</strong> — 调用 <code>DataSyncNetwork.syncBlockEntityToClient(be, forceAll, auto)</code> 方法触发实际的网络发送</li>
+</ol>
+<pre><code><span class="cmt">// autoUpdate = true（默认）—— 自动检测变化</span>
+<span class="an">@SyncToClient</span>
+<span class="kw">private int</span> energy;
+
+<span class="kw">public void</span> <span class="typ">serverTick</span>(<span class="typ">ServerLevel</span> level) {
+    energy += <span class="str">10</span>;  <span class="cmt">// 直接修改，框架会自动检测到变化</span>
+    <span class="kw">if</span> (level.getGameTime() % <span class="str">20</span> == <span class="str">0</span>) {
+        <span class="typ">DataSyncNetwork</span>.syncBlockEntityToClient(<span class="kw">this</span>, <span class="kw">false</span>, <span class="kw">true</span>);
+        <span class="cmt">// ↑ auto=true: 内部调用 updateFieldDirtyFlags(LogicalSide.SERVER, true)
+        //    detectChange 自动发现 energy 变化 → 纳入同步</span>
+    }
+}</code></pre>
+<pre><code><span class="cmt">// autoUpdate = false —— 需要手动标记</span>
+<span class="an">@SyncToClient</span>(autoUpdate = <span class="kw">false</span>)
+<span class="kw">private int</span> energy;
+
+<span class="kw">public void</span> <span class="typ">setEnergy</span>(<span class="kw">int</span> value) {
+    <span class="kw">this</span>.energy = value;
+    markFieldsForSync(<span class="str">"energy"</span>);  <span class="cmt">// ★ 必须手动标记</span>
+}</code></pre>
+
+<h2 id="usage-persist">持久化详解</h2>
+<p>持久化依赖 Minecraft 原版的区块保存机制：</p>
+<ol>
+    <li><strong>标记脏区块</strong> — 数据变更后调用 <code>setChanged()</code></li>
+    <li><strong>Minecraft 自动保存</strong> — 原版每隔一段时间检查脏区块并调用 <code>saveAdditional()</code></li>
+    <li><strong>框架序列化</strong> — <code>FieldDataHolderBlockEntity.saveAdditional()</code> 自动调用 <code>writeToData()</code></li>
+</ol>
+<div class="note warn"><strong>关键：</strong>不调用 <code>setChanged()</code>，数据<strong>不会</strong>写入磁盘。建议在修改任何 <code>@SaveToDisk</code> 字段后立即调用。</div>
+
+<h2 id="usage-codec">注册自定义 Codec</h2>
+<pre><code><span class="cmt">// 方式一：分别指定四个编解码器</span>
+<span class="typ">DataSyncCodec</span>.register(
+    <span class="typ">MyCustomType</span>.class,
+    (buf, obj) -> buf.writeInt(obj.getValue()),              <span class="cmt">// streamWriter</span>
+    buf -> <span class="kw">new</span> <span class="typ">MyCustomType</span>(buf.readInt()),                   <span class="cmt">// streamReader</span>
+    obj -> <span class="typ">IntData</span>.valueOf(obj.getValue()),                 <span class="cmt">// dataWriter</span>
+    (data, version) -> <span class="kw">new</span> <span class="typ">MyCustomType</span>(data.getInt())        <span class="cmt">// dataReader</span>
+);
+
+<span class="cmt">// 方式二：使用 ByteStreamCodec + DataCodec</span>
+<span class="typ">DataSyncCodec</span>.register(<span class="typ">MyCustomType</span>.class,
+    <span class="typ">ByteStreamCodec</span>.of(myWriter, myReader),
+    <span class="typ">DataCodec</span>.of(myDataWriter, myDataReader)
+);
+
+<span class="cmt">// 方式三：使用 ByteStreamCodec + Mojang Codec</span>
+<span class="typ">DataSyncCodec</span>.register(<span class="typ">MyCustomType</span>.class,
+    <span class="typ">ByteStreamCodec</span>.of(myWriter, myReader),
+    myMojangCodec
+);
+
+<span class="cmt">// 方式四：从 Forge Registry 创建</span>
+<span class="typ">DataSyncCodec</span>.register(<span class="typ">MyMobEffect</span>.class, <span class="typ">BuiltInRegistries</span>.MOB_EFFECT);</code></pre>
+
+<h2 id="usage-advanced">高级特性</h2>
+
+<h3>条件同步</h3>
+<pre><code><span class="an">@SyncToClient</span>(condition = <span class="str">"shouldSyncEnergy"</span>)
+<span class="kw">private int</span> energy;
+
+<span class="kw">private boolean</span> <span class="typ">shouldSyncEnergy</span>(<span class="kw">int</span> value) {
+    <span class="kw">return</span> value > <span class="str">0</span>;  <span class="cmt">// 仅当大于 0 时同步</span>
+}</code></pre>
+
+<h3>变更监听器</h3>
+<pre><code><span class="an">@SyncToClient</span>(listener = <span class="str">"onEnergyChanged"</span>, notifyUpdate = <span class="kw">true</span>)
+<span class="kw">private int</span> energy;
+
+<span class="kw">private void</span> <span class="typ">onEnergyChanged</span>(<span class="kw">int</span> newValue, <span class="kw">int</span> oldValue) {
+    <span class="typ">LOGGER</span>.info(<span class="str">"Energy: {} -> {}"</span>, oldValue, newValue);
+}</code></pre>
+
+<h3>自定义序列化方法（@Codec）</h3>
+<pre><code><span class="an">@SaveToDisk</span>
+<span class="an">@Codec</span>(writeToData = <span class="str">"customWrite"</span>, readFromData = <span class="str">"customRead"</span>)
+<span class="kw">private</span> <span class="typ">MyType</span> customField;
+
+<span class="kw">private</span> <span class="typ">Data</span> <span class="typ">customWrite</span>(<span class="typ">MyType</span> value) {
+    <span class="kw">return</span> <span class="typ">StringData</span>.valueOf(value.serialize());
+}
+
+<span class="kw">private</span> <span class="typ">MyType</span> <span class="typ">customRead</span>(<span class="typ">Data</span> data, <span class="kw">int</span> version) {
+    <span class="kw">return</span> <span class="typ">MyType</span>.deserialize(data.getString());
+}</code></pre>
+
+<h3>自定义同步数据</h3>
+<pre><code><span class="an">@Override</span>
+<span class="kw">public void</span> <span class="typ">writeCustomSyncData</span>(<span class="typ">FriendlyByteBuf</span> buf, <span class="kw">boolean</span> force) {
+    buf.writeBoolean(someCustomFlag);
+}
+
+<span class="an">@Override</span>
+<span class="kw">public void</span> <span class="typ">readCustomSyncData</span>(<span class="typ">FriendlyByteBuf</span> buf) {
+    <span class="kw">this</span>.someCustomFlag = buf.readBoolean();
+}</code></pre>
+
+<h3>自定义变化检测策略（@Strategy）</h3>
+<pre><code><span class="kw">public static final</span> <span class="typ">Hash.Strategy</span>&lt;<span class="typ">MyType</span>&gt; MY_STRATEGY = <span class="kw">new</span> <span class="typ">Hash.Strategy</span>&lt;&gt;() {
+    <span class="kw">public int</span> <span class="typ">hashCode</span>(<span class="typ">MyType</span> o) { <span class="kw">return</span> o == <span class="kw">null</span> ? <span class="str">0</span> : o.customHash(); }
+    <span class="kw">public boolean</span> <span class="typ">equals</span>(<span class="typ">MyType</span> a, <span class="typ">MyType</span> b) { <span class="kw">return</span> ... }
+};
+
+<span class="an">@SyncToClient</span>
+<span class="an">@Strategy</span>(<span class="str">"MY_STRATEGY"</span>)
+<span class="kw">private</span> <span class="typ">MyType</span> value;</code></pre>
+
+<!-- ===== API ===== -->
+<h2 id="api-codecs">内置 Codec 列表</h2>
+<table>
+    <thead><tr><th>类型</th><th>常量名</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>boolean[]</td><td>BOOLEANS_CODEC</td><td>布尔数组</td></tr>
+        <tr><td>byte[]</td><td>BYTES_CODEC</td><td>字节数组</td></tr>
+        <tr><td>int[]</td><td>INTS_CODEC</td><td>整数数组</td></tr>
+        <tr><td>long[]</td><td>LONGS_CODEC</td><td>长整数数组</td></tr>
+        <tr><td>Boolean</td><td>BOOLEAN_CODEC</td><td>布尔类型</td></tr>
+        <tr><td>Byte</td><td>BYTE_CODEC</td><td>字节类型</td></tr>
+        <tr><td>Short</td><td>SHORT_CODEC</td><td>短整数类型</td></tr>
+        <tr><td>Integer</td><td>INT_CODEC</td><td>整数类型</td></tr>
+        <tr><td>Long</td><td>LONG_CODEC</td><td>长整数类型</td></tr>
+        <tr><td>Float</td><td>FLOAT_CODEC</td><td>单精度浮点数</td></tr>
+        <tr><td>Double</td><td>DOUBLE_CODEC</td><td>双精度浮点数</td></tr>
+        <tr><td>Character</td><td>CHAR_CODEC</td><td>字符类型</td></tr>
+        <tr><td>String</td><td>STRING_CODEC</td><td>字符串</td></tr>
+        <tr><td>UUID</td><td>UUID_CODEC</td><td>通用唯一标识符</td></tr>
+        <tr><td>BigInteger</td><td>BIG_INTEGER_CODEC</td><td>大整数</td></tr>
+        <tr><td>Item</td><td>ITEM_CODEC</td><td>Minecraft 物品注册表项</td></tr>
+        <tr><td>Block</td><td>BLOCK_CODEC</td><td>Minecraft 方块注册表项</td></tr>
+        <tr><td>Fluid</td><td>FLUID_CODEC</td><td>Minecraft 流体注册表项</td></tr>
+        <tr><td>ResourceLocation</td><td>RESOURCE_LOCATION_CODEC</td><td>资源位置</td></tr>
+        <tr><td>BlockPos</td><td>BLOCK_POS_CODEC</td><td>方块坐标</td></tr>
+        <tr><td>CompoundTag</td><td>COMPOUND_TAG_CODEC</td><td>NBT 复合标签</td></tr>
+        <tr><td>ItemStack</td><td>ITEM_STACK_CODEC</td><td>物品堆叠</td></tr>
+        <tr><td>FluidStack</td><td>FLUID_STACK_CODEC</td><td>流体堆叠</td></tr>
+        <tr><td>Component</td><td>COMPONENT_CODEC</td><td>聊天组件</td></tr>
+        <tr><td>BlockState</td><td>BLOCK_STATE_CODEC</td><td>方块状态</td></tr>
+        <tr><td>Data</td><td>DATA_CODEC</td><td>Data 类型系统本身（透传）</td></tr>
+        <tr><td>StringMapData</td><td>MAP_DATA_CODEC</td><td>字符串键映射数据</td></tr>
+        <tr><td>Enum (所有)</td><td>自动生成</td><td>所有枚举类型自动拥有 Codec</td></tr>
+        <tr><td>T[] (非基本类型)</td><td>自动生成</td><td>所有非基本类型数组自动拥有 Codec</td></tr>
+    </tbody>
+</table>
+
+<h2 id="api-field-types">Field 实现列表</h2>
+<table>
+    <thead><tr><th>Field 类</th><th>匹配类型</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>BooleanField</td><td>boolean.class</td><td>布尔字段</td></tr>
+        <tr><td>ByteField</td><td>byte.class</td><td>字节字段</td></tr>
+        <tr><td>CharField</td><td>char.class</td><td>字符字段</td></tr>
+        <tr><td>ShortField</td><td>short.class</td><td>短整数字段</td></tr>
+        <tr><td>IntField</td><td>int.class</td><td>整数字段</td></tr>
+        <tr><td>LongField</td><td>long.class</td><td>长整数字段</td></tr>
+        <tr><td>FloatField</td><td>float.class</td><td>浮点数字段</td></tr>
+        <tr><td>DoubleField</td><td>double.class</td><td>双精度浮点字段</td></tr>
+        <tr><td>ObjCodecField</td><td>有 DataSyncCodec 的对象</td><td>使用 Codec 进行序列化的对象字段</td></tr>
+        <tr><td>CustomObjCodecField</td><td>有泛型 Codec 的对象</td><td>使用泛型 Codec 进行序列化的对象字段</td></tr>
+        <tr><td>ObjField</td><td>Object.class</td><td>通用对象字段（反射读写）</td></tr>
+    </tbody>
+</table>
+
+<h2 id="api-access-types">Access 实现列表</h2>
+<p>Access 实现用于处理 final 字段（集合/Map/自定义类型），在字段值内部进行操作而非替换整个引用：</p>
+<table>
+    <thead><tr><th>Access 类</th><th>匹配类型</th></tr></thead>
+    <tbody>
+        <tr><td>BooleanArrayAccess</td><td>boolean[]</td></tr>
+        <tr><td>ByteArrayAccess</td><td>byte[]</td></tr>
+        <tr><td>IntArrayAccess</td><td>int[]</td></tr>
+        <tr><td>LongArrayAccess</td><td>long[]</td></tr>
+        <tr><td>ArrayAccess&lt;T&gt;</td><td>T[] (非基本类型 + 有 Codec)</td></tr>
+        <tr><td>FieldDataHolderArrayAccess</td><td>IFieldDataHolder[]</td></tr>
+        <tr><td>SerializableArrayAccess</td><td>IDataSerializable[]</td></tr>
+        <tr><td>CollectionAccess</td><td>Collection</td></tr>
+        <tr><td>IntCollectionAccess</td><td>IntCollection (fastutil)</td></tr>
+        <tr><td>LongCollectionAccess</td><td>LongCollection (fastutil)</td></tr>
+        <tr><td>MapAccess</td><td>Map</td></tr>
+        <tr><td>Object2IntMapAccess</td><td>Object2IntMap (fastutil)</td></tr>
+        <tr><td>Object2LongMapAccess</td><td>Object2LongMap (fastutil)</td></tr>
+        <tr><td>Reference2IntMapAccess</td><td>Reference2IntMap (fastutil)</td></tr>
+        <tr><td>Reference2LongMapAccess</td><td>Reference2LongMap (fastutil)</td></tr>
+        <tr><td>SerializableAccess</td><td>IDataSerializable</td></tr>
+        <tr><td>FieldDataHolderAccess</td><td>IFieldDataHolder</td></tr>
+    </tbody>
+</table>
+
+<div class="footer">
+    <p>DataSyncLib v26.7.1 · Minecraft 1.20.1 · Forge 47.4.21 · Java 21 · License: GNU LGPL 3.0</p>
+</div>
+
+</main>
+</body>
+</html>
