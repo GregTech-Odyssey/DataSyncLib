@@ -107,6 +107,7 @@ li { margin: 4px 0; }
             <a href="#architecture">整体架构</a>
             <a href="#sync-workflow">同步与持久化流程</a>
             <a href="#data-flow">数据流</a>
+            <a href="#performance">高性能设计</a>
         </div>
         <div class="nav-section"><div class="nav-section-title">核心接口</div>
             <a href="#ifield-data-holder">IFieldDataHolder</a>
@@ -178,6 +179,10 @@ li { margin: 4px 0; }
     <div class="card"><h4>🧩 开箱即用</h4><p>提供 <code>FieldDataHolderBlockEntity</code> 基类，继承即可获得完整数据同步和持久化能力。</p></div>
     <div class="card"><h4>📦 DataComponent 系统</h4><p>可选的组件化数据模型，通过 <code>DataComponentRegistry</code> + <code>DataComponentMap</code> 实现类型安全的数据组件存取与合并。</p></div>
     <div class="card"><h4>🗂️ Registry 工具</h4><p>泛型注册表工具类，支持 freeze/unfreeze 生命周期、自动 ID 分配、内置序列化 Codec。</p></div>
+    <div class="card"><h4>⚡ MethodHandle 反射</h4><p>全框架使用 <code>MethodHandle</code> + <code>VarHandle</code> 替代传统反射，字段 getter/setter 调用接近原生字节码速度。</p></div>
+    <div class="card"><h4>📊 FastUtil 集合</h4><p>全面采用 FastUtil 高性能集合库：<code>Reference2ReferenceOpenHashMap</code>、<code>ReferenceArrayList</code> 等，避免基本类型装箱开销。</p></div>
+    <div class="card"><h4>🗜️ Data 类型系统</h4><p>19 种类型的二进制 Data 系统替代 NBT/Tag，VarInt 变长编码，比 Tag 更紧凑高效，支持更多 Map/Collection 类型。</p></div>
+    <div class="card"><h4>🧠 多级缓存</h4><p>类级元数据 ConcurrentHashMap 缓存、IdentityHashMapCache、Enum/Array Codec 自动生成缓存，消除重复反射和查找。</p></div>
 </div>
 
 <!-- ===== QUICKSTART ===== -->
@@ -283,6 +288,111 @@ li { margin: 4px 0; }
                                        │ → scheduleUpdate │
                                        └──────────────────┘</code></pre>
 
+<!-- ===== PERFORMANCE ===== -->
+<h2 id="performance">高性能设计</h2>
+<p>DataSyncLib 在每一层都针对性能做了优化，从字段访问到序列化格式再到集合选择，确保在高频 tick 场景下最小化性能开销。</p>
+
+<h3>MethodHandle 替代传统反射</h3>
+<p>框架完全不使用 <code>Field.get()</code> / <code>Field.set()</code> 等传统反射 API。所有字段访问通过 <code>MethodHandle</code> 和 <code>VarHandle</code> 实现：</p>
+<ul>
+    <li><code>ReflectUtil.createAdaptedGetter()</code> — 创建签名为 <code>(Object) → fieldType</code> 的 MethodHandle，通过 <code>invokeExact</code> 调用</li>
+    <li><code>ReflectUtil.createAdaptedSetter()</code> — 创建签名为 <code>(Object, fieldType) → void</code> 的 MethodHandle</li>
+    <li><strong>精确类型匹配</strong> — 所有 MethodHandle 通过 <code>asType()</code> 适配为精确签名，支持 <code>invokeExact</code>（比 <code>invoke</code> 更快）</li>
+    <li><strong>优于传统反射</strong> — MethodHandle 经过 JIT 编译后可内联，性能接近直接字段访问，远超 <code>Field.get/set</code></li>
+    <li><strong>访问权限绕过</strong> — 通过 <code>MethodHandles.privateLookupIn()</code> 获取私有字段的访问权限，无需反复 <code>setAccessible</code></li>
+</ul>
+<div class="note">对比 NBT/Tag 系统：原版 Minecraft 的 Tag 序列化大量使用 <code>Field.get/set</code> 反射。DataSyncLib 在类加载时一次性完成 MethodHandle 解析，运行时字段访问开销极低。</div>
+
+<h3>FastUtil 高性能集合</h3>
+<p>框架全面使用 <a href="https://fastutil.di.unimi.it/">FastUtil</a> 库替代 Java 标准集合：</p>
+<table>
+    <thead><tr><th>FastUtil 类型</th><th>使用场景</th><th>优势</th></tr></thead>
+    <tbody>
+        <tr><td>Reference2ReferenceOpenHashMap</td><td>DataSyncCodec 注册表、FieldDataManager 字段表、FieldDefinitionStorage 策略表</td><td>基于 identityHashCode 的键查找，避免 equals() 碰撞；开放寻址法内存连续</td></tr>
+        <tr><td>ReferenceArrayList</td><td>Registry 的 idValues 列表</td><td>基于 identity 的 ArrayList，避免 equals 调用</td></tr>
+        <tr><td>Reference2ReferenceLinkedOpenHashMap</td><td>Registry.IdMap</td><td>identity 键 + 保留插入顺序</td></tr>
+        <tr><td>Object2IntMap / Object2LongMap</td><td>FieldAccess 代理集合的哈希图</td><td>避免 Integer/Long 装箱，节省内存和 GC 压力</td></tr>
+        <tr><td>IntCollection / LongCollection</td><td>FieldAccess 代理集合</td><td>基本类型集合接口，无装箱开销</td></tr>
+        <tr><td>Int2IntMap / Long2LongMap 等</td><td>DataComponentKey Builder 方法（100+）</td><td>覆盖所有基本类型组合的 Map，零装箱</td></tr>
+    </tbody>
+</table>
+<p>FastUtil 的关键优势：</p>
+<ul>
+    <li><strong>节省内存</strong> — 基本类型专用集合无装箱对象，内存占用降低 3-5 倍</li>
+    <li><strong>减少 GC</strong> — 不产生短生命周期的 Integer/Long 等包装对象</li>
+    <li><strong>更好的缓存局部性</strong> — 开放寻址哈希表中键和值存储在连续数组中，CPU 缓存友好</li>
+    <li><strong>自定义哈希策略</strong> — 支持 <code>Hash.Strategy</code> 接口定制等值和哈希逻辑（如 ItemStack 的忽略 NBT 比较）</li>
+</ul>
+
+<h3>Data 类型系统 vs NBT/Tag</h3>
+<p>DataSyncLib 自定义二进制 Data 类型系统作为持久化格式，而非直接使用 Minecraft 的 NBT/Tag：</p>
+<table>
+    <thead><tr><th>对比维度</th><th>DataSyncLib Data</th><th>Minecraft NBT/Tag</th></tr></thead>
+    <tbody>
+        <tr><td>类型数量</td><td>19 种（含 IntMap、LongMap、DataMap、CustomData）</td><td>13 种</td></tr>
+        <tr><td>编码方式</td><td>VarInt/VarLong 变长编码，小整数最少 1 字节</td><td>固定宽度整数（4/8 字节）</td></tr>
+        <tr><td>Map 支持</td><td>StringMap、IntMap、LongMap、DataMap 四种</td><td>仅 CompoundTag（String→Tag）</td></tr>
+        <tr><td>List 元素类型</td><td>支持混合类型（每个元素携带类型 ID）</td><td>需统一类型</td></tr>
+        <tr><td>null 值</td><td>显式 NullData 类型，区分"null"与"不存在"</td><td>不存在即视为空</td></tr>
+        <tr><td>自定义类型</td><td>CustomData 支持用户注册自定义序列化逻辑</td><td>不支持</td></tr>
+        <tr><td>类型安全 API</td><td>sealed interface + 类型判别方法（toXxxData / asXxxData）</td><td>getId() + instanceof 判断</td></tr>
+        <tr><td>默认值安全</td><td>所有 getter 返回安全默认值（0, "", emptyList 等）</td><td>不存在的 Key 返回 null / 抛异常</td></tr>
+        <tr><td>序列化大小</td><td>VarInt 编号的类型 ID + VarInt 长度前缀，更紧凑</td><td>固定 1 字节类型 ID + 固定宽度长度</td></tr>
+    </tbody>
+</table>
+<div class="note"><strong>VarInt 编码优势：</strong>与 Minecraft 网络协议兼容的 VarInt 编码 —— 小于 128 的值用 1 字节表示，小于 16384 用 2 字节。对于大多数 TileEntity 数据（小整数、短数组），Data 的序列化结果明显小于同等的 NBT CompoundTag。</div>
+
+<h4>Data 支持的全部类型</h4>
+<table>
+    <thead><tr><th>ID</th><th>Data 类</th><th>Java 类型</th><th>用途</th></tr></thead>
+    <tbody>
+        <tr><td>0</td><td>NullData</td><td>null</td><td>显式 null 值标记</td></tr>
+        <tr><td>1</td><td>ByteData</td><td>boolean</td><td>布尔值（0/1）</td></tr>
+        <tr><td>2</td><td>ByteData</td><td>byte</td><td>单字节</td></tr>
+        <tr><td>3</td><td>ShortData</td><td>short</td><td>短整数</td></tr>
+        <tr><td>4</td><td>CharData</td><td>char</td><td>字符</td></tr>
+        <tr><td>5</td><td>IntData</td><td>int</td><td>整数（最常用）</td></tr>
+        <tr><td>6</td><td>LongData</td><td>long</td><td>长整数</td></tr>
+        <tr><td>7</td><td>FloatData</td><td>float</td><td>单精度浮点</td></tr>
+        <tr><td>8</td><td>DoubleData</td><td>double</td><td>双精度浮点</td></tr>
+        <tr><td>9</td><td>ByteArrayData</td><td>byte[]</td><td>字节数组（含 boolean[]）</td></tr>
+        <tr><td>10</td><td>IntArrayData</td><td>int[]</td><td>整数数组（含 short[], char[], float[]）</td></tr>
+        <tr><td>11</td><td>LongArrayData</td><td>long[]</td><td>长整数数组（含 double[]）</td></tr>
+        <tr><td>12</td><td>StringData</td><td>String</td><td>UTF-8 字符串</td></tr>
+        <tr><td>13</td><td>ListData</td><td>List&lt;Data&gt;</td><td>混合类型有序列表</td></tr>
+        <tr><td>14</td><td>StringMapData</td><td>Map&lt;String, Data&gt;</td><td>字符串键映射（最常用复合类型）</td></tr>
+        <tr><td>15</td><td>CustomData</td><td>用户自定义</td><td>可扩展的自定义类型</td></tr>
+        <tr><td>16</td><td>DataMapData</td><td>Map&lt;Data, Data&gt;</td><td>Data-键映射</td></tr>
+        <tr><td>17</td><td>IntMapData</td><td>Int2ObjectMap&lt;Data&gt;</td><td>整数键映射（FastUtil 实现）</td></tr>
+        <tr><td>18</td><td>LongMapData</td><td>Long2ObjectMap&lt;Data&gt;</td><td>长整数键映射（FastUtil 实现）</td></tr>
+    </tbody>
+</table>
+
+<h3>多级缓存体系</h3>
+<p>框架在多个层级实现了缓存，避免重复的反射扫描和 Codec 查找：</p>
+<table>
+    <thead><tr><th>缓存层</th><th>实现</th><th>缓存内容</th></tr></thead>
+    <tbody>
+        <tr><td>类级元数据</td><td>ConcurrentHashMap&lt;Class, FieldDefinitionStorage&gt;</td><td>每个类的所有被注解字段定义（含父类继承），首次访问后永久缓存</td></tr>
+        <tr><td>字段工厂</td><td>IdentityHashMapCache&lt;Class, Factory&gt;</td><td>类型到 DataField 工厂的映射，基于 identity 键</td></tr>
+        <tr><td>泛型工厂</td><td>HashMapCache&lt;Supplier, Factory&gt;</td><td>泛型类型参数到工厂的映射</td></tr>
+        <tr><td>Codec 注册表</td><td>Reference2ReferenceOpenHashMap</td><td>类型到 DataSyncCodec 的直接映射，O(1) identity 查找</td></tr>
+        <tr><td>枚举 Codec</td><td>ConcurrentHashMapCache</td><td>首次访问枚举类型时自动生成并缓存 Codec</td></tr>
+        <tr><td>数组 Codec</td><td>ConcurrentHashMapCache</td><td>首次访问数组类型时自动生成并缓存 Codec</td></tr>
+        <tr><td>MethodHandle</td><td>DataFieldDefinition 字段级</td><td>getter/setter/condition/listener 的 MethodHandle 在构造时一次性解析</td></tr>
+    </tbody>
+</table>
+
+<h3>其他性能优化</h3>
+<ul>
+    <li><strong>双检锁延迟初始化</strong> — <code>LazyFieldDataManager</code> 使用 double-checked locking，FieldDataManager 仅在首次使用时创建</li>
+    <li><strong>volatile 重入保护</strong> — <code>FieldDataManager.updating</code> 和 <code>writing</code> 标志用 volatile 实现无锁重入保护</li>
+    <li><strong>直接数组访问</strong> — <code>AbstractDataComponentMap</code> 直接操作 FastUtil 内部 <code>key[]</code> 和 <code>value[]</code> 数组，绕过标准 Map API 的方法调用开销</li>
+    <li><strong>VarInt 索引寻址</strong> — 网络协议使用 VarInt 字段索引（而非字段名字符串），减少传输字节数</li>
+    <li><strong>增量同步</strong> — dirty flag 机制确保仅传输变化的字段，空闲时零网络开销</li>
+    <li><strong>预排序字段数组</strong> — <code>FieldDataManager</code> 内部维护 <code>syncToClientFields[]</code> 等预排序数组，避免每次同步时遍历所有字段</li>
+</ul>
+
 <!-- ===== IFieldDataHolder ===== -->
 <h2 id="ifield-data-holder">IFieldDataHolder 接口</h2>
 <p><code>IFieldDataHolder</code> 是所有被管理数据持有者的核心接口。实现此接口的对象可以由 <code>FieldDataManager</code> 管理其被注解的字段。</p>
@@ -342,12 +452,12 @@ li { margin: 4px 0; }
 <p><code>DataFieldDefinition&lt;T&gt;</code> 封装单个被管理字段的完整元数据和行为。由 <code>FieldDefinitionStorage</code> 在类扫描时创建，包含：</p>
 <ul>
     <li><strong>反射信息</strong> — Field、isFinal、genericType[]、genericCodecs[]</li>
-    <li><strong>访问器</strong> — 通过 MethodHandle 实现高性能 getter/setter（覆盖所有基本类型 + Object）</li>
-    <li><strong>序列化代理</strong> — 支持 Codec 注解指定的自定义序列化方法，或自动从 DataSyncCodec 查找</li>
-    <li><strong>条件判断</strong> — skipSync() / skipSave() 系列方法，支持所有基本类型的条件方法分派</li>
-    <li><strong>变化策略</strong> — Hash.Strategy 用于变化检测，默认 OBJECT_STRATEGY（hashCode/equals）</li>
-    <li><strong>默认值</strong> — 支持 defaultValue 字符串解析和 defaultValueGetter 方法引用</li>
-    <li><strong>监听器</strong> — getListener(side) 返回字段更新时的回调 MethodHandle</li>
+    <li><strong>访问器</strong> — 通过 <code>MethodHandle.invokeExact()</code> 实现高性能 getter/setter（覆盖所有基本类型 + Object），构造时一次性解析，运行时接近原生字段访问速度</li>
+    <li><strong>序列化代理</strong> — 支持 Codec 注解指定的自定义序列化方法（也通过 MethodHandle 调用），或自动从 DataSyncCodec 查找</li>
+    <li><strong>条件判断</strong> — skipSync() / skipSave() 系列方法，通过 MethodHandle 调用，支持所有基本类型的方法分派</li>
+    <li><strong>变化策略</strong> — FastUtil <code>Hash.Strategy</code> 用于变化检测，默认 OBJECT_STRATEGY（hashCode/equals）</li>
+    <li><strong>默认值</strong> — 支持 defaultValue 字符串解析和 defaultValueGetter MethodHandle 引用</li>
+    <li><strong>监听器</strong> — getListener(side) 返回字段更新时的回调 MethodHandle，通过 invokeExact 调用</li>
 </ul>
 
 <!-- ===== FieldDataManager ===== -->
@@ -448,10 +558,11 @@ li { margin: 4px 0; }
 </table>
 <p>特性：</p>
 <ul>
+    <li><strong>FastUtil 注册表</strong> — 内部使用 <code>Reference2ReferenceOpenHashMap</code> 存储类型到 Codec 的映射，基于 identity 键的 O(1) 查找</li>
     <li><strong>多来源构造</strong> — of(streamCodec) / of(dataCodec) / of(streamCodec, dataCodec) / of(streamCodec, mojangCodec)</li>
-    <li><strong>枚举自动生成</strong> — 所有 enum 类型首次访问时自动生成 Codec。支持固定序数枚举和序列化名枚举</li>
-    <li><strong>数组自动生成</strong> — 所有非基本类型数组首次访问时自动生成 Codec</li>
-    <li><strong>泛型支持</strong> — register() 可接受 Class&lt;?&gt;... genericTypes 参数用于泛型类型注册</li>
+    <li><strong>枚举自动生成</strong> — 所有 enum 类型首次访问时通过 ConcurrentHashMapCache 自动生成并缓存 Codec</li>
+    <li><strong>数组自动生成</strong> — 所有非基本类型数组首次访问时通过 ConcurrentHashMapCache 自动生成并缓存 Codec</li>
+    <li><strong>泛型支持</strong> — register() 可接受 Class&lt;?&gt;... genericTypes 参数，内部用 identityHashCode 包装数组作为缓存键</li>
     <li><strong>Minecraft 集成</strong> — 提供 register(type, Registry) 便捷方法，自动从 Minecraft 注册表创建 Codec</li>
 </ul>
 
@@ -504,7 +615,13 @@ map.merge(otherMap);                           <span class="cmt">// 批量合并
 <p>还提供了 <code>getBoolean</code>、<code>getLong</code>、<code>getString</code> 等类型便捷方法，Key 不存在时返回安全默认值。</p>
 
 <h3>AbstractDataComponentMap</h3>
-<p>自定义 identity-based 哈希表基类，重写 <code>Reference2ObjectOpenHashMap</code> 的 get/put/containsKey 以使用 <code>DataComponentKey.mixCode</code> 和 <code>==</code> 恒等比较。直接访问 FastUtil 内部字段（key[]、value[]、mask）以获得最大性能。</p>
+<p>自定义 identity-based 哈希表基类，重写 <code>Reference2ObjectOpenHashMap</code> 的 get/put/containsKey 以使用 <code>DataComponentKey.mixCode</code>（基于 <code>System.identityHashCode</code> 混合后的哈希值）和 <code>==</code> 恒等比较。关键性能特征：</p>
+<ul>
+    <li><strong>恒等键查找</strong> — 不同 Registry 中同名 Key 具有不同 identity，避免命名冲突和 equals 开销</li>
+    <li><strong>直接内部数组访问</strong> — 绕过 FastUtil 标准 API，直接操作 <code>key[]</code> 和 <code>value[]</code> 内部数组，消除方法调用开销</li>
+    <li><strong>预计算 mixCode</strong> — <code>DataComponentKey</code> 在构造时通过 <code>HashCommon.mix(System.identityHashCode(this))</code> 预计算哈希值，查找时无需重复计算</li>
+    <li><strong>开放寻址法</strong> — 线性探测解决哈希冲突，内存连续且 CPU 缓存友好</li>
+</ul>
 
 <!-- ===== Registry ===== -->
 <h2 id="registry">Registry 工具类</h2>

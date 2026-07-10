@@ -17,6 +17,8 @@ DataSyncLib 是专为 Minecraft 模组开发设计的数据同步框架。通过
 - **📢 变更通知** — Listener 回调 + NotifiableHolder 系统
 - **📦 DataComponent 系统** — 组件化数据模型，`DataComponentRegistry` + `DataComponentMap`
 - **🗂️ Registry 工具** — 泛型注册表，支持 freeze/unfreeze 生命周期和内置序列化
+- **⚡ 高性能** — MethodHandle 替代反射、FastUtil 集合、多级缓存、VarInt 紧凑编码
+- **🗜️ Data 类型系统** — 19 种类型的二进制 Data 系统，比 Tag 更紧凑高效
 - **🧩 开箱即用** — 继承 `FieldDataHolderBlockEntity` 即可获得完整能力
 
 ## 快速开始
@@ -50,8 +52,8 @@ public class MyBlockEntity extends FieldDataHolderBlockEntity {
 👉 **[完整文档 (HTML)](docs/index.html)**
 
 文档涵盖：架构设计、同步与持久化流程、数据流、所有核心接口详解、注解完整参考、
-DataComponent 系统、Registry 工具类、使用指南（BlockEntity / Entity / 普通类 / 嵌套 Holder）、
-高级特性、完整 API 参考。
+DataComponent 系统、Registry 工具类、高性能设计（MethodHandle / FastUtil / Data 类型系统 / 多级缓存）、
+使用指南（BlockEntity / Entity / 普通类 / 嵌套 Holder）、高级特性、完整 API 参考。
 
 ## 技术栈
 
