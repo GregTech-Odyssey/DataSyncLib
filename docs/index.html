@@ -301,7 +301,6 @@ li { margin: 4px 0; }
     <li><strong>优于传统反射</strong> — MethodHandle 经过 JIT 编译后可内联，性能接近直接字段访问，远超 <code>Field.get/set</code></li>
     <li><strong>访问权限绕过</strong> — 通过 <code>MethodHandles.privateLookupIn()</code> 获取私有字段的访问权限，无需反复 <code>setAccessible</code></li>
 </ul>
-<div class="note">对比 NBT/Tag 系统：原版 Minecraft 的 Tag 序列化大量使用 <code>Field.get/set</code> 反射。DataSyncLib 在类加载时一次性完成 MethodHandle 解析，运行时字段访问开销极低。</div>
 
 <h3>FastUtil 高性能集合</h3>
 <p>框架全面使用 <a href="https://fastutil.di.unimi.it/">FastUtil</a> 库替代 Java 标准集合：</p>

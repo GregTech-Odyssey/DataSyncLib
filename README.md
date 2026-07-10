@@ -1,27 +1,28 @@
 # DataSyncLib
 
-**Minecraft 数据同步库** — 基于注解的自动化数据同步与持久化框架。
+**Minecraft Data Synchronization Library** — Annotation-driven automatic data sync and persistence framework.
 
-## 简介
+## Introduction
 
-DataSyncLib 是专为 Minecraft 模组开发设计的数据同步框架。通过声明式注解
-（`@SyncToClient`、`@SyncToServer`、`@SaveToDisk`），自动处理客户端与服务端之间的
-字段同步、变更检测与磁盘持久化，大幅减少样板代码。
+DataSyncLib is a data synchronization framework built for Minecraft Forge mod development.
+Using declarative annotations (`@SyncToClient`, `@SyncToServer`, `@SaveToDisk`), it automatically
+handles client-server field synchronization, change detection, and disk persistence — drastically
+reducing boilerplate code.
 
-## 核心特性
+## Key Features
 
-- **🔁 双向同步** — `@SyncToClient` 和 `@SyncToServer` 自动处理服务端↔客户端字段同步，支持异步调用
-- **💾 自动持久化** — `@SaveToDisk` 自动将字段写入/读取 NBT 数据
-- **📡 增量同步** — 内置 dirty flag 机制，仅传输变化的字段
-- **🔧 可扩展 Codec** — 统一的 `DataSyncCodec` 注册表，预置 30+ 常用类型
-- **📢 变更通知** — Listener 回调 + NotifiableHolder 系统
-- **📦 DataComponent 系统** — 组件化数据模型，`DataComponentRegistry` + `DataComponentMap`
-- **🗂️ Registry 工具** — 泛型注册表，支持 freeze/unfreeze 生命周期和内置序列化
-- **⚡ 高性能** — MethodHandle 替代反射、FastUtil 集合、多级缓存、VarInt 紧凑编码
-- **🗜️ Data 类型系统** — 19 种类型的二进制 Data 系统，比 Tag 更紧凑高效
-- **🧩 开箱即用** — 继承 `FieldDataHolderBlockEntity` 即可获得完整能力
+- **🔁 Bidirectional Sync** — `@SyncToClient` and `@SyncToServer` handle server↔client field sync automatically. Async-safe.
+- **💾 Auto Persistence** — `@SaveToDisk` fields are automatically written to/read from NBT data.
+- **📡 Incremental Sync** — Built-in dirty flag mechanism transmits only changed fields.
+- **🔧 Extensible Codec** — Unified `DataSyncCodec` registry with 30+ pre-registered types.
+- **📢 Change Notification** — Listener callbacks + NotifiableHolder system.
+- **📦 DataComponent System** — Component-based data model via `DataComponentRegistry` + `DataComponentMap`.
+- **🗂️ Registry Utility** — Generic registry with freeze/unfreeze lifecycle and built-in serialization.
+- **⚡ High Performance** — MethodHandle instead of reflection, FastUtil collections, multi-level caching, VarInt compact encoding.
+- **🗜️ Data Type System** — Custom 19-type binary Data system, more compact and efficient than Tag.
+- **🧩 Ready to Use** — Extend `FieldDataHolderBlockEntity` to get full capabilities out of the box.
 
-## 快速开始
+## Quick Start
 
 ```java
 public class MyBlockEntity extends FieldDataHolderBlockEntity {
@@ -36,33 +37,33 @@ public class MyBlockEntity extends FieldDataHolderBlockEntity {
 
     public void serverTick(ServerLevel level) {
         energy++;
-        setChanged();  // 标记需要保存到磁盘
-        DataSyncNetwork.syncBlockEntityToClient(this, false, true);  // 异步安全
+        setChanged();  // Mark chunk for saving to disk
+        DataSyncNetwork.syncBlockEntityToClient(this, false, true);  // Async-safe
     }
 }
 ```
 
-> **关键：** 同步需主动调用 `DataSyncNetwork.syncBlockEntityToClient()`（支持异步），
-> `markFieldsForSync` 用于 `autoUpdate = false` 的字段。
-> 持久化需手动调用 `setChanged()`。
-> 完整示例参考 `TestBlockEntity` 类。
+> **Key points:** Sync requires explicit calls to `DataSyncNetwork.syncBlockEntityToClient()` (async-safe).
+> `markFieldsForSync` is for `autoUpdate = false` fields.
+> Persistence requires manual `setChanged()` calls.
+> See `TestBlockEntity` for a complete example.
 
-## 文档
+## Documentation
 
-👉 **[完整文档 (HTML)](docs/index.html)**
+👉 **[Full Documentation - English (HTML)](docs/index_en.html)** | 👉 **[完整文档 - 中文 (HTML)](docs/index.html)**
 
-文档涵盖：架构设计、同步与持久化流程、数据流、所有核心接口详解、注解完整参考、
-DataComponent 系统、Registry 工具类、高性能设计（MethodHandle / FastUtil / Data 类型系统 / 多级缓存）、
-使用指南（BlockEntity / Entity / 普通类 / 嵌套 Holder）、高级特性、完整 API 参考。
+Covers: architecture design, sync & persistence flow, data flow, all core interfaces, complete annotation reference,
+DataComponent system, Registry utility, performance design (MethodHandle / FastUtil / Data type system / multi-level caching),
+usage guide (BlockEntity / Entity / plain class / nested holders), advanced features, full API reference.
 
-## 技术栈
+## Tech Stack
 
-| 组件 | 版本 |
-|------|------|
+| Component | Version |
+|-----------|---------|
 | Minecraft | 1.20.1 |
-| Forge | 47.4.21 |
-| Java | 21 |
+| Forge    | 47.4.21 |
+| Java     | 21      |
 
-## 许可证
+## License
 
 GNU LGPL 3.0
