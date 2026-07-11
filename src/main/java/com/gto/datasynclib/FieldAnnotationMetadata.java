@@ -57,8 +57,10 @@ final class FieldAnnotationMetadata {
 
     FieldAnnotationMetadata(Class<?> clazz, Field field, SaveToDisk saveToDisk, SyncToClient syncToClient, SyncToServer syncToServer) {
         var type = field.getType();
-        this.generic = field.getAnnotation(Generic.class) != null;
-        this.access = field.getAnnotation(Access.class) != null;
+        var access = field.getAnnotation(Access.class);
+        var generic = field.getAnnotation(Generic.class);
+        this.generic = generic != null;
+        this.access = access != null;
         this.saveToDisk = saveToDisk;
         this.syncToClient = syncToClient;
         this.syncToServer = syncToServer;
@@ -69,7 +71,7 @@ final class FieldAnnotationMetadata {
         this.notifyServerUpdate = syncToServer != null && syncToServer.notifyUpdate();
         this.autoSyncToClient = syncToClient != null && syncToClient.autoUpdate();
         this.autoSyncToServer = syncToServer != null && syncToServer.autoUpdate();
-        this.createAccessInstance = access && field.getAnnotation(Access.class).createInstance();
+        this.createAccessInstance = this.access && access.createInstance();
 
         if (saveToDisk != null && !saveToDisk.defaultValueGetter().isEmpty()) {
             var method = ReflectUtil.getAccessibleMethod(clazz, saveToDisk.defaultValueGetter());

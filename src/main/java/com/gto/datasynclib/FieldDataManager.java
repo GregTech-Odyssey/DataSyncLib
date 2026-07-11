@@ -6,6 +6,7 @@ import com.gto.datasynclib.datastream.data.StringMapData;
 import com.gto.datasynclib.util.ReflectUtil;
 import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
+import lombok.Getter;
 import net.minecraft.network.FriendlyByteBuf;
 import org.apache.commons.lang3.ArrayUtils;
 import org.jetbrains.annotations.NotNull;
@@ -51,6 +52,7 @@ public final class FieldDataManager {
     private final DataField<?>[] syncToClientFields;
     private final DataField<?>[] syncToServerFields;
     private final DataField<?>[] saveFields;
+    @Getter
     private boolean changed;
     private volatile boolean updating;
     private volatile boolean writing;
@@ -144,10 +146,6 @@ public final class FieldDataManager {
 
     public void clearChanged() {
         changed = false;
-    }
-
-    public boolean isChanged() {
-        return changed;
     }
 
     /**

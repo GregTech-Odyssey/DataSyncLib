@@ -8,7 +8,7 @@ import static it.unimi.dsi.fastutil.HashCommon.arraySize;
 /**
  * The concrete data component map used for both network sync and disk persistence data transfer.
  *
- * <p>Extends {@link AbstractDataComponentMap} with typed accessor methods that understand
+ * <p>Extends {@link DataKey2ObjectMap} with typed accessor methods that understand
  * {@link DataComponentKey} semantics. Key features beyond a standard Map:
  * <ul>
  *   <li>{@link #getData(DataComponentKey)} / {@link #getOrDefaultData(DataComponentKey, Object)} —
@@ -23,10 +23,10 @@ import static it.unimi.dsi.fastutil.HashCommon.arraySize;
  * <p>Also provides typed convenience accessors ({@code getBoolean}, {@code getInt}, etc.) that return
  * safe defaults (0, 0.0, false, "") when a key is not present.
  *
- * @see AbstractDataComponentMap
+ * @see DataKey2ObjectMap
  * @see DataComponentKey
  */
-public final class DataComponentMap extends AbstractDataComponentMap<DataComponentKey<?>, Object> {
+public final class DataComponentMap extends DataKey2ObjectMap<DataComponentKey<?>, Object> {
 
     public DataComponentMap() {
         super(2, 0.75F);
@@ -55,14 +55,15 @@ public final class DataComponentMap extends AbstractDataComponentMap<DataCompone
 
     public <T> T getData(DataComponentKey<T> dataKey) {
         final Object[] key = this.key;
+        final int mask = this.mask;
         Object curr;
         int pos;
-        if ((curr = key[pos = dataKey.mixCode & this.mask]) == null) {
+        if ((curr = key[pos = dataKey.mixCode & mask]) == null) {
             return null;
         } else if (dataKey == curr) {
             return (T) this.value[pos];
         } else {
-            while ((curr = key[pos = pos + 1 & this.mask]) != null) {
+            while ((curr = key[pos = pos + 1 & mask]) != null) {
                 if (dataKey == curr) {
                     return (T) this.value[pos];
                 }
@@ -73,14 +74,15 @@ public final class DataComponentMap extends AbstractDataComponentMap<DataCompone
 
     public <T> T getOrDefaultData(DataComponentKey<T> dataKey, T defaultValue) {
         final Object[] key = this.key;
+        final int mask = this.mask;
         Object curr;
         int pos;
-        if ((curr = key[pos = dataKey.mixCode & this.mask]) == null) {
+        if ((curr = key[pos = dataKey.mixCode & mask]) == null) {
             return defaultValue;
         } else if (dataKey == curr) {
             return (T) this.value[pos];
         } else {
-            while ((curr = key[pos = pos + 1 & this.mask]) != null) {
+            while ((curr = key[pos = pos + 1 & mask]) != null) {
                 if (dataKey == curr) {
                     return (T) this.value[pos];
                 }
@@ -91,6 +93,7 @@ public final class DataComponentMap extends AbstractDataComponentMap<DataCompone
 
     public <T> T getOrCreateData(DataComponentKey<T> dataKey, Supplier<T> creator) {
         final Object[] key = this.key;
+        final int mask = this.mask;
         int pos;
         Object curr;
         if ((curr = key[pos = dataKey.mixCode & mask]) != null) {
@@ -112,6 +115,7 @@ public final class DataComponentMap extends AbstractDataComponentMap<DataCompone
 
     public <T> T getOrPut(DataComponentKey<T> dataKey, T data) {
         final Object[] key = this.key;
+        final int mask = this.mask;
         int pos;
         Object curr;
         if ((curr = key[pos = dataKey.mixCode & mask]) != null) {
@@ -136,6 +140,7 @@ public final class DataComponentMap extends AbstractDataComponentMap<DataCompone
 
     public Object merge(DataComponentKey<?> dataKey, Object v) {
         final Object[] key = this.key;
+        final int mask = this.mask;
         int pos;
         Object curr;
         if ((curr = key[pos = dataKey.mixCode & mask]) != null) {
@@ -162,14 +167,15 @@ public final class DataComponentMap extends AbstractDataComponentMap<DataCompone
 
     public boolean containsKey(DataComponentKey<?> dataKey) {
         final Object[] key = this.key;
+        final int mask = this.mask;
         Object curr;
         int pos;
-        if ((curr = key[pos = dataKey.mixCode & this.mask]) == null) {
+        if ((curr = key[pos = dataKey.mixCode & mask]) == null) {
             return false;
         } else if (dataKey == curr) {
             return true;
         } else {
-            while ((curr = key[pos = pos + 1 & this.mask]) != null) {
+            while ((curr = key[pos = pos + 1 & mask]) != null) {
                 if (dataKey == curr) {
                     return true;
                 }

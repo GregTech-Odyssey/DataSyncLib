@@ -23,7 +23,7 @@ import java.util.function.Function;
  *
  * <h3>Identity-based hashing</h3>
  * The {@link #mixCode} field is computed once from {@code System.identityHashCode(this)} mixed via
- * {@link HashCommon#mix}. This enables identity-based key lookup in {@link AbstractDataComponentMap},
+ * {@link HashCommon#mix}. This enables identity-based key lookup in {@link DataKey2ObjectMap},
  * ensuring that keys with the same name but from different registries are treated as distinct.
  *
  * <h3>Merge and Create Functions</h3>

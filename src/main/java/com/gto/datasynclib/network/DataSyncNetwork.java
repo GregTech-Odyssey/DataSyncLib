@@ -144,8 +144,6 @@ public class DataSyncNetwork {
         }
     }
 
-    // ==================== Block Entity Send Methods ====================
-
     /**
      * Syncs a block entity's {@code @SyncToClient} fields to players tracking its chunk.
      * <p>
@@ -182,8 +180,6 @@ public class DataSyncNetwork {
         }
     }
 
-    // ==================== Entity Send Methods ====================
-
     /**
      * Syncs an entity's {@code @SyncToClient} fields to players tracking it.
      * <p>
@@ -218,5 +214,87 @@ public class DataSyncNetwork {
             var packet = new EntitySyncPacket(entity.getId(), data);
             Minecraft.getInstance().execute(() -> CHANNEL.sendToServer(packet));
         }
+    }
+
+
+    /**
+     * Syncs a block entity's {@code @SyncToClient} fields to players tracking its chunk.
+     * <p>
+     * Call from the <strong>server</strong> side.
+     * Support async calls.
+     */
+    public void syncBlockEntityToClient(@NotNull BlockEntity be, boolean all) {
+        syncBlockEntityToClient(be,all,true);
+    }
+
+    /**
+     * Syncs a block entity's {@code @SyncToServer} fields to the server.
+     * <p>
+     * Call from the <strong>client</strong> side.
+     * Support async calls.
+     */
+    public void syncBlockEntityToServer(@NotNull BlockEntity be, boolean all) {
+        syncBlockEntityToServer(be,all,true);
+    }
+
+    /**
+     * Syncs an entity's {@code @SyncToClient} fields to players tracking it.
+     * <p>
+     * Call from the <strong>server</strong> side.
+     * Support async calls.
+     */
+    public void syncEntityToClient(@NotNull Entity entity, boolean all) {
+        syncEntityToClient(entity,all,true);
+    }
+
+    /**
+     * Syncs an entity's {@code @SyncToServer} fields to the server.
+     * <p>
+     * Call from the <strong>client</strong> side.
+     * Support async calls.
+     */
+    public void syncEntityToServer(@NotNull Entity entity, boolean all) {
+        syncEntityToServer(entity,all,true);
+    }
+
+
+    /**
+     * Syncs a block entity's {@code @SyncToClient} fields to players tracking its chunk.
+     * <p>
+     * Call from the <strong>server</strong> side.
+     * Support async calls.
+     */
+    public void syncBlockEntityToClient(@NotNull BlockEntity be) {
+        syncBlockEntityToClient(be,false,true);
+    }
+
+    /**
+     * Syncs a block entity's {@code @SyncToServer} fields to the server.
+     * <p>
+     * Call from the <strong>client</strong> side.
+     * Support async calls.
+     */
+    public void syncBlockEntityToServer(@NotNull BlockEntity be) {
+        syncBlockEntityToServer(be,false,true);
+    }
+
+    /**
+     * Syncs an entity's {@code @SyncToClient} fields to players tracking it.
+     * <p>
+     * Call from the <strong>server</strong> side.
+     * Support async calls.
+     */
+    public void syncEntityToClient(@NotNull Entity entity) {
+        syncEntityToClient(entity,false,true);
+    }
+
+    /**
+     * Syncs an entity's {@code @SyncToServer} fields to the server.
+     * <p>
+     * Call from the <strong>client</strong> side.
+     * Support async calls.
+     */
+    public void syncEntityToServer(@NotNull Entity entity) {
+        syncEntityToServer(entity,false,true);
     }
 }
