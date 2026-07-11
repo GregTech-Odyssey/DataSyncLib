@@ -12,6 +12,7 @@ import com.gto.datasynclib.test.ModItems;
 import com.gto.datasynclib.util.EnumUtil;
 import com.gto.datasynclib.util.FluidStackHashStrategy;
 import com.gto.datasynclib.util.ItemStackHashStrategy;
+import com.gto.datasynclib.util.NbtUtil;
 import it.unimi.dsi.fastutil.ints.IntCollection;
 import it.unimi.dsi.fastutil.longs.LongCollection;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
@@ -92,6 +93,7 @@ public final class DataSyncLib {
 
         EnumUtil.addFixedEnum(LogicalSide.class);
         EnumUtil.addFixedEnum(Direction.class);
+        NbtUtil.init();
 
         if (FMLLoader.isProduction()) return;
         // Register test blocks and block entities

@@ -576,6 +576,11 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
         return this instanceof LongMapData longMapData ? longMapData : null;
     }
 
+    @Nullable
+    default <T> CustomData<T> toCustomData(CustomData.Type<T> type) {
+        return null;
+    }
+
     default ListData asListData() {
         return (ListData) this;
     }
@@ -594,5 +599,9 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
 
     default LongMapData asLongMapData() {
         return (LongMapData) this;
+    }
+
+    default <T> CustomData<T> asCustomData() {
+        return (CustomData<T>) this;
     }
 }

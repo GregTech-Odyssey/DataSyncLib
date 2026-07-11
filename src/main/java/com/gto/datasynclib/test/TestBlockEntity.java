@@ -8,12 +8,12 @@ import com.gto.datasynclib.annotations.SaveToDisk;
 import com.gto.datasynclib.annotations.SyncToClient;
 import com.gto.datasynclib.annotations.SyncToServer;
 import com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity;
-import com.gto.datasynclib.datastream.data.StringMapData;
 import com.gto.datasynclib.listener.ObjNotifiableHolder;
 import com.gto.datasynclib.network.DataSyncNetwork;
 import lombok.Getter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -24,7 +24,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.*;
 
- class TestBlockEntity extends FieldDataHolderBlockEntity {
+class TestBlockEntity extends FieldDataHolderBlockEntity {
 
     protected boolean isDirty;
     @SaveToDisk
@@ -56,7 +56,8 @@ import java.util.*;
     private final ObjNotifiableHolder<String> objectHolder = ObjNotifiableHolder.create(DataSyncCodec.STRING_CODEC);
 
     @SyncToClient
-    private final StringMapData mapData = new StringMapData();
+    @SaveToDisk
+    private CompoundTag tagData = new CompoundTag();
 
     public TestBlockEntity(BlockPos worldPosition, BlockState blockState) {
         super(ModBlockEntities.TEST_BLOCK_ENTITY.get(), worldPosition, blockState);
@@ -86,7 +87,7 @@ import java.util.*;
             isDirty = true;
             ++b.a;
             b.c.value = b.a + "";
-            mapData.putInt("aaa", mapData.getInt("aaa") + 1);
+            tagData.putInt("aaa", tagData.getInt("aaa") + 1);
             DataSyncNetwork.syncBlockEntityToClient(this, false, true);
         }
     }
@@ -95,7 +96,7 @@ import java.util.*;
         if (level.getGameTime() % 20 == 0) {
             getFieldDataManager().markFieldsForSync("objectHolder");
             DataSyncNetwork.syncBlockEntityToServer(this, false, true);
-            DataSyncLib.LOGGER.info("mapData: {}", mapData);
+            DataSyncLib.LOGGER.info("tagData: {}", tagData);
         }
     }
 
@@ -121,7 +122,7 @@ import java.util.*;
         private int a;
 
         @SaveToDisk
-        private final Item b = Items.IRON_INGOT;
+        private Item b = Items.IRON_INGOT;
 
         @SyncToClient
         private final ObjNotifiableHolder<String> c = ObjNotifiableHolder.create(DataSyncCodec.STRING_CODEC);
@@ -129,6 +130,7 @@ import java.util.*;
         public B() {
             c.setReceiverListener((s, n, o) -> {
                 DataSyncLib.LOGGER.info("D changed: {} {} {}", s, n, o);
+                b = Items.COPPER_INGOT;
             });
         }
 

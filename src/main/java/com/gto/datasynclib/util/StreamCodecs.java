@@ -5,6 +5,8 @@ import lombok.experimental.UtilityClass;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Registry;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -32,20 +34,55 @@ public class StreamCodecs {
         ByteStreamCodec.registerCodec(BlockPos.class, BLOCK_POS_CODEC);
     }
 
+    public static final ByteStreamCodec<Tag> TAG_CODEC = new ByteStreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf stream, Tag obj) {
+            stream.writeByte(obj.getId());
+            NbtUtil.write(obj, stream);
+        }
+
+        @Override
+        public Tag decode(FriendlyByteBuf stream) {
+            return NbtUtil.read(stream.readByte(), stream);
+        }
+
+        static {
+            ByteStreamCodec.registerCodec(Tag.class, TAG_CODEC);
+        }
+    };
+
     public static final ByteStreamCodec<CompoundTag> COMPOUND_TAG_CODEC = new ByteStreamCodec<>() {
 
         @Override
         public void encode(FriendlyByteBuf stream, CompoundTag obj) {
-            stream.writeNbt(obj);
+            NbtUtil.write(obj, stream);
         }
 
         @Override
         public CompoundTag decode(FriendlyByteBuf stream) {
-            return stream.readNbt();
+            return (CompoundTag) NbtUtil.read(Tag.TAG_COMPOUND, stream);
         }
 
         static {
             ByteStreamCodec.registerCodec(CompoundTag.class, COMPOUND_TAG_CODEC);
+        }
+    };
+
+    public static final ByteStreamCodec<ListTag> LIST_TAG_CODEC = new ByteStreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf stream, ListTag obj) {
+            NbtUtil.write(obj, stream);
+        }
+
+        @Override
+        public ListTag decode(FriendlyByteBuf stream) {
+            return (ListTag) NbtUtil.read(Tag.TAG_LIST, stream);
+        }
+
+        static {
+            ByteStreamCodec.registerCodec(ListTag.class, LIST_TAG_CODEC);
         }
     };
 

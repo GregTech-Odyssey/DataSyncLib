@@ -10,7 +10,7 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 
 
- class TestBlock extends Block implements EntityBlock {
+class TestBlock extends Block implements EntityBlock {
 
     public TestBlock(Properties properties) {
         super(properties);
