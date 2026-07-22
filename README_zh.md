@@ -4,7 +4,7 @@
 
 ## 简介
 
-DataSyncLib 是为 Minecraft Forge 模组开发打造的数据同步框架。通过声明式注解
+DataSyncLib 是为 Minecraft 模组开发打造的数据同步框架。通过声明式注解
 （`@SyncToClient`、`@SyncToServer`、`@SaveToDisk`），自动完成客户端-服务端字段同步、
 变更检测和磁盘持久化，大幅减少样板代码。
 

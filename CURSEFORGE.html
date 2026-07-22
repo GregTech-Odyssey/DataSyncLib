@@ -1,0 +1,210 @@
+<h1>DataSyncLib</h1>
+
+<p><strong>Annotation-driven automatic data sync and persistence framework for Minecraft mod development.</strong></p>
+
+<hr>
+
+<h2>📖 Overview</h2>
+
+<p><strong>DataSyncLib</strong> is a powerful data synchronization library designed for Minecraft mod developers. It eliminates the boilerplate of manual network packet handling and NBT persistence by using declarative Java annotations.</p>
+
+<p>Simply annotate your fields with <code>@SyncToClient</code>, <code>@SyncToServer</code>, or <code>@SaveToDisk</code>, and DataSyncLib automatically handles:</p>
+
+<ul>
+<li>🔁 <strong>Client-server field synchronization</strong> — async-safe, incremental delta sync</li>
+<li>💾 <strong>Disk persistence</strong> — automatic NBT save/load with change detection</li>
+<li>📡 <strong>Network transmission</strong> — index-addressed protocol, only changed fields are sent</li>
+<li>🔧 <strong>Custom codecs</strong> — 30+ pre-registered types, extensible via <code>@Codec</code></li>
+</ul>
+
+<hr>
+
+<h2>✨ Key Features</h2>
+
+<table>
+<tr><th>Feature</th><th>Description</th></tr>
+<tr><td><strong>🔁 Bidirectional Sync</strong></td><td><code>@SyncToClient</code> and <code>@SyncToServer</code> handle server↔client field sync. Fully async-safe.</td></tr>
+<tr><td><strong>💾 Auto Persistence</strong></td><td><code>@SaveToDisk</code> fields are automatically written to and read from NBT.</td></tr>
+<tr><td><strong>📡 Incremental Sync</strong></td><td>Built-in dirty flag detection — only changed fields are transmitted over the network.</td></tr>
+<tr><td><strong>🔧 Extensible Codec System</strong></td><td><code>DataSyncCodec</code> registry with 30+ pre-registered types. Register custom codecs via <code>@Codec</code>.</td></tr>
+<tr><td><strong>📢 Change Notification</strong></td><td>Per-field listener callbacks + <code>NotifiableHolder</code> system for reactive UI updates.</td></tr>
+<tr><td><strong>📦 DataComponent System</strong></td><td>Identity-keyed component data model with <code>DataComponentRegistry</code> + <code>DataComponentMap</code>.</td></tr>
+<tr><td><strong>🗂️ Registry Utility</strong></td><td>Generic registry with freeze/unfreeze lifecycle and built-in serialization.</td></tr>
+<tr><td><strong>⚡ High Performance</strong></td><td><code>MethodHandle</code> instead of reflection, <code>FastUtil</code> collections, multi-level caching, <code>VarInt</code> encoding.</td></tr>
+<tr><td><strong>🗜️ Compact Data Format</strong></td><td>Custom 19-type binary Data system, more compact than NBT Tag.</td></tr>
+<tr><td><strong>🧩 Ready to Use</strong></td><td>Extend <code>FieldDataHolderBlockEntity</code> — full capabilities out of the box.</td></tr>
+<tr><td><strong>🪆 Nested Holders</strong></td><td><code>@AdditionalHolder</code> recursively discovers annotated fields in nested objects.</td></tr>
+<tr><td><strong>🎯 Custom Strategies</strong></td><td><code>@Strategy</code> for custom hash/equality change detection on complex types (ItemStack, FluidStack, etc.).</td></tr>
+</table>
+
+<hr>
+
+<h2>🚀 Quick Start</h2>
+
+<pre><code>public class MyBlockEntity extends FieldDataHolderBlockEntity {
+
+    @SyncToClient
+    @SaveToDisk
+    private int energy = 0;
+
+    @SyncToClient(notifyUpdate = true)  // Triggers scheduleUpdate on client
+    private String status = "idle";
+
+    @SyncToServer(autoUpdate = false)   // Only synced when explicitly marked
+    private int clientConfig = 0;
+
+    public MyBlockEntity(BlockPos pos, BlockState state) {
+        super(ModBlockEntities.MY_BLOCK_ENTITY.get(), pos, state);
+    }
+
+    public void serverTick(ServerLevel level) {
+        energy++;
+        setChanged();  // Mark chunk for saving
+        DataSyncNetwork.syncBlockEntityToClient(this, false, true);  // Async-safe
+    }
+
+    @Override
+    public void scheduleUpdate(LogicalSide side) {
+        if (side.isClient()) {
+            // Re-render or refresh UI on client
+        }
+    }
+}</code></pre>
+
+<h3>Nested Holders</h3>
+
+<pre><code>public class MachineBlockEntity extends FieldDataHolderBlockEntity {
+
+    @AdditionalHolder  // Scans InventoryData for annotated fields
+    private InventoryData inventory = new InventoryData();
+
+    @AdditionalHolder
+    private EnergyData energy = new EnergyData();
+}
+
+class InventoryData {
+    @SaveToDisk @SyncToClient
+    private int itemCount;
+}
+
+class EnergyData {
+    @SaveToDisk @SyncToClient(condition = "shouldSyncEnergy")
+    private long storedEnergy;
+
+    private boolean shouldSyncEnergy(long value) {
+        return value &gt; 0;  // Skip sync when empty
+    }
+}</code></pre>
+
+<h3>Custom Codec</h3>
+
+<pre><code>// 1. Define codec — FieldDataManager auto-discovers @SaveToDisk fields on the POJO
+private static final FieldDataCodec&lt;MyConfig&gt; CONFIG_CODEC =
+    FieldDataManager.createCodec(MyConfig.class, MyConfig::new);
+
+// 2. Reference on the field
+@SaveToDisk @SyncToClient
+@Codec(saveCodec = "CONFIG_CODEC", syncCodec = "CONFIG_CODEC")
+private MyConfig config = new MyConfig();</code></pre>
+
+<h3>Entity Sync</h3>
+
+<pre><code>public class MyEntity extends Entity implements IFieldDataHolder {
+
+    private final LazyFieldDataManager fieldDataManager = new LazyFieldDataManager(this);
+
+    @SyncToClient
+    private int state = 0;
+
+    @Override
+    public FieldDataManager getFieldDataManager() {
+        return fieldDataManager.get();
+    }
+
+    @Override
+    public void tick() {
+        if (!level().isClientSide()) {
+            state = calculateState();
+            DataSyncNetwork.syncEntityToClient(this);
+        }
+    }
+}</code></pre>
+
+<hr>
+
+<h2>📋 Annotation Reference</h2>
+
+<table>
+<tr><th>Annotation</th><th>Purpose</th><th>Key Attributes</th></tr>
+<tr><td><code>@SyncToClient</code></td><td>Server→Client sync</td><td><code>autoUpdate</code>, <code>notifyUpdate</code>, <code>condition</code>, <code>listener</code></td></tr>
+<tr><td><code>@SyncToServer</code></td><td>Client→Server sync</td><td><code>autoUpdate</code>, <code>notifyUpdate</code>, <code>condition</code>, <code>listener</code></td></tr>
+<tr><td><code>@SaveToDisk</code></td><td>Disk persistence</td><td><code>key</code>, <code>condition</code>, <code>saveNull</code>, <code>defaultValue</code>, <code>defaultValueGetter</code></td></tr>
+<tr><td><code>@Access</code></td><td>Force access-mode for containers</td><td><code>createInstance</code></td></tr>
+<tr><td><code>@AdditionalHolder</code></td><td>Recursively scan nested object fields</td><td>—</td></tr>
+<tr><td><code>@Codec</code></td><td>Custom serialization</td><td><code>saveCodec</code> / <code>syncCodec</code> / <code>writeToData</code> / <code>readFromData</code></td></tr>
+<tr><td><code>@Strategy</code></td><td>Custom change detection strategy</td><td><code>value</code> (static field name)</td></tr>
+<tr><td><code>@Generic</code></td><td>Force generic-type factory resolution</td><td>—</td></tr>
+<tr><td><code>@AddToManager</code></td><td>Add to manager without auto sync/persist</td><td>—</td></tr>
+</table>
+
+<hr>
+
+<h2>📦 Installation</h2>
+
+<h3>Prerequisites</h3>
+<ul>
+<li><strong>Java</strong> 21</li>
+</ul>
+
+<h3>For Developers</h3>
+
+<pre><code>repositories {
+    maven {
+        url = "https://maven.gtodyssey.com/releases"
+    }
+}
+
+dependencies {
+    implementation fg.deobf("com.gto:datasynclib-forge-1.20.1:26.7.4")
+}</code></pre>
+
+<hr>
+
+<h2>📖 Full Documentation</h2>
+
+<p>Detailed documentation with architecture diagrams, data flow charts, API reference, and advanced usage guides:</p>
+
+<ul>
+<li><strong><a href="#">English Documentation</a></strong> — Open in browser for best experience</li>
+<li><strong><a href="#">中文文档</a></strong> — 中文完整文档</li>
+</ul>
+
+<hr>
+
+<h2>🏗️ Architecture</h2>
+
+<pre><code>Annotations → FieldDefinitionStorage → DataFieldDefinition[]
+                                            ↓
+IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
+                    (DCL lazy init)          (per-instance)     (AbstractField / AbstractFieldAccess)</code></pre>
+
+<table>
+<tr><th>Component</th><th>Role</th></tr>
+<tr><td><strong>FieldDefinitionStorage</strong></td><td>Global cache — scans class hierarchy for annotated fields</td></tr>
+<tr><td><strong>FieldDataManager</strong></td><td>Per-instance lifecycle manager — field discovery, change detection, serialization</td></tr>
+<tr><td><strong>DataField hierarchy</strong></td><td><code>AbstractField</code> (primitive values), <code>ObjField</code> (objects with codecs), <code>AbstractFieldAccess</code> (collections/maps/arrays)</td></tr>
+<tr><td><strong>DataSyncCodec</strong></td><td>Unified codec registry pairing <code>ByteStreamCodec</code> (network) with <code>DataCodec</code> (persistence)</td></tr>
+<tr><td><strong>Data type system</strong></td><td>19-type sealed binary format, more compact than NBT, with VarInt encoding</td></tr>
+</table>
+
+<hr>
+
+<h2>💡 Inspiration</h2>
+
+<p>This project draws inspiration from <strong><a href="https://github.com/Low-Drag-MC/LDLib-MultiLoader/tree/1.20.1/common/src/main/java/com/lowdragmc/lowdraglib/syncdata" rel="nofollow">LDLib's syncdata package</a></strong> by Low-Drag-MC, a powerful multi-loader library for Minecraft mod development.</p>
+
+<hr>
+
+<h2>📄 License</h2>
+
+<p>This project is licensed under the <strong>GNU LGPL 3.0</strong> — you are free to use, modify, and distribute this library in your own mods.</p>

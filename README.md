@@ -4,7 +4,7 @@
 
 ## Introduction
 
-DataSyncLib is a data synchronization framework built for Minecraft Forge mod development.
+DataSyncLib is a data synchronization framework built for Minecraft mod development.
 Using declarative annotations (`@SyncToClient`, `@SyncToServer`, `@SaveToDisk`), it automatically
 handles client-server field synchronization, change detection, and disk persistence — drastically
 reducing boilerplate code.
