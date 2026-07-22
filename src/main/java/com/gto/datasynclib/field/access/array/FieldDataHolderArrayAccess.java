@@ -30,19 +30,19 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, IFieldDataHolder @NotNull [] instance, boolean auto) {
+    protected boolean hasChange(@NotNull LogicalSide side, IFieldDataHolder @NotNull [] instance, boolean autoOnly) {
         var hashCode = HashUtil.arrayIdentityHashCode(instance);
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;
             for (var element : instance) {
-                element.getFieldDataManager().updateFieldDirtyFlags(side, auto);
+                element.getFieldDataManager().updateFieldDirtyFlags(side, autoOnly);
                 element.getFieldDataManager().markAsChanged();
             }
             return true;
         }
         boolean hasChange = false;
         for (var element : instance) {
-            if (element != null && element.getFieldDataManager().updateFieldDirtyFlags(side, auto)) {
+            if (element != null && element.getFieldDataManager().updateFieldDirtyFlags(side, autoOnly)) {
                 element.getFieldDataManager().markAsChanged();
                 hasChange = true;
             }
@@ -51,19 +51,19 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
     }
 
     @Override
-    protected void writeBuffer(@NotNull LogicalSide side, IFieldDataHolder @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean force) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, IFieldDataHolder @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
         for (var element : instance) {
             if (element == null || !element.getFieldDataManager().isChanged()) {
                 data.writeBoolean(false);
             } else {
                 data.writeBoolean(true);
-                data.writeByteArray(element.getFieldDataManager().writeToNetworkBuffer(side, force));
+                data.writeByteArray(element.getFieldDataManager().writeToNetworkBuffer(side, writeAll));
             }
         }
     }
 
     @Override
-    protected void readBuffer(@NotNull LogicalSide side, IFieldDataHolder @NotNull [] instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, IFieldDataHolder @NotNull [] instance, @NotNull FriendlyByteBuf data) {
         for (var element : instance) {
             if (data.readBoolean()) {
                 if (element != null) element.getFieldDataManager().readFromNetworkBuffer(side, data.readByteArray());
@@ -72,7 +72,7 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
     }
 
     @Override
-    protected @NotNull Data writeData(@NotNull Object source, IFieldDataHolder @NotNull [] instance) {
+    protected @NotNull Data doWriteData(@NotNull Object source, IFieldDataHolder @NotNull [] instance) {
         var list = new ListData();
         for (var element : instance) {
             if (element != null) {
@@ -89,7 +89,7 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
     }
 
     @Override
-    protected void readData(IFieldDataHolder @NotNull [] instance, @NotNull Data data, int dataVersion) {
+    protected void doReadData(IFieldDataHolder @NotNull [] instance, @NotNull Data data, int dataVersion) {
         var list = data.getList();
         var length = Math.min(list.size(), instance.length);
         for (int i = 0; i < length; i++) {

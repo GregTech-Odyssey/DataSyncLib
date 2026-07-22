@@ -23,7 +23,7 @@ public final class IntArrayAccess extends AbstractFieldAccess<int[]> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, int @NotNull [] instance, boolean auto) {
+    protected boolean hasChange(@NotNull LogicalSide side, int @NotNull [] instance, boolean autoOnly) {
         var hashCode = Arrays.hashCode(instance);
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;
@@ -33,14 +33,14 @@ public final class IntArrayAccess extends AbstractFieldAccess<int[]> {
     }
 
     @Override
-    protected void writeBuffer(@NotNull LogicalSide side, int @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean force) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, int @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
         for (var element : instance) {
             data.writeInt(element);
         }
     }
 
     @Override
-    protected void readBuffer(@NotNull LogicalSide side, int @NotNull [] instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, int @NotNull [] instance, @NotNull FriendlyByteBuf data) {
         var length = instance.length;
         for (int i = 0; i < length; i++) {
             instance[i] = data.readInt();
@@ -48,14 +48,14 @@ public final class IntArrayAccess extends AbstractFieldAccess<int[]> {
     }
 
     @Override
-    protected @NotNull Data writeData(@NotNull Object source, int @NotNull [] instance) {
+    protected @NotNull Data doWriteData(@NotNull Object source, int @NotNull [] instance) {
         if (definition.hasDefaultValue() && Arrays.equals(instance, definition.getDefaultValue(source)))
             return NullData.NONE;
         return IntArrayData.valueOf(instance);
     }
 
     @Override
-    protected void readData(int @NotNull [] instance, @NotNull Data data, int dataVersion) {
+    protected void doReadData(int @NotNull [] instance, @NotNull Data data, int dataVersion) {
         var list = data.getIntArray();
         var length = Math.min(list.length, instance.length);
         System.arraycopy(list, 0, instance, 0, length);

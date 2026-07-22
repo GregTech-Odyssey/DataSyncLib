@@ -51,16 +51,16 @@ final class FieldAnnotationMetadata {
     private final boolean notifyServerUpdate;
     private final boolean autoSyncToClient;
     private final boolean autoSyncToServer;
-    private final boolean generic;
-    private final boolean access;
+    private final boolean hasGeneric;
+    private final boolean hasAccessAnnotation;
     private final boolean createAccessInstance;
 
     FieldAnnotationMetadata(Class<?> clazz, Field field, SaveToDisk saveToDisk, SyncToClient syncToClient, SyncToServer syncToServer) {
         var type = field.getType();
         var access = field.getAnnotation(Access.class);
         var generic = field.getAnnotation(Generic.class);
-        this.generic = generic != null;
-        this.access = access != null;
+        this.hasGeneric = generic != null;
+        this.hasAccessAnnotation = access != null;
         this.saveToDisk = saveToDisk;
         this.syncToClient = syncToClient;
         this.syncToServer = syncToServer;
@@ -71,7 +71,7 @@ final class FieldAnnotationMetadata {
         this.notifyServerUpdate = syncToServer != null && syncToServer.notifyUpdate();
         this.autoSyncToClient = syncToClient != null && syncToClient.autoUpdate();
         this.autoSyncToServer = syncToServer != null && syncToServer.autoUpdate();
-        this.createAccessInstance = this.access && access.createInstance();
+        this.createAccessInstance = this.hasAccessAnnotation && access.createInstance();
 
         if (saveToDisk != null && !saveToDisk.defaultValueGetter().isEmpty()) {
             var method = ReflectUtil.getAccessibleMethod(clazz, saveToDisk.defaultValueGetter());
@@ -201,5 +201,9 @@ final class FieldAnnotationMetadata {
 
     boolean isSyncToServer() {
         return syncToServer != null;
+    }
+
+    boolean hasCustomCodec() {
+        return dataCodec != null || streamCodec != null || writeToData != null || writeToBuffer != null;
     }
 }

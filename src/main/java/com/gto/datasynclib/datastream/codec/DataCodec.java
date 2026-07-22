@@ -1,13 +1,17 @@
 package com.gto.datasynclib.datastream.codec;
 
 import com.gto.datasynclib.datastream.data.*;
+import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.Codec;
+import com.mojang.serialization.DataResult;
+import com.mojang.serialization.DynamicOps;
 import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
@@ -26,6 +30,22 @@ import java.util.function.Function;
  * @param <T> the type this codec can encode and decode
  */
 public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
+
+    default Codec<T> toCodec(int dataVersion) {
+        var codec = this;
+        return new Codec<>() {
+
+            @Override
+            public <T1> DataResult<T1> encode(T input, DynamicOps<T1> ops, T1 prefix) {
+                return DataResult.success(ops.createByteList(ByteBuffer.wrap(codec.encode(input).writeToBytes())));
+            }
+
+            @Override
+            public <T1> DataResult<Pair<T, T1>> decode(DynamicOps<T1> ops, T1 input) {
+                return DataResult.success(Pair.of(codec.decode(Data.readData(Unpooled.copiedBuffer(ops.getByteBuffer(input).result().orElseThrow())), dataVersion), ops.empty()));
+            }
+        };
+    }
 
     static <T> DataCodec<T> of(ByteStreamCodec<T> codec) {
         return new DataCodec<>() {

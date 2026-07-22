@@ -549,6 +549,23 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
         return new BigInteger(array);
     }
 
+    // ===== Sentinel check =====
+
+    /**
+     * Checks whether this Data instance is the {@link NullData#NONE} sentinel,
+     * which signals "do not write this entry" during serialization.
+     *
+     * <p>Callers that process Data returned from writeToData() methods should
+     * check this before serializing, or they risk writing the suppression
+     * sentinel as a regular null value. Using this method is preferred over
+     * {@code data == NullData.NONE} as it is more self-documenting.</p>
+     *
+     * @return {@code true} if this is the NONE sentinel that should be skipped
+     */
+    default boolean isNone() {
+        return false;
+    }
+
     @Nullable
     // ===== Safe and unchecked cast methods =====
 

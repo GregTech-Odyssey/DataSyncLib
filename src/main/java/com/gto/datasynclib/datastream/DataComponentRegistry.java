@@ -6,10 +6,8 @@ import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.StringMapData;
 import com.gto.datasynclib.util.Registry;
-import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.Codec;
-import com.mojang.serialization.DataResult;
-import com.mojang.serialization.DynamicOps;
+import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
@@ -27,13 +25,13 @@ import java.util.function.Consumer;
  * </ul>
  *
  * <p>During encoding, entries whose keys have a {@code null} codec are silently skipped.
- * During decoding, entries with unknown keys or null codecs are skipped (the buffer position
- * is not advanced, so remaining entries may be affected).
+ * Each entry is written with a length prefix so that unknown keys can be safely skipped
+ * during decoding without corrupting the buffer position.
  *
  * @see DataComponentKey
  * @see DataComponentMap
  */
-public final class DataComponentRegistry extends Registry<String, DataComponentKey<?>> implements ByteStreamCodec<DataComponentMap>, DataCodec<DataComponentMap>, Codec<DataComponentMap> {
+public final class DataComponentRegistry extends Registry<String, DataComponentKey<?>> implements ByteStreamCodec<DataComponentMap>, DataCodec<DataComponentMap> {
 
     public DataComponentRegistry(String name) {
         super(name + "_data_component");
@@ -60,27 +58,13 @@ public final class DataComponentRegistry extends Registry<String, DataComponentK
     }
 
     @Override
-    public <T> DataResult<Pair<DataComponentMap, T>> decode(DynamicOps<T> ops, T input) {
-        return Data.CODEC.map(this::decode).decode(ops, input);
-    }
-
-    @Override
-    public <T> DataResult<T> encode(DataComponentMap input, DynamicOps<T> ops, T prefix) {
-        return Data.CODEC.comap(i -> encode(input)).encode(input, ops, prefix);
-    }
-
-    @Override
     public DataComponentMap decode(FriendlyByteBuf buf) {
         var size = buf.readVarInt();
         var map = new DataComponentMap(size);
         for (int i = 0; i < size; i++) {
             var keyId = buf.readVarInt();
             var key = get(keyId);
-            if (key == null || key.codec == null) {
-                // Cannot decode value without a registered key with a codec.
-                // The buffer is now corrupted — skip remaining entries.
-                break;
-            }
+            if (key == null || key.codec == null) throw new RuntimeException("Invalid data component key id " + keyId+" {"+key+"}");
             var value = key.codec.streamReader.decode(buf);
             if (value != null) map.put(key, value);
         }

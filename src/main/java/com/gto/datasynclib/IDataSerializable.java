@@ -5,42 +5,70 @@ import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Interface for objects that can be serialized and deserialized for data synchronization.
- * <p>
- * Provides methods for detecting and tracking changes, as well as writing to and reading from
- * various data formats including network buffers ({@link FriendlyByteBuf}) and persistent
- * storage ({@link Data}). Implementing classes can control their own serialization behavior
- * for both network synchronization and disk persistence.
+ * Interface for objects that self-manage their serialization for both network
+ * synchronization and disk persistence.
+ *
+ * <p>Unlike {@link com.gto.datasynclib.IFieldDataHolder} where individual fields are
+ * managed by the framework, {@code IDataSerializable} gives full control to the
+ * implementing class. The object is responsible for its own change detection,
+ * network encoding/decoding, and persistent storage encoding/decoding.</p>
+ *
+ * <h3>Two independent I/O paths:</h3>
+ * <ul>
+ *   <li><strong>Network:</strong> {@link #writeBuffer}/{@link #readBuffer} — uses
+ *       {@link FriendlyByteBuf} for live client-server sync</li>
+ *   <li><strong>Persistence:</strong> {@link #writeData}/{@link #readData} — uses
+ *       {@link Data} objects for disk save/load</li>
+ * </ul>
+ *
+ * <h3>Change tracking:</h3>
+ * <p>The {@link #detectChange()}/{@link #markAsChanged()}/{@link #clearChanged()}/
+ * {@link #isChanged()} quartet supports both automatic detection (comparing snapshots)
+ * and manual flag management. Implementations that always need to sync can simply
+ * return {@code true} from {@code detectChange()}.</p>
+ *
+ * <h3>Data version migration:</h3>
+ * <p>The {@code dataVersion} parameter in {@link #readData(Data, int)} enables
+ * backward-compatible data migration — check the version and adapt the deserialization
+ * logic for older formats.</p>
+ *
+ * @see com.gto.datasynclib.AbstractDataSerializable
+ * @see com.gto.datasynclib.listener.ObjSerializableHolder
  */
 public interface IDataSerializable {
 
     /**
-     * Detects whether the data has changed by comparing current values with previous snapshots.
-     * This method should implement the comparison logic specific to the data structure.
+     * Detects whether the data has changed since the last sync by comparing current
+     * values with previous snapshots or stored state.
      *
-     * @return true if changes are detected, false otherwise
+     * @return {@code true} if changes are detected and the object should be included
+     *         in the next synchronization
      */
     boolean detectChange();
 
     /**
-     * Marks this data as changed, forcing it to be included in the next synchronization.
+     * Marks this object as changed, forcing it to be included in the next
+     * synchronization regardless of automatic change detection.
      */
     void markAsChanged();
 
     /**
-     * Clears the changed flag, indicating that the data has been synchronized.
+     * Clears the changed flag after a successful synchronization.
+     * Called by the framework after the object's data has been transmitted.
      */
     void clearChanged();
 
     /**
-     * Checks whether this data is marked as changed.
+     * Checks whether this object is currently marked as changed.
      *
-     * @return true if the data has been marked as changed, false otherwise
+     * @return {@code true} if the object has been marked as changed
      */
     boolean isChanged();
 
     /**
-     * Writes the data to a network buffer for synchronization.
+     * Writes the object's data to a network buffer for live synchronization.
+     * The implementation should write exactly the data needed by {@link #readBuffer}
+     * to reconstruct the state.
      *
      * @param side the logical side (client or server) performing the write
      * @param buf  the network buffer to write to, must not be null
@@ -48,7 +76,8 @@ public interface IDataSerializable {
     void writeBuffer(LogicalSide side, @NotNull FriendlyByteBuf buf);
 
     /**
-     * Reads the data from a network buffer during synchronization.
+     * Reads the object's data from a network buffer during live synchronization.
+     * The implementation should read exactly the data written by {@link #writeBuffer}.
      *
      * @param side the logical side (client or server) performing the read
      * @param buf  the network buffer to read from, must not be null
@@ -56,17 +85,17 @@ public interface IDataSerializable {
     void readBuffer(LogicalSide side, @NotNull FriendlyByteBuf buf);
 
     /**
-     * Writes the data to a {@link Data} object for persistent storage.
+     * Serializes the object's data to a {@link Data} tree for persistent storage.
      *
-     * @return the Data object containing the serialized data
+     * @return the Data object containing the serialized state (never null)
      */
     Data writeData();
 
     /**
-     * Reads the data from a {@link Data} object during loading.
+     * Deserializes the object's data from a {@link Data} tree during loading.
      *
-     * @param data        the Data object containing the serialized data, must not be null
-     * @param dataVersion the version of the data format, useful for handling migrations
+     * @param data        the Data object containing the previously serialized state
+     * @param dataVersion the version of the data format, for handling migrations
      */
     void readData(@NotNull Data data, int dataVersion);
 }

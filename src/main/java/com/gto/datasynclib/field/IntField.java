@@ -30,7 +30,7 @@ public final class IntField extends AbstractField<Integer> {
     }
 
     @Override
-    public void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean force) {
+    public void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean writeAll) {
         var value = definition.getInt(source);
         lastValue = value;
         data.writeInt(value);

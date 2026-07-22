@@ -30,7 +30,7 @@ public final class BooleanField extends AbstractField<Boolean> {
     }
 
     @Override
-    public void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean force) {
+    public void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean writeAll) {
         var value = definition.getBoolean(source);
         lastValue = value;
         data.writeBoolean(value);

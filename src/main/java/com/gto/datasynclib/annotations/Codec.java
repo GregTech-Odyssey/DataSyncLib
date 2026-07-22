@@ -6,9 +6,39 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Specifies the codec used for serializing and deserializing this field.
- * Allows customization of how the field value is encoded for disk storage,
- * network synchronization, and buffer operations.
+ * Specifies custom serialization for this field, overriding the default codec lookup.
+ *
+ * <p>Supports two modes of operation:</p>
+ *
+ * <h3>Mode 1: Static Codec Fields (recommended)</h3>
+ * <p>Reference static fields of type {@link com.gto.datasynclib.datastream.codec.DataCodec}
+ * and {@link com.gto.datasynclib.datastream.codec.ByteStreamCodec} declared in the same
+ * class (or accessible from it). Use {@link #saveCodec()} for the persistence codec and
+ * {@link #syncCodec()} for the network codec. If only {@code saveCodec} is specified,
+ * the sync codec is automatically derived from it.</p>
+ *
+ * <h3>Mode 2: Instance Methods</h3>
+ * <p>When {@code saveCodec} is empty, specify instance methods on the declaring class
+ * for manual serialization:</p>
+ * <ul>
+ *   <li>{@link #writeToData()} / {@link #readFromData()} — for persistence (T → Data / Data → T)</li>
+ *   <li>{@link #writeToBuffer()} / {@link #readFromBuffer()} — for network sync
+ *       ((FriendlyByteBuf, T) → void / FriendlyByteBuf → T)</li>
+ * </ul>
+ *
+ * <h3>Example:</h3>
+ * <pre>{@code
+ * // Using FieldDataCodec (a composite codec):
+ * private static final FieldDataCodec<MyObj> MY_CODEC =
+ *     FieldDataManager.createCodec(MyObj.class, MyObj::new);
+ *
+ * @Codec(saveCodec = "MY_CODEC", syncCodec = "MY_CODEC")
+ * private MyObj data;
+ *
+ * // Using instance methods:
+ * @Codec(writeToData = "myWriteToData", readFromData = "myReadFromData")
+ * private MyObj data;
+ * }</pre>
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.FIELD)

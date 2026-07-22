@@ -14,15 +14,65 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 
+/**
+ * NBT ↔ Data conversion utilities and {@link com.gto.datasynclib.datastream.data.CustomData} type registrations.
+ *
+ * <h2>Conversion Direction &amp; Limitations</h2>
+ * <p><strong>NBT → Data ({@link #convertToData(Tag)}):</strong> Generally safe. All standard
+ * NBT types have a corresponding Data representation.</p>
+ * <p><strong>Data → NBT ({@link #convertToTag(Data)}):</strong> <em>Not all Data types can be
+ * converted back.</em> Data has more types (19) than NBT (13). Specifically, NBT has no
+ * equivalent for: {@code DataMapData} (ID 16), {@code IntMapData} (ID 17),
+ * {@code LongMapData} (ID 18), {@code CustomData} (ID 15). Attempting to convert these
+ * will throw {@link MatchException}.</p>
+ *
+ * <h2>Performance: Prefer CustomData Over Conversion</h2>
+ * <p>The {@code convertToTag/convertToData} methods iterate every element recursively,
+ * creating new Data/Tag objects for the entire tree. This is O(n) and allocates heavily.
+ * For NBT fields that only need to be stored and retrieved, use the pre-registered
+ * {@link com.gto.datasynclib.datastream.data.CustomData.Type CustomData.Type} instances
+ * instead — they <strong>wrap</strong> the original NBT object directly without conversion:</p>
+ * <pre>{@code
+ * // ❌ Slow: full conversion (allocates new objects for every element)
+ * Data data = NbtUtil.convertToData(compoundTag);
+ *
+ * // ✅ Fast: zero-copy wrapping (just wraps the reference)
+ * Data data = NbtUtil.COMPOUND_TAG_TYPE.create(compoundTag.copy());
+ * }</pre>
+ * <p>The three registered types and their IDs:
+ * <ul>
+ *   <li>{@link #TAG_TYPE} (ID 0) — wraps any {@link Tag} with a 1-byte type prefix</li>
+ *   <li>{@link #COMPOUND_TAG_TYPE} (ID 1) — wraps {@link CompoundTag} directly (no type prefix, more compact)</li>
+ *   <li>{@link #LIST_TAG_TYPE} (ID 2) — wraps {@link ListTag} directly (no type prefix, more compact)</li>
+ * </ul>
+ * <p>The type-specific wrappers ({@code COMPOUND_TAG_TYPE} and {@code LIST_TAG_TYPE}) are
+ * more compact because they omit the type-ID byte that {@code TAG_TYPE} requires for
+ * run-time dispatch.</p>
+ *
+ * @see com.gto.datasynclib.datastream.data.CustomData
+ */
 @UtilityClass
 public class NbtUtil {
 
+    /**
+     * Wraps any {@link Tag} with a 1-byte type-ID prefix for run-time dispatch.
+     * Supports all NBT types. Use this when the exact NBT type is unknown at codec-registration time.
+     */
     public final CustomData.Type<Tag> TAG_TYPE = CustomData.Type.<Tag>builder(0).copy(Tag::copy).write((t, b) -> {
         b.writeByte(t.getId());
         write(t, b);
     }).read(b -> read(b.readByte(), b)).build();
 
+    /**
+     * Wraps a {@link CompoundTag} directly without a type-ID prefix.
+     * More compact than {@link #TAG_TYPE}. Use this when the type is statically known.
+     */
     public final CustomData.Type<CompoundTag> COMPOUND_TAG_TYPE = CustomData.Type.<CompoundTag>builder(1).copy(CompoundTag::copy).write(NbtUtil::write).read(b -> (CompoundTag) read(Tag.TAG_COMPOUND, b)).build();
+
+    /**
+     * Wraps a {@link ListTag} directly without a type-ID prefix.
+     * More compact than {@link #TAG_TYPE}. Use this when the type is statically known.
+     */
     public final CustomData.Type<ListTag> LIST_TAG_TYPE = CustomData.Type.<ListTag>builder(2).copy(ListTag::copy).write(NbtUtil::write).read(b -> (ListTag) read(Tag.TAG_LIST, b)).build();
 
     public Tag read(byte id, ByteBuf byteBuf) {
@@ -68,6 +118,24 @@ public class NbtUtil {
         }
     }
 
+    /**
+     * Converts a {@link Data} tree to an equivalent NBT {@link Tag} tree.
+     *
+     * <p><strong>Limitation:</strong> Not all Data types can be converted. Data has 19 types
+     * while NBT has only 13. The following Data types have NO NBT equivalent and will throw
+     * {@link MatchException}: {@code DataMapData} (ID 16), {@code IntMapData} (ID 17),
+     * {@code LongMapData} (ID 18), {@code CustomData} (ID 15).</p>
+     *
+     * <p><strong>Performance:</strong> This method recursively converts every element, allocating
+     * new Tag objects for the entire tree. For NBT fields, prefer using
+     * {@link #COMPOUND_TAG_TYPE}{@code .create()} or {@link #LIST_TAG_TYPE}{@code .create()}
+     * which wrap the original object with zero conversion overhead.</p>
+     *
+     * @param data the Data tree to convert (must not contain unsupported types)
+     * @return the equivalent NBT Tag tree
+     * @throws MatchException if the Data contains types with no NBT equivalent
+     * @see #convertToData(Tag)
+     */
     public Tag convertToTag(Data data) {
         return switch (data.getId()) {
             case Data.NULL -> EndTag.INSTANCE;
@@ -101,6 +169,22 @@ public class NbtUtil {
         };
     }
 
+    /**
+     * Converts an NBT {@link Tag} tree to an equivalent {@link Data} tree.
+     *
+     * <p>All standard NBT types (13) have a corresponding Data representation, so this
+     * direction is generally safe. However, prefer using the {@link CustomData.Type}
+     * wrappers ({@link #TAG_TYPE}, {@link #COMPOUND_TAG_TYPE}, {@link #LIST_TAG_TYPE})
+     * for NBT fields — they wrap the original object with zero conversion overhead,
+     * avoiding the O(n) recursive allocation cost of this method.</p>
+     *
+     * <p>This method is mainly useful for compatibility/migration scenarios where
+     * existing NBT data needs to be imported into the Data type system.</p>
+     *
+     * @param tag the NBT Tag tree to convert
+     * @return the equivalent Data tree
+     * @see #convertToTag(Data)
+     */
     public Data convertToData(Tag tag) {
         return switch (tag.getId()) {
             case Tag.TAG_END -> NullData.INSTANCE;

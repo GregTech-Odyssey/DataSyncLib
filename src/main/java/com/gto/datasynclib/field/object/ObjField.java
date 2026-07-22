@@ -37,7 +37,7 @@ public abstract class ObjField<T> extends AbstractField<T> {
     }
 
     @Override
-    public final void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean force) {
+    public final void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean writeAll) {
         T value = definition.get(source);
         lastValue = value;
         if (value == null) {

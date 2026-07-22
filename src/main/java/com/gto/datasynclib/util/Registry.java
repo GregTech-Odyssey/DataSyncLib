@@ -16,9 +16,32 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
- * Generic registry mapping comparable keys to values with automatic integer ID assignment.
- * Supports freeze/unfreeze lifecycle, ID-to-value and key-to-value lookup,
- * and provides built-in ByteStreamCodec and DataCodec for serialization.
+ * Generic named registry mapping {@link Comparable} keys to values with automatic
+ * integer ID assignment for efficient network serialization.
+ *
+ * <h3>Lifecycle:</h3>
+ * <ol>
+ *   <li>{@link #unfreeze()} — clears the registry and opens it for registration</li>
+ *   <li>{@link #register(Comparable, Object)} — add entries while unfrozen</li>
+ *   <li>{@link #freeze()} — sorts entries by key, assigns sequential integer IDs, locks registry</li>
+ * </ol>
+ *
+ * <h3>Serialization:</h3>
+ * <ul>
+ *   <li>{@link #streamCodec()} — encodes/decodes by integer ID (compact, for network)</li>
+ *   <li>{@link #dataCodec(com.gto.datasynclib.datastream.codec.DataCodec)} — encodes/decodes by key
+ *       (self-describing, for disk persistence)</li>
+ *   <li>{@link #codec(com.mojang.serialization.Codec)} — Mojang DFU codec via key xmap</li>
+ * </ul>
+ *
+ * <h3>Thread-safety:</h3>
+ * <p>The {@link #frozen} flag is {@code volatile}. Registration and freeze/unfreeze
+ * operations are {@code synchronized}. Read operations ({@code get()}, {@code getId()},
+ * iteration) are lock-free and safe after freezing.</p>
+ *
+ * @param <K> the key type (must be {@link Comparable})
+ * @param <V> the value type
+ * @see com.gto.datasynclib.datastream.DataComponentRegistry
  */
 public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
 

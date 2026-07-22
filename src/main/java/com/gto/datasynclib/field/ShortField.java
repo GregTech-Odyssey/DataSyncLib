@@ -30,7 +30,7 @@ public final class ShortField extends AbstractField<Short> {
     }
 
     @Override
-    public void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean force) {
+    public void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean writeAll) {
         var value = definition.getShort(source);
         lastValue = value;
         data.writeShort(value);

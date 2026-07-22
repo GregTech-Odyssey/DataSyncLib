@@ -13,25 +13,41 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Base class for {@link DataField} implementations that wrap complex field types (collections, maps,
- * arrays, and other composite structures) rather than simple primitive values.
+ * Base class for <strong>container-type</strong> field implementations (collections, maps,
+ * arrays, {@link com.gto.datasynclib.IFieldDataHolder IFieldDataHolder}, and
+ * {@link com.gto.datasynclib.IDataSerializable IDataSerializable}).
  *
- * <p>Unlike {@link com.gto.datasynclib.field.AbstractField} which handles primitive value fields,
- * this class manages access to mutable container objects. Subclasses implement the abstract methods
- * to provide type-specific change detection, buffer writing/reading, and data serialization.</p>
- *
- * <p>Key behaviors:</p>
+ * <p>Uses the <strong>template method</strong> pattern with a clear naming convention:</p>
  * <ul>
- *   <li><strong>Instance tracking:</strong> Detects when the referenced object changes identity,
- *       automatically marking the field as changed.</li>
- *   <li><strong>Instance creation:</strong> When {@code createInstance} is true, handles
- *       serialization of the container itself (not just its contents), including null-vs-value
- *       encoding and legacy data version migration.</li>
- *   <li><strong>Change detection:</strong> Delegates to {@link #hasChange} for content-level
- *       change detection within the same object instance.</li>
+ *   <li><strong>Public interface methods</strong> (from {@link com.gto.datasynclib.DataField}):
+ *     {@link #detectChange}, {@link #writeToBuffer}, {@link #readFromBuffer},
+ *     {@link #writeToData}, {@link #readFromData} — handle the common logic:
+ *     null checks, instance identity tracking, {@code createInstance} wrapping,
+ *     skip conditions, and listener invocation.</li>
+ *   <li><strong>Protected template methods</strong> (implemented by subclasses):
+ *     {@link #hasChange}, {@link #doWriteBuffer}, {@link #doReadBuffer},
+ *     {@link #doWriteData}, {@link #doReadData} — provide type-specific
+ *     serialization logic for the container's <em>contents</em> only.</li>
  * </ul>
  *
- * @param <T> the type of the access-managed object (e.g., {@code Collection}, {@code Map}, array)
+ * <h3>Key behaviors:</h3>
+ * <ul>
+ *   <li><strong>Instance tracking:</strong> {@link #detectChange} compares the current
+ *       object reference against the previously-seen one. If a different object is now
+ *       assigned to the field, the field is automatically marked as changed. If it's
+ *       the same object, content-level change detection ({@link #hasChange}) is invoked.</li>
+ *   <li><strong>{@code createInstance} mode:</strong> When the field's definition has
+ *       {@link com.gto.datasynclib.DataFieldDefinition#createInstance} = {@code true},
+ *       the container itself (not just its contents) is serialized. This handles fields
+ *       that may be {@code null} and need full instance replacement on deserialization.
+ *       Also supports a legacy data version ({@code dataVersion == -1}) migration path.</li>
+ *   <li><strong>Listener invocation:</strong> After reading from buffer, if a listener
+ *       {@link java.lang.invoke.MethodHandle} is registered on the definition, it's
+ *       invoked with {@code (source, newValue, oldInstance)}.</li>
+ * </ul>
+ *
+ * @param <T> the type of the access-managed container (e.g., {@code Collection}, {@code Map}, array)
+ * @see com.gto.datasynclib.field.AbstractField
  */
 public abstract class AbstractFieldAccess<T> implements DataField<T> {
 
@@ -72,17 +88,17 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
     }
 
     @Override
-    public boolean detectChange(@NotNull LogicalSide side, @NotNull Object source, boolean auto) {
+    public boolean detectChange(@NotNull LogicalSide side, @NotNull Object source, boolean autoOnly) {
         var instance = getInstance(source);
         if (definition.skipSync(side, source, instance)) return false;
         if (this.instance != instance) {
             this.instance = instance;
             markAsChanged(source);
-            if (instance != null && mustDetect()) hasChange(side, instance, auto);
+            if (instance != null && mustDetect()) hasChange(side, instance, autoOnly);
             return true;
         }
         if (instance == null) return changed;
-        if (hasChange(side, instance, auto)) {
+        if (hasChange(side, instance, autoOnly)) {
             markAsChanged(source);
             return true;
         }
@@ -90,7 +106,7 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
     }
 
     @Override
-    public final void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean force) {
+    public final void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean writeAll) {
         var value = getInstance(source);
         if (definition.createInstance) {
             if (value == null) {
@@ -101,7 +117,7 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
             }
         }
         if (value == null) return;
-        writeBuffer(side, value, data, force);
+        doWriteBuffer(side, value, data, writeAll);
     }
 
     @Override
@@ -117,7 +133,7 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
         } else {
             value = getInstance(source);
         }
-        if (value != null) readBuffer(side, value, data);
+        if (value != null) doReadBuffer(side, value, data);
         var listener = definition.getListener(side);
         if (listener != null) {
             try {
@@ -140,13 +156,13 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
                 if (definition.skipSave(source, value)) return NullData.NONE;
                 var list = new ListData(2);
                 list.add(definition.encode(source, value));
-                list.add(writeData(source, value));
+                list.add(doWriteData(source, value));
                 return list;
             }
         } else {
             if (value == null) return NullData.NONE;
             if (definition.skipSave(source, value)) return NullData.NONE;
-            return writeData(source, value);
+            return doWriteData(source, value);
         }
     }
 
@@ -157,7 +173,7 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
                 if (data instanceof StringMapData mapData && !mapData.isEmpty()) {
                     var uid = mapData.get("uid");
                     var value = definition.decode(source, uid, dataVersion);
-                    readData(value, mapData.get("payload").getStringMap().get("d"), dataVersion);
+                    doReadData(value, mapData.get("payload").getStringMap().get("d"), dataVersion);
                     definition.set(source, value);
                 }
             } else {
@@ -167,24 +183,44 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
                 } else {
                     var list = data.getList();
                     value = definition.decode(source, list.getFirst(), dataVersion);
-                    readData(value, list.get(1), dataVersion);
+                    doReadData(value, list.get(1), dataVersion);
                 }
                 definition.set(source, value);
             }
         } else {
             var value = getInstance(source);
             if (value == null) return;
-            readData(value, data, dataVersion);
+            doReadData(value, data, dataVersion);
         }
     }
 
-    protected abstract boolean hasChange(@NotNull LogicalSide side, @NotNull T instance, boolean auto);
+    /**
+     * Template method: check if the container's <em>contents</em> have changed.
+     * Called by {@link #detectChange} after confirming the instance reference hasn't changed.
+     */
+    protected abstract boolean hasChange(@NotNull LogicalSide side, @NotNull T instance, boolean autoOnly);
 
-    protected abstract void writeBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull FriendlyByteBuf data, boolean force);
+    /**
+     * Template method: write the container's <em>contents</em> to the network buffer.
+     * Called by {@link #writeToBuffer} after null/instance/createInstance handling.
+     */
+    protected abstract void doWriteBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull FriendlyByteBuf data, boolean writeAll);
 
-    protected abstract void readBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull FriendlyByteBuf data);
+    /**
+     * Template method: read the container's <em>contents</em> from the network buffer.
+     * Called by {@link #readFromBuffer} after null/instance/createInstance handling.
+     */
+    protected abstract void doReadBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull FriendlyByteBuf data);
 
-    protected abstract @NotNull Data writeData(@NotNull Object source, @NotNull T instance);
+    /**
+     * Template method: serialize the container's <em>contents</em> to a Data object.
+     * Called by {@link #writeToData} after null/instance/createInstance/skip handling.
+     */
+    protected abstract @NotNull Data doWriteData(@NotNull Object source, @NotNull T instance);
 
-    protected abstract void readData(@NotNull T instance, @NotNull Data data, int dataVersion);
+    /**
+     * Template method: deserialize the container's <em>contents</em> from a Data object.
+     * Called by {@link #readFromData} after null/instance/createInstance handling.
+     */
+    protected abstract void doReadData(@NotNull T instance, @NotNull Data data, int dataVersion);
 }

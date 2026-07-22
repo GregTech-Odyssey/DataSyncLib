@@ -6,10 +6,27 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Extended from {@link AddToManager}
- * Marks a field to be synchronized to the client.
- * Fields annotated with this annotation will have their values sent from the server to the client.
- * This is typically used for displaying data on the client side, such as GUI elements or rendering states.
+ * Marks a field for <strong>server-to-client</strong> synchronization.
+ *
+ * <p>When the server calls
+ * {@link com.gto.datasynclib.network.DataSyncNetwork#syncBlockEntityToClient
+ * DataSyncNetwork.syncBlockEntityToClient()} (or the entity equivalent), changed fields
+ * annotated with {@code @SyncToClient} are serialized and sent to all players
+ * tracking the chunk/entity.</p>
+ *
+ * <h3>Automatic vs. manual update:</h3>
+ * <ul>
+ *   <li>{@code autoUpdate = true} (default) — the field is checked for changes
+ *       automatically during each sync call via dirty flag detection</li>
+ *   <li>{@code autoUpdate = false} — the field is only synced when explicitly
+ *       marked via {@code markFieldsForSync()}</li>
+ * </ul>
+ *
+ * <h3>Change notification:</h3>
+ * <p>Set {@link #notifyUpdate()} to {@code true} to trigger
+ * {@link com.gto.datasynclib.IFieldDataHolder#scheduleUpdate(com.gto.datasynclib.LogicalSide)}
+ * on the client after receiving a sync update. Use {@link #listener()} for
+ * field-level callback on value change.</p>
  *
  * @see SyncToServer
  */

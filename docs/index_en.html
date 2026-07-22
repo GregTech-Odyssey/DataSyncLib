@@ -121,6 +121,7 @@ li { margin: 4px 0; }
             <a href="#field-definition-storage">FieldDefinitionStorage</a>
             <a href="#datasync-network">DataSyncNetwork</a>
             <a href="#codec">DataSyncCodec</a>
+            <a href="#field-data-codec">FieldDataCodec</a>
             <a href="#datacomponent">DataComponent System</a>
             <a href="#registry">Registry Utility</a>
             <a href="#notifiable-holder">NotifiableHolder</a>
@@ -132,6 +133,7 @@ li { margin: 4px 0; }
             <a href="#an-other">Other Annotations</a>
         </div>
         <div class="nav-section"><div class="nav-section-title">Usage Guide</div>
+            <a href="#field-data-holder-be">FieldDataHolderBlockEntity</a>
             <a href="#usage-blockentity">BlockEntity Usage</a>
             <a href="#usage-entity">Entity Usage</a>
             <a href="#usage-regular">Plain Class Usage</a>
@@ -140,6 +142,15 @@ li { margin: 4px 0; }
             <a href="#usage-persist">Persistence Explained</a>
             <a href="#usage-codec">Custom Codec Registration</a>
             <a href="#usage-advanced">Advanced Features</a>
+        </div>
+        <div class="nav-section"><div class="nav-section-title">Utilities</div>
+            <a href="#utils-nbt">NbtUtil</a>
+            <a href="#utils-codecs">DataCodecs / StreamCodecs</a>
+            <a href="#utils-reflect">ReflectUtil</a>
+            <a href="#utils-hash">HashUtil</a>
+            <a href="#utils-enum">EnumUtil</a>
+            <a href="#utils-strategy">Hash Strategies</a>
+            <a href="#utils-cache">Cache System</a>
         </div>
         <div class="nav-section"><div class="nav-section-title">API Reference</div>
             <a href="#api-codecs">Built-in Codec List</a>
@@ -239,7 +250,7 @@ li { margin: 4px 0; }
 <p>Field synchronization requires <strong>explicit calls</strong> to <code>DataSyncNetwork</code> static methods. The framework does not push data automatically on every tick.</p>
 <ol>
     <li><strong>Modify field values</strong> — change annotated fields in tick or business methods</li>
-    <li><strong>Call sync method</strong> — invoke <code>DataSyncNetwork.syncBlockEntityToClient(be, forceAll, auto)</code> (server side) or <code>syncBlockEntityToServer(be, forceAll, auto)</code> (client side)</li>
+    <li><strong>Call sync method</strong> — invoke <code>DataSyncNetwork.syncBlockEntityToClient(be, writeAll, autoOnly)</code> (server side) or <code>syncBlockEntityToServer(be, writeAll, autoOnly)</code> (client side)</li>
     <li><strong>Internal pipeline</strong> — the method internally calls <code>FieldDataManager.updateFieldDirtyFlags()</code> → <code>writeToNetworkBuffer()</code> → sends network packet</li>
     <li><strong>Remote reception</strong> — the packet triggers <code>FieldDataManager.readFromNetworkBuffer()</code> to deserialize and restore field values</li>
     <li><strong>Update notification</strong> — if the field has <code>notifyUpdate = true</code>, <code>scheduleUpdate()</code> is called to notify UI refresh</li>
@@ -400,7 +411,7 @@ li { margin: 4px 0; }
         <tr><td>getFieldDataManager()</td><td><strong>Required.</strong> Returns the associated FieldDataManager instance</td></tr>
         <tr><td>markFieldsForSync(String...)</td><td>Convenience default. Marks specified fields as dirty (for autoUpdate=false fields)</td></tr>
         <tr><td>scheduleUpdate(LogicalSide)</td><td>Default. Called on field update notification. Override to trigger UI refresh etc.</td></tr>
-        <tr><td>writeCustomSyncData(buf, force)</td><td>Write additional custom data to the network buffer before standard field sync</td></tr>
+        <tr><td>writeCustomSyncData(buf, writeAll)</td><td>Write additional custom data to the network buffer before standard field sync</td></tr>
         <tr><td>readCustomSyncData(buf)</td><td>Read additional custom data from the network buffer before standard field sync</td></tr>
         <tr><td>writeCustomSaveData(data)</td><td>Write additional custom data to StringMapData before standard field persistence</td></tr>
         <tr><td>readCustomSaveData(data, version)</td><td>Read additional custom data from StringMapData before standard field loading</td></tr>
@@ -435,8 +446,8 @@ li { margin: 4px 0; }
         <tr><td>markAsChanged(source)</td><td>Mark the field as dirty (for a specific source object)</td></tr>
         <tr><td>isChanged(source)</td><td>Check whether the field is marked dirty</td></tr>
         <tr><td>clearChanged(source)</td><td>Clear the dirty flag</td></tr>
-        <tr><td>detectChange(side, source, auto)</td><td>Detect whether field value has changed. The auto parameter indicates automatic detection mode</td></tr>
-        <tr><td>writeToBuffer(side, source, buf, force)</td><td>Write field value to network buffer. force=true writes even if not dirty</td></tr>
+        <tr><td>detectChange(side, source, autoOnly)</td><td>Detect whether field value has changed. autoOnly=true: only checks fields with autoUpdate=true; false=force-detect all fields</td></tr>
+        <tr><td>writeToBuffer(side, source, buf, writeAll)</td><td>Write field value to network buffer. writeAll=true writes all fields regardless of dirty state</td></tr>
         <tr><td>readFromBuffer(side, source, buf)</td><td>Read and set field value from network buffer, also triggers listener callbacks</td></tr>
         <tr><td>writeToData(source)</td><td>Encode field value to a Data object for persistence</td></tr>
         <tr><td>readFromData(source, data, version)</td><td>Decode and restore field value from a Data object</td></tr>
@@ -464,7 +475,7 @@ li { margin: 4px 0; }
 <h3>Core Responsibilities</h3>
 <ul style="line-height: 2;">
     <li><strong>Field discovery &amp; instantiation</strong> — reads class-level metadata from <code>FieldDefinitionStorage</code>, creates DataField implementations for each field</li>
-    <li><strong>Change detection</strong> — <code>updateFieldDirtyFlags(LogicalSide, boolean auto)</code> iterates sync fields, calling detectChange</li>
+    <li><strong>Change detection</strong> — <code>updateFieldDirtyFlags(LogicalSide, boolean autoOnly)</code> iterates sync fields, calling detectChange</li>
     <li><strong>Network serialization</strong> — writes custom sync data first, then each dirty field as (VarInt fieldIndex, fieldPayload) pairs</li>
     <li><strong>Data persistence</strong> — via <code>writeToData()</code>/<code>readFromData()</code> using the StringMapData format</li>
     <li><strong>Re-entrancy protection</strong> — <code>updating</code> and <code>writing</code> volatile flags prevent recursion</li>
@@ -475,8 +486,8 @@ li { margin: 4px 0; }
 <table>
     <thead><tr><th>Method</th><th>Description</th></tr></thead>
     <tbody>
-        <tr><td>updateFieldDirtyFlags(side, auto)</td><td>Iterates sync fields calling detectChange. Returns true if any change or dirty flag found</td></tr>
-        <tr><td>writeToNetworkBuffer(side, force)</td><td>Serializes dirty fields to byte[]. force=true writes all fields</td></tr>
+        <tr><td>updateFieldDirtyFlags(side, autoOnly)</td><td>Iterates sync fields calling detectChange. Returns true if any change or dirty flag found</td></tr>
+        <tr><td>writeToNetworkBuffer(side, writeAll)</td><td>Serializes dirty fields to byte[]. writeAll=true writes all fields</td></tr>
         <tr><td>readFromNetworkBuffer(side, data)</td><td>Deserializes byte[] and restores field values, triggers listener and scheduleUpdate</td></tr>
         <tr><td>writeToData()</td><td>Serializes all @SaveToDisk fields to StringMapData</td></tr>
         <tr><td>readFromData(data, dataVersion)</td><td>Deserializes and restores all persisted fields from StringMapData</td></tr>
@@ -534,10 +545,10 @@ li { margin: 4px 0; }
 <table>
     <thead><tr><th>Method</th><th>Calling Side</th><th>Parameters</th></tr></thead>
     <tbody>
-        <tr><td>syncBlockEntityToClient(be, all, auto)</td><td>Server</td><td>all: force full sync; auto: auto-detect changes</td></tr>
-        <tr><td>syncBlockEntityToServer(be, all, auto)</td><td>Client</td><td>Same as above</td></tr>
-        <tr><td>syncEntityToClient(entity, all, auto)</td><td>Server</td><td>Same as above</td></tr>
-        <tr><td>syncEntityToServer(entity, all, auto)</td><td>Client</td><td>Same as above</td></tr>
+        <tr><td>syncBlockEntityToClient(be, all, autoOnly)</td><td>Server</td><td>all: full sync (true=all fields); autoOnly: true=only check autoUpdate fields</td></tr>
+        <tr><td>syncBlockEntityToServer(be, all, autoOnly)</td><td>Client</td><td>Same as above</td></tr>
+        <tr><td>syncEntityToClient(entity, all, autoOnly)</td><td>Server</td><td>Same as above</td></tr>
+        <tr><td>syncEntityToServer(entity, all, autoOnly)</td><td>Client</td><td>Same as above</td></tr>
     </tbody>
 </table>
 <div class="note"><strong>Async mechanism:</strong> after detecting changes and serializing data, the methods dispatch the actual network send to the main thread via <code>level.getServer().execute()</code> (server) or <code>Minecraft.getInstance().execute()</code> (client), so they can be called from any thread. Additionally, when data is synced server→client, the receiving handler automatically calls <code>be.setChanged()</code> on the BlockEntity.</div>
@@ -563,6 +574,31 @@ li { margin: 4px 0; }
     <li><strong>Generic support</strong> — register() accepts Class&lt;?&gt;... genericTypes, using identityHashCode-wrapped arrays as cache keys</li>
     <li><strong>Minecraft integration</strong> — register(type, Registry) convenience method auto-creates codecs from Minecraft registries</li>
 </ul>
+
+<!-- ===== FieldDataCodec ===== -->
+<h2 id="field-data-codec">FieldDataCodec — POJO Codec</h2>
+<p><code>FieldDataCodec&lt;T&gt;</code> wraps an annotated POJO class, serializing all its <code>@SaveToDisk</code>/<code>@SyncToClient</code> fields as a single unit. It implements both <code>ByteStreamCodec&lt;T&gt;</code> and <code>DataCodec&lt;T&gt;</code>, so it can be referenced directly in the <code>@Codec</code> annotation.</p>
+
+<div class="code-block"><pre><span class="kw">private static final</span> <span class="typ">FieldDataCodec</span>&lt;<span class="typ">MyConfig</span>&gt; CONFIG_CODEC =
+    <span class="typ">FieldDataManager</span>.createCodec(<span class="typ">MyConfig</span>.class, <span class="typ">MyConfig</span>::<span class="kw">new</span>);
+
+<span class="an">@SaveToDisk</span>
+<span class="an">@SyncToClient</span>
+<span class="an">@Codec</span>(saveCodec = <span class="str">"CONFIG_CODEC"</span>, syncCodec = <span class="str">"CONFIG_CODEC"</span>)
+<span class="kw">private</span> <span class="typ">MyConfig</span> config = <span class="kw">new</span> <span class="typ">MyConfig</span>();</pre></div>
+
+<p>Internally, <code>FieldDataCodec</code> implements <code>IFieldDataHolder</code> and uses a <code>ThreadLocal</code> to expose the current POJO instance to its internal <code>FieldDataManager</code> during encode/decode. All annotated fields are serialized via <code>writeAllToData()</code> / <code>readAllFromData()</code>.</p>
+
+<p>Creation:</p>
+<div class="code-block"><pre><span class="cmt">// Simple</span>
+<span class="typ">FieldDataCodec</span>&lt;<span class="typ">MyObj</span>&gt; codec = <span class="typ">FieldDataManager</span>.createCodec(<span class="typ">MyObj</span>.class, <span class="typ">MyObj</span>::<span class="kw">new</span>);
+
+<span class="cmt">// With extra custom data</span>
+<span class="typ">FieldDataCodec</span>&lt;<span class="typ">MyObj</span>&gt; codec = <span class="typ">FieldDataManager</span>.createCodec(
+    <span class="typ">MyObj</span>.class, <span class="typ">MyObj</span>::<span class="kw">new</span>,
+    extraStreamWriter, extraStreamReader,   <span class="cmt">// network custom data</span>
+    extraDataWriter, extraDataReader        <span class="cmt">// disk custom data</span>
+);</pre></div>
 
 <!-- ===== DataComponent ===== -->
 <h2 id="datacomponent">DataComponent System</h2>
@@ -675,8 +711,140 @@ reg.freeze();
     });
 }</code></pre>
 
+<!-- ===== UTILITIES ===== -->
+<h2 id="utils-nbt">NbtUtil — NBT Conversion (v26.7.3 Revamp)</h2>
+<p><code>NbtUtil</code> provides NBT ↔ Data conversion, with 3 <code>CustomData.Type</code> registrations. However, <strong>conversion is generally discouraged</strong> — use CustomData wrapping instead for zero-copy performance.</p>
+
+<div class="note warn"><strong>⚠️ Recommendation: Prefer CustomData over convertToXxx</strong><br>
+CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), while <code>convertToData/convertToTag</code> recursively convert the entire tree, allocating new objects — O(n) time and memory.<br>
+<strong>Only use convertToData when importing existing NBT data into the Data type system; only use convertToTag when you explicitly need NBT output from Data.</strong></div>
+
+<h3>CustomData Type Registrations (Recommended)</h3>
+<table>
+    <thead><tr><th>Constant</th><th>ID</th><th>Wraps</th><th>Notes</th></tr></thead>
+    <tbody>
+        <tr><td><code>TAG_TYPE</code></td><td>0</td><td><code>Tag</code></td><td>Generic NBT — 1-byte type ID prefix, dispatches on read</td></tr>
+        <tr><td><code>COMPOUND_TAG_TYPE</code></td><td>1</td><td><code>CompoundTag</code></td><td>Known type — no ID prefix, more compact</td></tr>
+        <tr><td><code>LIST_TAG_TYPE</code></td><td>2</td><td><code>ListTag</code></td><td>Known type — no ID prefix, more compact</td></tr>
+    </tbody>
+</table>
+
+<div class="code-block"><pre><span class="cmt">// ✅ Recommended: CustomData zero-copy wrapping</span>
+<span class="typ">Data</span> data = <span class="typ">NbtUtil</span>.COMPOUND_TAG_TYPE.create(tag.copy());
+
+<span class="cmt">// ❌ Discouraged: full conversion (recursively allocates new objects)</span>
+<span class="typ">Data</span> data = <span class="typ">NbtUtil</span>.convertToData(tag);</pre></div>
+
+<h3>Bidirectional Conversion (use only when necessary)</h3>
+<div class="code-block"><pre><span class="cmt">// NBT → Data (generally safe — all 13 NBT types have a Data equivalent)</span>
+<span class="typ">Data</span> data = <span class="typ">NbtUtil</span>.convertToData(compoundTag);
+<span class="cmt">// Data → NBT (limited — Data has 19 types, NBT only has 13)</span>
+<span class="typ">Tag</span> tag = <span class="typ">NbtUtil</span>.convertToTag(data);</pre></div>
+
+<h3>Data → NBT Conversion Limitations</h3>
+<p>NBT has 13 types while Data has 19. The following 4 Data types <strong>cannot be converted back to NBT</strong> and will throw <code>MatchException</code>:</p>
+<ul>
+    <li><code>DataMapData</code> (ID 16) — NBT has no Data→Data map</li>
+    <li><code>IntMapData</code> (ID 17) — NBT has no Int→Data map</li>
+    <li><code>LongMapData</code> (ID 18) — NBT has no Long→Data map</li>
+    <li><code>CustomData</code> (ID 15) — user-defined types, NBT cannot represent</li>
+</ul>
+
+<p>Fully-supported bidirectional types: EndTag↔NullData, ByteTag↔ByteData, ShortTag↔ShortData, IntTag↔IntData, LongTag↔LongData, FloatTag↔FloatData, DoubleTag↔DoubleData, StringTag↔StringData, ByteArrayTag↔ByteArrayData, IntArrayTag↔IntArrayData, LongArrayTag↔LongArrayData, ListTag↔ListData (element-by-element), CompoundTag↔StringMapData (entry-by-entry).</p>
+
+<h2 id="utils-codecs">DataCodecs / StreamCodecs — Minecraft Type Codecs</h2>
+<p>Pre-registered codec constants for common Minecraft types, used by <code>DataSyncCodec</code>.</p>
+
+<table>
+    <thead><tr><th>Constant</th><th>DataCodec Format</th><th>StreamCodec Format</th></tr></thead>
+    <tbody>
+        <tr><td><code>RESOURCE_LOCATION_CODEC</code></td><td>StringData("namespace:path")</td><td>UTF strings (namespace + path)</td></tr>
+        <tr><td><code>BLOCK_POS_CODEC</code></td><td>IntArrayData [x, y, z]</td><td>Long (<code>BlockPos.asLong()</code>)</td></tr>
+        <tr><td><code>TAG_CODEC</code></td><td>CustomData → NbtUtil.TAG_TYPE</td><td>1-byte type ID + NBT write</td></tr>
+        <tr><td><code>COMPOUND_TAG_CODEC</code></td><td>CustomData → NbtUtil.COMPOUND_TAG_TYPE</td><td>Direct NBT write (no type ID)</td></tr>
+        <tr><td><code>LIST_TAG_CODEC</code></td><td>CustomData → NbtUtil.LIST_TAG_TYPE</td><td>Direct NBT write (no type ID)</td></tr>
+        <tr><td><code>ITEM_STACK_CODEC</code></td><td>CompoundTag (save/load)</td><td><code>FriendlyByteBuf.writeItem()</code></td></tr>
+        <tr><td><code>FLUID_STACK_CODEC</code></td><td>CompoundTag (writeToNBT)</td><td><code>FluidStack.writeToPacket()</code></td></tr>
+        <tr><td><code>COMPONENT_CODEC</code></td><td>StringData (JSON)</td><td><code>FriendlyByteBuf.writeComponent()</code></td></tr>
+    </tbody>
+</table>
+
+<p>Both classes also provide <code>of(Registry)</code> methods to create codecs from vanilla Minecraft Registries (numeric IDs for network, ResourceLocation keys for persistence).</p>
+
+<h2 id="utils-reflect">ReflectUtil — MethodHandle Reflection</h2>
+<p>The performance backbone of the framework — converts all reflective access to <code>MethodHandle</code> for near-direct-invocation performance.</p>
+
+<table>
+    <thead><tr><th>Method</th><th>Signature</th><th>Description</th></tr></thead>
+    <tbody>
+        <tr><td><code>createAdaptedGetter(Field)</code></td><td><code>(Object) → fieldType</code></td><td>Adapts to (Object)→returnType. Tries unreflectGetter → findGetter → findVarHandle</td></tr>
+        <tr><td><code>createAdaptedSetter(Field)</code></td><td><code>(Object, value) → void</code></td><td>Returns null for final fields. Same fallback chain as getter</td></tr>
+        <tr><td><code>createAdaptedMethodHandle(Method)</code></td><td><code>(Object, Object...) → Result</code></td><td>All reference params widened to Object for invokeExact compatibility</td></tr>
+        <tr><td><code>getFieldGenericTypeClasses(Type)</code></td><td><code>Class[]</code></td><td>Extracts generic type arguments (e.g., <code>List&lt;String&gt;</code> → <code>[String.class]</code>)</td></tr>
+        <tr><td><code>parse(Class, String)</code></td><td><code>Object</code></td><td>Parses default values from annotation strings (primitives, strings, enums)</td></tr>
+    </tbody>
+</table>
+
+<h2 id="utils-hash">HashUtil — Identity-Based Array Hashing</h2>
+<p>Identity-based (not value-based) hash and equality for <code>Object[]</code> arrays. Used as cache keys for generic codec resolution — two <code>Class[]</code> arrays with identical content but different instances are treated as different keys (generic type parameters must match exactly).</p>
+
+<table>
+    <thead><tr><th>Method</th><th>Behavior</th></tr></thead>
+    <tbody>
+        <tr><td><code>arrayIdentityHashCode(Object[])</code></td><td><code>System.identityHashCode</code> per element</td></tr>
+        <tr><td><code>arrayIdentityEquals(Object[], Object[])</code></td><td><code>==</code> (reference equality) per element</td></tr>
+        <tr><td><code>arrayIdentityWrapper(T[])</code></td><td>Returns <code>Supplier&lt;T[]&gt;</code> with identity semantics for cache keys</td></tr>
+        <tr><td><code>arrayWrapper(T[])</code></td><td>Returns <code>Supplier&lt;T[]&gt;</code> with value semantics (<code>Arrays.hashCode/equals</code>)</td></tr>
+    </tbody>
+</table>
+
+<h2 id="utils-enum">EnumUtil — Enum Serialization</h2>
+<p>Enum name/serialized-name caching with "fixed enum" concept for encoding optimization.</p>
+
+<h3>Fixed vs Non-Fixed Enums</h3>
+<p>Fixed enums (registered via <code>addFixedEnum()</code>) have stable ordinal order and use <strong>IntData</strong> (ordinal) encoding — more compact. Non-fixed enums use <strong>StringData</strong> (serialized name) encoding — better forward compatibility.</p>
+
+<table>
+    <thead><tr><th>Method</th><th>Description</th></tr></thead>
+    <tbody>
+        <tr><td><code>addFixedEnum(Class)</code></td><td>Register an enum type whose ordinals are stable</td></tr>
+        <tr><td><code>isFixed(Class)</code></td><td>Check if an enum type is registered as fixed</td></tr>
+        <tr><td><code>getSerializedName(Enum)</code></td><td>Get serialized name (prefers <code>StringRepresentable</code>, falls back to <code>name()</code>)</td></tr>
+        <tr><td><code>getSerializedEnum(Class, String)</code></td><td>Reverse-lookup enum constant by serialized name</td></tr>
+    </tbody>
+</table>
+
+<p><code>LogicalSide</code> and <code>Direction</code> are registered as fixed enums by default.</p>
+
+<h2 id="utils-strategy">ItemStackHashStrategy / FluidStackHashStrategy</h2>
+<p>Custom <code>Hash.Strategy</code> implementations for <code>ItemStack</code> and <code>FluidStack</code> change detection. Three comparison levels:</p>
+
+<table>
+    <thead><tr><th>Constant</th><th>Compares</th><th>Use Case</th></tr></thead>
+    <tbody>
+        <tr><td><code>ITEM / FLUID</code></td><td>Type only</td><td>Don't care about count or NBT</td></tr>
+        <tr><td><code>ITEM_AND_TAG / FLUID_AND_TAG</code></td><td>Type + NBT tag</td><td>Care about attributes, not count</td></tr>
+        <tr><td><code>ALL</code></td><td>Type + count + NBT</td><td>Full comparison (default registered)</td></tr>
+    </tbody>
+</table>
+
+<p>null and ItemStack.EMPTY / FluidStack.EMPTY are treated as equivalent.</p>
+
+<h2 id="utils-cache">Cache System</h2>
+<p>The framework uses a three-tier caching strategy with computeIfAbsent semantics:</p>
+
+<table>
+    <thead><tr><th>Class</th><th>Backing</th><th>Thread-Safe</th><th>Usage</th></tr></thead>
+    <tbody>
+        <tr><td><code>MapCache&lt;K,V&gt;</code></td><td>Interface</td><td>—</td><td>Defines <code>getCache</code> / <code>getCacheNonAtomic</code></td></tr>
+        <tr><td><code>HashMapCache&lt;K,V&gt;</code></td><td>HashMap</td><td>No</td><td>Single-threaded (e.g., field factory cache)</td></tr>
+        <tr><td><code>ConcurrentHashMapCache&lt;K,V&gt;</code></td><td>ConcurrentHashMap</td><td>Yes</td><td>Concurrent access (e.g., enum cache)</td></tr>
+        <tr><td><code>IdentityHashMapCache&lt;K,V&gt;</code></td><td>FastUtil Reference2Reference</td><td>No</td><td>Identity-based Class key comparison (e.g., factory registries)</td></tr>
+    </tbody>
+</table>
+
 <!-- ===== ANNOTATIONS ===== -->
-<h2>Annotation Reference</h2>
+<h2 id="annotations">Annotation Reference</h2>
 
 <h3 id="an-synctoclient">@SyncToClient</h3>
 <p>Marks a field to be synchronized <strong>from server to client</strong>. Internally extends <code>@AddToManager</code>.</p>
@@ -691,7 +859,16 @@ reg.freeze();
 </table>
 
 <h3 id="an-synctoserver">@SyncToServer</h3>
-<p>Marks a field to be synchronized <strong>from client to server</strong>. Attributes are identical to <code>@SyncToClient</code>.</p>
+<p>Marks a field for <strong>client-to-server synchronization</strong>. When the client calls <code>DataSyncNetwork.syncBlockEntityToServer()</code>, changed fields are sent to the server for authoritative processing.</p>
+<table>
+    <thead><tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+        <tr><td>autoUpdate</td><td>boolean</td><td>true</td><td>When <code>autoOnly=true</code> in sync call, only auto-detect changes on this field</td></tr>
+        <tr><td>notifyUpdate</td><td>boolean</td><td>false</td><td>Trigger server-side <code>scheduleUpdate(LogicalSide)</code> after receiving sync</td></tr>
+        <tr><td>condition</td><td>String</td><td>""</td><td>Method name returning boolean; skip sync when returning true</td></tr>
+        <tr><td>listener</td><td>String</td><td>""</td><td>Change listener method with signature <code>(T newValue, T oldValue) -> void</code></td></tr>
+    </tbody>
+</table>
 
 <h3 id="an-savetodisk">@SaveToDisk</h3>
 <p>Marks a field to be <strong>persisted to disk</strong>. Internally extends <code>@AddToManager</code>.</p>
@@ -712,12 +889,27 @@ reg.freeze();
     <tbody>
         <tr><td>@AddToManager</td><td>FIELD</td><td>Meta-annotation. Marks a field for FieldDataManager management. @SaveToDisk/@SyncToClient/@SyncToServer all extend this</td></tr>
         <tr><td>@Access</td><td>FIELD</td><td>Marks a non-final field to use final-field Access mode. createInstance=true creates a new instance on serialization</td></tr>
-        <tr><td>@Codec</td><td>FIELD</td><td>Specifies custom codecs for the field. Can reference static DataCodec/ByteStreamCodec fields, or instance methods (writeToData/readFromData/writeToBuffer/readFromBuffer)</td></tr>
+        <tr><td>@Codec</td><td>FIELD</td><td>Custom serialization. Two modes: ① <code>saveCodec</code>/<code>syncCodec</code> reference static fields (e.g. FieldDataCodec); ② <code>writeToData</code>/<code>readFromData</code>/<code>writeToBuffer</code>/<code>readFromBuffer</code> reference instance methods</td></tr>
         <tr><td>@Strategy</td><td>FIELD</td><td>Specifies the Hash.Strategy for change detection, referencing a static field by name</td></tr>
         <tr><td>@Generic</td><td>FIELD</td><td>Forces generic type handling for the field. Use when the field is generic but auto-detection fails</td></tr>
         <tr><td>@AdditionalHolder</td><td>FIELD</td><td>Marks a nested IFieldDataHolder field; its internally annotated fields are merged into the current class's FieldDataManager</td></tr>
     </tbody>
 </table>
+
+<!-- ===== FieldDataHolderBlockEntity ===== -->
+<h2 id="field-data-holder-be">FieldDataHolderBlockEntity Base Class</h2>
+<p>Extend <code>FieldDataHolderBlockEntity</code> to get automatic sync and persistence. It provides:</p>
+
+<table>
+    <thead><tr><th>Method</th><th>Auto Behavior</th></tr></thead>
+    <tbody>
+        <tr><td><code>getUpdateTag()</code></td><td>Overrides vanilla to include <code>@SyncToClient</code> fields under <code>"field_sync"</code>. New players receive current state on chunk load</td></tr>
+        <tr><td><code>saveAdditional(tag)</code></td><td>Writes <code>VERSION</code> and <code>"field_save"</code> — serialized <code>@SaveToDisk</code> fields</td></tr>
+        <tr><td><code>load(tag)</code></td><td>Prefers <code>"field_sync"</code> (chunk sync), falls back to <code>"field_save"</code> (disk restore). Sync-first ensures fresh state for new players</td></tr>
+    </tbody>
+</table>
+
+<p>Manual steps: ① Call sync methods in tick, ② Call <code>setChanged()</code> after field changes, ③ Increment <code>VERSION</code> when changing field layout</p>
 
 <!-- ===== USAGE ===== -->
 <h2 id="usage-blockentity">BlockEntity Usage (Recommended)</h2>
@@ -839,7 +1031,7 @@ reg.freeze();
 <p>Network sync requires two steps working together:</p>
 <ol>
     <li><strong>Annotation configuration</strong> — with <code>autoUpdate = true</code> (default), the framework auto-compares old and new values to detect changes; set to <code>false</code> to require manual <code>markFieldsForSync("fieldName")</code></li>
-    <li><strong>Trigger sync explicitly</strong> — call <code>DataSyncNetwork.syncBlockEntityToClient(be, forceAll, auto)</code> to trigger the actual network send</li>
+    <li><strong>Trigger sync explicitly</strong> — call <code>DataSyncNetwork.syncBlockEntityToClient(be, writeAll, autoOnly)</code> to trigger the actual network send</li>
 </ol>
 <pre><code><span class="cmt">// autoUpdate = true (default) — automatic change detection</span>
 <span class="an">@SyncToClient</span>
@@ -849,7 +1041,7 @@ reg.freeze();
     energy += <span class="str">10</span>;  <span class="cmt">// direct modification, framework auto-detects the change</span>
     <span class="kw">if</span> (level.getGameTime() % <span class="str">20</span> == <span class="str">0</span>) {
         <span class="typ">DataSyncNetwork</span>.syncBlockEntityToClient(<span class="kw">this</span>, <span class="kw">false</span>, <span class="kw">true</span>);
-        <span class="cmt">// ↑ auto=true: internally calls updateFieldDirtyFlags(LogicalSide.SERVER, true)
+        <span class="cmt">// ↑ autoOnly=true: only checks autoUpdate fields. Internally calls updateFieldDirtyFlags(LogicalSide.SERVER, true)
         //    detectChange auto-discovers energy change → included in sync</span>
     }
 }</code></pre>

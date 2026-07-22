@@ -30,7 +30,7 @@ public final class FloatField extends AbstractField<Float> {
     }
 
     @Override
-    public void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean force) {
+    public void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean writeAll) {
         var value = definition.getFloat(source);
         lastValue = value;
         data.writeFloat(value);

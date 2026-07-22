@@ -44,7 +44,7 @@ public class DataKey2ObjectMap<K extends DataComponentKey<?>, V> extends Referen
         final int mask = this.mask;
         Object curr;
         int pos;
-        if ((curr = key[pos = ((DataComponentKey<?>) k).mixCode &mask]) == null) {
+        if ((curr = key[pos = ((DataComponentKey<?>) k).mixCode & mask]) == null) {
             return null;
         } else if (k == curr) {
             return this.value[pos];

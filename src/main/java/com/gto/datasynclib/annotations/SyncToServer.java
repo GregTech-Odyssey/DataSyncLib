@@ -6,11 +6,29 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Extended from {@link AddToManager}
- * Marks a field to be synchronized to the server.
- * Fields annotated with this annotation will have their values sent from the client to the server.
- * This is typically used for handling user input or client-side interactions that need to be
- * processed on the server, such as configuration settings or interaction states.
+ * Marks a field for <strong>client-to-server</strong> synchronization.
+ *
+ * <p>When the client calls
+ * {@link com.gto.datasynclib.network.DataSyncNetwork#syncBlockEntityToServer
+ * DataSyncNetwork.syncBlockEntityToServer()} (or the entity equivalent), changed fields
+ * annotated with {@code @SyncToServer} are serialized and sent to the server for
+ * authoritative processing.</p>
+ *
+ * <p>This is typically used for handling user input or client-side interactions that
+ * need server-side validation or processing, such as GUI configuration changes,
+ * button presses, or interaction state updates.</p>
+ *
+ * <h3>Automatic vs. manual update:</h3>
+ * <ul>
+ *   <li>{@code autoUpdate = true} (default) — the field is checked for changes
+ *       automatically during each sync call via dirty flag detection</li>
+ *   <li>{@code autoUpdate = false} — the field is only synced when explicitly
+ *       marked via {@code markFieldsForSync()}</li>
+ * </ul>
+ *
+ * <h3>Sync condition:</h3>
+ * <p>{@link #condition()} references a method with signature {@code (T) -> boolean}.
+ * When the method returns {@code true}, the field is <em>skipped</em> (not synced).</p>
  *
  * @see SyncToClient
  */

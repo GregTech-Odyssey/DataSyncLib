@@ -4,12 +4,11 @@ import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.DataSyncLib;
 import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
-import com.gto.datasynclib.annotations.SaveToDisk;
-import com.gto.datasynclib.annotations.SyncToClient;
-import com.gto.datasynclib.annotations.SyncToServer;
+import com.gto.datasynclib.annotations.*;
 import com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity;
 import com.gto.datasynclib.listener.ObjNotifiableHolder;
 import com.gto.datasynclib.network.DataSyncNetwork;
+import com.gto.datasynclib.util.FieldDataCodec;
 import lombok.Getter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -25,6 +24,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import java.util.*;
 
 class TestBlockEntity extends FieldDataHolderBlockEntity {
+
+    private static final FieldDataCodec<A> A_CODEC = FieldDataManager.createCodec(A.class, A::new);
 
     protected boolean isDirty;
     @SaveToDisk
@@ -46,7 +47,9 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     private final Map<Integer, Boolean> map = new HashMap<>();
 
     @SaveToDisk
-    private final A a = new A();
+    @Codec(saveCodec = "A_CODEC", syncCodec = "A_CODEC")
+    @SyncToClient
+    private A a = new A();
 
     @SaveToDisk
     @SyncToClient
@@ -87,6 +90,7 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
             isDirty = true;
             ++b.a;
             b.c.value = b.a + "";
+            a = new A(b.a);
             tagData.putInt("aaa", tagData.getInt("aaa") + 1);
             DataSyncNetwork.syncBlockEntityToClient(this, false, true);
         }
@@ -97,6 +101,7 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
             getFieldDataManager().markFieldsForSync("objectHolder");
             DataSyncNetwork.syncBlockEntityToServer(this, false, true);
             DataSyncLib.LOGGER.info("tagData: {}", tagData);
+            DataSyncLib.LOGGER.info("a.a: {}", a.a);
         }
     }
 
@@ -107,13 +112,18 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
         }
     }
 
-    private static class A implements IFieldDataHolder {
+    private static class A {
 
-        @SaveToDisk
+        private A(int a) {
+            this.a = a;
+        }
+
+        private A() {
+
+        }
+
+        @AddToManager
         private int a;
-
-        @Getter
-        private final FieldDataManager fieldDataManager = new FieldDataManager(this);
     }
 
     private static class B implements IFieldDataHolder {

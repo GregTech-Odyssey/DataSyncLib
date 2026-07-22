@@ -4,17 +4,60 @@ import com.gto.datasynclib.datastream.data.StringMapData;
 import net.minecraft.network.FriendlyByteBuf;
 
 /**
- * Interface for objects that hold field data managed by {@link FieldDataManager}.
- * Provides methods for synchronization, persistence, and custom data handling.
+ * Interface for objects whose annotated fields are managed by a {@link FieldDataManager}.
+ *
+ * <p>Implementations must provide a {@link FieldDataManager} via {@link #getFieldDataManager()}.
+ * The recommended approach is to use {@link com.gto.datasynclib.LazyFieldDataManager} for
+ * lazy initialization (see {@link com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity}
+ * for the canonical implementation).</p>
+ *
+ * <h3>Source resolution:</h3>
+ * <p>{@link #getSource(DataFieldDefinition)} resolves the actual object that owns a given
+ * field. For simple cases where all fields are declared directly on the holder class,
+ * this returns {@code this}. For nested holders (via
+ * {@link com.gto.datasynclib.annotations.AdditionalHolder @AdditionalHolder}), the
+ * {@link DataFieldDefinition#source} function is a composed getter chain that reaches
+ * into the nested object.</p>
+ *
+ * <h3>Customization hooks:</h3>
+ * <ul>
+ *   <li>{@link #writeCustomSyncData}/{@link #readCustomSyncData} — inject extra data before
+ *       field-level network serialization</li>
+ *   <li>{@link #writeCustomSaveData}/{@link #readCustomSaveData} — inject extra data before
+ *       field-level disk serialization</li>
+ *   <li>{@link #scheduleUpdate(LogicalSide)} — called after receiving sync data for fields
+ *       with {@code notifyUpdate = true}, for triggering re-renders or validation</li>
+ * </ul>
+ *
+ * @see FieldDataManager
+ * @see com.gto.datasynclib.LazyFieldDataManager
+ * @see com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity
  */
 public interface IFieldDataHolder {
 
     /**
-     * Gets the {@link FieldDataManager} associated with this data holder.
+     * Gets the {@link FieldDataManager} that drives the sync and persistence lifecycle
+     * for this holder's annotated fields.
      *
-     * @return the field data manager instance
+     * @return the field data manager instance (never null after initialization)
      */
     FieldDataManager getFieldDataManager();
+
+    /**
+     * Resolves the actual owning object for a given field definition.
+     *
+     * <p>For simple holders, returns {@code this}. For holders with
+     * {@code @AdditionalHolder} nested objects, walks the composed getter chain
+     * ({@link DataFieldDefinition#source}) to reach the nested owner.</p>
+     *
+     * @param definition the field definition to resolve the source for
+     * @return the object that owns the field (may be a nested sub-object)
+     */
+    default Object getSource(DataFieldDefinition<?> definition) {
+        var source = definition.source;
+        if (source == null) return this;
+        return source.apply(this);
+    }
 
     /**
      * Marks the specified fields for synchronization.
@@ -46,9 +89,9 @@ public interface IFieldDataHolder {
      * custom data synchronization.
      *
      * @param buf   the network data buffer
-     * @param force whether to force writing all data (ignoring dirty flags)
+     * @param writeAll whether to force writing all data (ignoring dirty flags)
      */
-    default void writeCustomSyncData(FriendlyByteBuf buf, boolean force) {
+    default void writeCustomSyncData(FriendlyByteBuf buf, boolean writeAll) {
     }
 
     /**

@@ -23,7 +23,7 @@ public final class IntCollectionAccess extends AbstractFieldAccess<IntCollection
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull IntCollection instance, boolean auto) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull IntCollection instance, boolean autoOnly) {
         var hashCode = instance.hashCode();
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;
@@ -33,13 +33,13 @@ public final class IntCollectionAccess extends AbstractFieldAccess<IntCollection
     }
 
     @Override
-    protected void writeBuffer(@NotNull LogicalSide side, @NotNull IntCollection instance, @NotNull FriendlyByteBuf data, boolean force) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull IntCollection instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
         data.writeVarInt(instance.size());
         instance.forEach(data::writeInt);
     }
 
     @Override
-    protected void readBuffer(@NotNull LogicalSide side, @NotNull IntCollection instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull IntCollection instance, @NotNull FriendlyByteBuf data) {
         var length = data.readVarInt();
         instance.clear();
         for (int i = 0; i < length; i++) {
@@ -48,13 +48,13 @@ public final class IntCollectionAccess extends AbstractFieldAccess<IntCollection
     }
 
     @Override
-    protected @NotNull Data writeData(@NotNull Object source, @NotNull IntCollection instance) {
+    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull IntCollection instance) {
         if (instance.isEmpty()) return NullData.INSTANCE;
         return new IntArrayData(instance.toIntArray());
     }
 
     @Override
-    protected void readData(@NotNull IntCollection instance, @NotNull Data data, int dataVersion) {
+    protected void doReadData(@NotNull IntCollection instance, @NotNull Data data, int dataVersion) {
         instance.clear();
         var array = data.getIntArray();
         for (var element : array) {

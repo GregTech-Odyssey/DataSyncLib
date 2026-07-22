@@ -47,27 +47,27 @@ public final class FieldDataHolderAccess extends AbstractFieldAccess<IFieldDataH
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull IFieldDataHolder instance, boolean auto) {
-        return instance.getFieldDataManager().updateFieldDirtyFlags(side, auto);
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull IFieldDataHolder instance, boolean autoOnly) {
+        return instance.getFieldDataManager().updateFieldDirtyFlags(side, autoOnly);
     }
 
     @Override
-    protected void writeBuffer(@NotNull LogicalSide side, @NotNull IFieldDataHolder instance, @NotNull FriendlyByteBuf data, boolean force) {
-        data.writeByteArray(instance.getFieldDataManager().writeToNetworkBuffer(side, force));
+    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull IFieldDataHolder instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
+        data.writeByteArray(instance.getFieldDataManager().writeToNetworkBuffer(side, writeAll));
     }
 
     @Override
-    protected void readBuffer(@NotNull LogicalSide side, @NotNull IFieldDataHolder instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull IFieldDataHolder instance, @NotNull FriendlyByteBuf data) {
         instance.getFieldDataManager().readFromNetworkBuffer(side, data.readByteArray());
     }
 
     @Override
-    protected @NotNull Data writeData(@NotNull Object source, @NotNull IFieldDataHolder instance) {
+    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull IFieldDataHolder instance) {
         return instance.getFieldDataManager().writeToData();
     }
 
     @Override
-    protected void readData(@NotNull IFieldDataHolder instance, @NotNull Data data, int dataVersion) {
+    protected void doReadData(@NotNull IFieldDataHolder instance, @NotNull Data data, int dataVersion) {
         instance.getFieldDataManager().readFromData(data, dataVersion);
     }
 }

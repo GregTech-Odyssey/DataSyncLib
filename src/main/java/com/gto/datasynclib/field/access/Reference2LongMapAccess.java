@@ -30,7 +30,7 @@ public class Reference2LongMapAccess<K> extends AbstractFieldAccess<Reference2Lo
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Reference2LongMap instance, boolean auto) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Reference2LongMap instance, boolean autoOnly) {
         var hashCode = instance.hashCode();
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;
@@ -40,7 +40,7 @@ public class Reference2LongMapAccess<K> extends AbstractFieldAccess<Reference2Lo
     }
 
     @Override
-    protected void writeBuffer(@NotNull LogicalSide side, @NotNull Reference2LongMap instance, @NotNull FriendlyByteBuf data, boolean force) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull Reference2LongMap instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
         data.writeVarInt(instance.size());
         Reference2LongMaps.fastForEach(instance, e -> {
             keyCodec.streamWriter.encode(data, (K) e.getKey());
@@ -49,7 +49,7 @@ public class Reference2LongMapAccess<K> extends AbstractFieldAccess<Reference2Lo
     }
 
     @Override
-    protected void readBuffer(@NotNull LogicalSide side, @NotNull Reference2LongMap instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull Reference2LongMap instance, @NotNull FriendlyByteBuf data) {
         var length = data.readVarInt();
         instance.clear();
         for (int i = 0; i < length; i++) {
@@ -60,7 +60,7 @@ public class Reference2LongMapAccess<K> extends AbstractFieldAccess<Reference2Lo
     }
 
     @Override
-    protected @NotNull Data writeData(@NotNull Object source, @NotNull Reference2LongMap instance) {
+    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull Reference2LongMap instance) {
         if (instance.isEmpty()) return NullData.INSTANCE;
         var list = new ListData();
         Reference2LongMaps.fastForEach(instance, e -> {
@@ -71,7 +71,7 @@ public class Reference2LongMapAccess<K> extends AbstractFieldAccess<Reference2Lo
     }
 
     @Override
-    protected void readData(@NotNull Reference2LongMap instance, @NotNull Data data, int dataVersion) {
+    protected void doReadData(@NotNull Reference2LongMap instance, @NotNull Data data, int dataVersion) {
         var list = data.getList();
         var size = list.size();
         instance.clear();

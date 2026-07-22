@@ -23,7 +23,7 @@ public final class LongCollectionAccess extends AbstractFieldAccess<LongCollecti
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull LongCollection instance, boolean auto) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull LongCollection instance, boolean autoOnly) {
         var hashCode = instance.hashCode();
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;
@@ -33,13 +33,13 @@ public final class LongCollectionAccess extends AbstractFieldAccess<LongCollecti
     }
 
     @Override
-    protected void writeBuffer(@NotNull LogicalSide side, @NotNull LongCollection instance, @NotNull FriendlyByteBuf data, boolean force) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull LongCollection instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
         data.writeVarInt(instance.size());
         instance.forEach(data::writeLong);
     }
 
     @Override
-    protected void readBuffer(@NotNull LogicalSide side, @NotNull LongCollection instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull LongCollection instance, @NotNull FriendlyByteBuf data) {
         var length = data.readVarInt();
         instance.clear();
         for (int i = 0; i < length; i++) {
@@ -48,13 +48,13 @@ public final class LongCollectionAccess extends AbstractFieldAccess<LongCollecti
     }
 
     @Override
-    protected @NotNull Data writeData(@NotNull Object source, @NotNull LongCollection instance) {
+    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull LongCollection instance) {
         if (instance.isEmpty()) return NullData.INSTANCE;
         return new LongArrayData(instance.toLongArray());
     }
 
     @Override
-    protected void readData(@NotNull LongCollection instance, @NotNull Data data, int dataVersion) {
+    protected void doReadData(@NotNull LongCollection instance, @NotNull Data data, int dataVersion) {
         instance.clear();
         var array = data.getLongArray();
         for (var element : array) {

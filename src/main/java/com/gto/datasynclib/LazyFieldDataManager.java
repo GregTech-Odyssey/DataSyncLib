@@ -1,21 +1,39 @@
 package com.gto.datasynclib;
 
 /**
- * A thread-safe, lazy-initializing wrapper for {@link FieldDataManager}.
- * <p>
- * This class implements the double-checked locking pattern to ensure that the
- * {@link FieldDataManager} is created only once, even in concurrent environments.
- * The underlying {@link FieldDataManager} is only instantiated when first requested,
- * reducing overhead for cases where it may not be needed.
+ * A thread-safe, lazy-initializing wrapper for {@link FieldDataManager} using the
+ * double-checked locking pattern.
+ *
+ * <p>The underlying {@link FieldDataManager} is only instantiated when first requested
+ * via {@link #get()}, avoiding the cost of reflection-based field scanning until the
+ * holder is actually used for sync or persistence.</p>
+ *
+ * <p>An explicit {@code holderClass} can be provided to control which class hierarchy
+ * is scanned, independent of the holder's actual runtime class.</p>
+ *
+ * <h3>Thread-safety:</h3>
+ * <p>The {@code get()} method uses double-checked locking with a {@code synchronized}
+ * block. For full Java Memory Model correctness, the {@code fieldDataManager} field
+ * should be declared {@code volatile} to prevent instruction reordering that could
+ * expose a partially-constructed {@code FieldDataManager} to another thread.</p>
+ *
+ * @see FieldDataManager
  */
 public final class LazyFieldDataManager {
 
     private final IFieldDataHolder holder;
+    private final Class<?> holderClass;
 
-    private FieldDataManager fieldDataManager;
+    private volatile FieldDataManager fieldDataManager;
 
     public LazyFieldDataManager(IFieldDataHolder holder) {
         this.holder = holder;
+        this.holderClass = holder.getClass();
+    }
+
+    public LazyFieldDataManager(IFieldDataHolder holder, Class<?> holderClass) {
+        this.holder = holder;
+        this.holderClass = holderClass;
     }
 
     /**
@@ -31,7 +49,7 @@ public final class LazyFieldDataManager {
         if (manager == null) {
             synchronized (this) {
                 if (fieldDataManager == null) {
-                    fieldDataManager = new FieldDataManager(holder);
+                    fieldDataManager = new FieldDataManager(holder, holderClass);
                 }
                 manager = fieldDataManager;
             }

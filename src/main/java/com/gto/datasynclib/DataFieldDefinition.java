@@ -4,6 +4,7 @@ import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.util.ReflectUtil;
 import it.unimi.dsi.fastutil.Hash;
 import net.minecraft.network.FriendlyByteBuf;
+import org.jetbrains.annotations.Nullable;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.reflect.Field;
@@ -43,10 +44,6 @@ public final class DataFieldDefinition<T> {
     };
 
     /**
-     * Identity function used as the top-level source extractor for the root object.
-     */
-    static Function<Object, Object> SOURCE = Function.identity();
-    /**
      * Sorts definitions by their key for deterministic ordering.
      */
     static final Comparator<DataFieldDefinition<?>> COMPARATOR = Comparator.comparing(d -> d.key);
@@ -82,6 +79,7 @@ public final class DataFieldDefinition<T> {
     /**
      * Function that extracts the owning object from the root holder. Supports nested {@code @AdditionalHolder}.
      */
+    @Nullable
     public final Function<Object, Object> source;
     /**
      * Whether this field is persisted to disk (annotated with {@code @SaveToDisk}).
@@ -127,7 +125,7 @@ public final class DataFieldDefinition<T> {
     private final MethodHandle serverListenerHandle;
 
     @SuppressWarnings("unchecked")
-    DataFieldDefinition(Field field, DataField.Factory<T> factory, Function<Object, Object> source, FieldAnnotationMetadata fieldAnnotations, Class<?>[] genericType, boolean isFinal, boolean createInstance, Map<Class<?>, Hash.Strategy<?>> strategies) {
+    DataFieldDefinition(Field field, DataField.Factory<T> factory, @Nullable Function<Object, Object> source, FieldAnnotationMetadata fieldAnnotations, Class<?>[] genericType, boolean isFinal, boolean createInstance, Map<Class<?>, Hash.Strategy<?>> strategies) {
         this.field = field;
         this.factory = factory;
         this.source = source;
@@ -272,7 +270,7 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, boolean value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
         if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
@@ -282,7 +280,7 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, byte value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
         if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
@@ -292,7 +290,7 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, short value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
         if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
@@ -302,7 +300,7 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, int value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
         if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
@@ -312,7 +310,7 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, long value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
         if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
@@ -322,7 +320,7 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, float value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
         if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
@@ -332,7 +330,7 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, double value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
         if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
@@ -342,7 +340,7 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, char value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
         if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
@@ -352,7 +350,7 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, T value) {
-        var conditions = side == LogicalSide.CLIENT ? this.syncToServerCondition : this.syncToClientCondition;
+        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
         if (conditions == null) return false;
         try {
             return (boolean) conditions.invokeExact(source, value);
@@ -598,15 +596,15 @@ public final class DataFieldDefinition<T> {
     }
 
     public MethodHandle getListener(LogicalSide side) {
-        return side == LogicalSide.CLIENT ? clientListenerHandle : serverListenerHandle;
+        return side.isClient() ? clientListenerHandle : serverListenerHandle;
     }
 
     boolean notifyUpdate(LogicalSide side) {
-        return side == LogicalSide.CLIENT ? notifyClientUpdate : notifyServerUpdate;
+        return side.isClient() ? notifyClientUpdate : notifyServerUpdate;
     }
 
     boolean autoUpdate(LogicalSide side) {
-        return side == LogicalSide.CLIENT ? autoSyncToServer : autoSyncToClient;
+        return side.isServer() ? autoSyncToClient : autoSyncToServer;
     }
 
     public Data encode(Object source, T obj) {

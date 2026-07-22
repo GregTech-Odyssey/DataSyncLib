@@ -121,6 +121,7 @@ li { margin: 4px 0; }
             <a href="#field-definition-storage">FieldDefinitionStorage</a>
             <a href="#datasync-network">DataSyncNetwork</a>
             <a href="#codec">DataSyncCodec</a>
+            <a href="#field-data-codec">FieldDataCodec</a>
             <a href="#datacomponent">DataComponent 系统</a>
             <a href="#registry">Registry 工具类</a>
             <a href="#notifiable-holder">NotifiableHolder</a>
@@ -132,6 +133,7 @@ li { margin: 4px 0; }
             <a href="#an-other">其他注解</a>
         </div>
         <div class="nav-section"><div class="nav-section-title">使用指南</div>
+            <a href="#field-data-holder-be">FieldDataHolderBlockEntity</a>
             <a href="#usage-blockentity">BlockEntity 用法</a>
             <a href="#usage-entity">Entity 用法</a>
             <a href="#usage-regular">普通类用法</a>
@@ -140,6 +142,15 @@ li { margin: 4px 0; }
             <a href="#usage-persist">持久化详解</a>
             <a href="#usage-codec">注册自定义 Codec</a>
             <a href="#usage-advanced">高级特性</a>
+        </div>
+        <div class="nav-section"><div class="nav-section-title">工具类</div>
+            <a href="#utils-nbt">NbtUtil</a>
+            <a href="#utils-codecs">DataCodecs / StreamCodecs</a>
+            <a href="#utils-reflect">ReflectUtil</a>
+            <a href="#utils-hash">HashUtil</a>
+            <a href="#utils-enum">EnumUtil</a>
+            <a href="#utils-strategy">Hash 策略</a>
+            <a href="#utils-cache">缓存体系</a>
         </div>
         <div class="nav-section"><div class="nav-section-title">API 参考</div>
             <a href="#api-codecs">内置 Codec 列表</a>
@@ -240,7 +251,7 @@ li { margin: 4px 0; }
 <p>字段同步需要 <strong>主动调用</strong> <code>DataSyncNetwork</code> 的静态方法触发。框架不会自动在每 tick 推送数据。</p>
 <ol>
     <li><strong>修改字段值</strong> — 在 tick 或业务方法中修改被注解标记的字段</li>
-    <li><strong>调用同步方法</strong> — 调用 <code>DataSyncNetwork.syncBlockEntityToClient(be, forceAll, auto)</code>（服务端）或 <code>syncBlockEntityToServer(be, forceAll, auto)</code>（客户端）</li>
+    <li><strong>调用同步方法</strong> — 调用 <code>DataSyncNetwork.syncBlockEntityToClient(be, writeAll, autoOnly)</code>（服务端）或 <code>syncBlockEntityToServer(be, writeAll, autoOnly)</code>（客户端）</li>
     <li><strong>内部流程</strong> — 同步方法内部调用 <code>FieldDataManager.updateFieldDirtyFlags()</code> 检测变化 → <code>writeToNetworkBuffer()</code> 序列化 → 发送网络包</li>
     <li><strong>远端接收</strong> — 收到包后调用 <code>FieldDataManager.readFromNetworkBuffer()</code> 反序列化，还原字段值</li>
     <li><strong>更新通知</strong> — 若字段设置了 <code>notifyUpdate = true</code>，调用 <code>scheduleUpdate()</code> 通知渲染刷新</li>
@@ -401,7 +412,7 @@ li { margin: 4px 0; }
         <tr><td>getFieldDataManager()</td><td><strong>必须实现</strong>。返回关联的 FieldDataManager 实例</td></tr>
         <tr><td>markFieldsForSync(String...)</td><td>便捷 default 方法，标记指定字段为脏（用于 autoUpdate=false 的字段）</td></tr>
         <tr><td>scheduleUpdate(LogicalSide)</td><td>default 方法，字段更新通知时调用。重写以触发渲染刷新等操作</td></tr>
-        <tr><td>writeCustomSyncData(buf, force)</td><td>在标准字段同步前写入额外的自定义数据到网络包</td></tr>
+        <tr><td>writeCustomSyncData(buf, writeAll)</td><td>在标准字段同步前写入额外的自定义数据到网络包</td></tr>
         <tr><td>readCustomSyncData(buf)</td><td>在标准字段同步前从网络包读取额外的自定义数据</td></tr>
         <tr><td>writeCustomSaveData(data)</td><td>在标准字段持久化前写入额外的自定义数据到 StringMapData</td></tr>
         <tr><td>readCustomSaveData(data, version)</td><td>在标准字段加载前从 StringMapData 读取额外的自定义数据</td></tr>
@@ -436,8 +447,8 @@ li { margin: 4px 0; }
         <tr><td>markAsChanged(source)</td><td>标记该字段为脏（针对特定 source 对象）</td></tr>
         <tr><td>isChanged(source)</td><td>检查字段是否已标记为脏</td></tr>
         <tr><td>clearChanged(source)</td><td>清除脏标记</td></tr>
-        <tr><td>detectChange(side, source, auto)</td><td>检测字段值是否发生变化，auto 参数指示是否为自动检测模式</td></tr>
-        <tr><td>writeToBuffer(side, source, buf, force)</td><td>将字段值写入网络缓冲区。force=true 时忽略脏标记强制写入</td></tr>
+        <tr><td>detectChange(side, source, autoOnly)</td><td>检测字段值是否发生变化，autoOnly 参数：true=仅检查 autoUpdate 字段，false=强制检查所有字段</td></tr>
+        <tr><td>writeToBuffer(side, source, buf, writeAll)</td><td>将字段值写入网络缓冲区。writeAll=true 时写入所有字段（忽略脏标记）</td></tr>
         <tr><td>readFromBuffer(side, source, buf)</td><td>从网络缓冲区读取并设置字段值，同时触发 listener 回调</td></tr>
         <tr><td>writeToData(source)</td><td>将字段值编码为 Data 对象用于持久化</td></tr>
         <tr><td>readFromData(source, data, version)</td><td>从 Data 对象解码并还原字段值</td></tr>
@@ -465,7 +476,7 @@ li { margin: 4px 0; }
 <h3>核心职责</h3>
 <ul style="line-height: 2;">
     <li><strong>字段发现与实例化</strong> — 从 <code>FieldDefinitionStorage</code> 读取类级元数据，为每个字段创建 DataField 实现</li>
-    <li><strong>变更检测</strong> — <code>updateFieldDirtyFlags(LogicalSide, boolean auto)</code> 遍历同步字段，调用 detectChange</li>
+    <li><strong>变更检测</strong> — <code>updateFieldDirtyFlags(LogicalSide, boolean autoOnly)</code> 遍历同步字段，调用 detectChange</li>
     <li><strong>网络序列化</strong> — 先写自定义同步数据，然后按 (VarInt fieldIndex, fieldPayload) 格式写入每个脏字段</li>
     <li><strong>数据持久化</strong> — 通过 <code>writeToData()</code>/<code>readFromData()</code> 使用 StringMapData 格式读写</li>
     <li><strong>重入保护</strong> — <code>updating</code> 和 <code>writing</code> volatile 标志防止递归</li>
@@ -476,8 +487,8 @@ li { margin: 4px 0; }
 <table>
     <thead><tr><th>方法</th><th>说明</th></tr></thead>
     <tbody>
-        <tr><td>updateFieldDirtyFlags(side, auto)</td><td>遍历同步字段调用 detectChange。有变化或已标记脏则返回 true</td></tr>
-        <tr><td>writeToNetworkBuffer(side, force)</td><td>序列化脏字段为 byte[]。force=true 时写入所有字段</td></tr>
+        <tr><td>updateFieldDirtyFlags(side, autoOnly)</td><td>遍历同步字段调用 detectChange。有变化或已标记脏则返回 true</td></tr>
+        <tr><td>writeToNetworkBuffer(side, writeAll)</td><td>序列化脏字段为 byte[]。writeAll=true 时写入所有字段</td></tr>
         <tr><td>readFromNetworkBuffer(side, data)</td><td>反序列化 byte[] 并还原字段值，触发 listener 和 scheduleUpdate</td></tr>
         <tr><td>writeToData()</td><td>序列化所有 @SaveToDisk 字段为 StringMapData</td></tr>
         <tr><td>readFromData(data, dataVersion)</td><td>从 StringMapData 反序列化还原所有持久化字段</td></tr>
@@ -535,10 +546,10 @@ li { margin: 4px 0; }
 <table>
     <thead><tr><th>方法</th><th>调用侧</th><th>参数</th></tr></thead>
     <tbody>
-        <tr><td>syncBlockEntityToClient(be, all, auto)</td><td>服务端</td><td>all: 强制全量同步; auto: 自动检测变化</td></tr>
-        <tr><td>syncBlockEntityToServer(be, all, auto)</td><td>客户端</td><td>同上</td></tr>
-        <tr><td>syncEntityToClient(entity, all, auto)</td><td>服务端</td><td>同上</td></tr>
-        <tr><td>syncEntityToServer(entity, all, auto)</td><td>客户端</td><td>同上</td></tr>
+        <tr><td>syncBlockEntityToClient(be, all, autoOnly)</td><td>服务端</td><td>all: 全量同步（true=全部字段）; autoOnly: true=仅检查 autoUpdate 字段</td></tr>
+        <tr><td>syncBlockEntityToServer(be, all, autoOnly)</td><td>客户端</td><td>同上</td></tr>
+        <tr><td>syncEntityToClient(entity, all, autoOnly)</td><td>服务端</td><td>同上</td></tr>
+        <tr><td>syncEntityToServer(entity, all, autoOnly)</td><td>客户端</td><td>同上</td></tr>
     </tbody>
 </table>
 <div class="note"><strong>异步原理：</strong>方法内部检测变化并序列化数据后，通过 <code>level.getServer().execute()</code>（服务端）或 <code>Minecraft.getInstance().execute()</code>（客户端）将网络包发送调度到主线程，因此本身可在任意线程调用。另外，当数据由服务端→客户端同步时，接收方的 handler 会自动对 BlockEntity 调用 <code>be.setChanged()</code>。</div>
@@ -564,6 +575,31 @@ li { margin: 4px 0; }
     <li><strong>泛型支持</strong> — register() 可接受 Class&lt;?&gt;... genericTypes 参数，内部用 identityHashCode 包装数组作为缓存键</li>
     <li><strong>Minecraft 集成</strong> — 提供 register(type, Registry) 便捷方法，自动从 Minecraft 注册表创建 Codec</li>
 </ul>
+
+<!-- ===== FieldDataCodec ===== -->
+<h2 id="field-data-codec">FieldDataCodec — POJO 编解码器</h2>
+<p><code>FieldDataCodec&lt;T&gt;</code> 是一个复合编解码器，它将一个带注解的 POJO 类的所有 <code>@SaveToDisk</code>/<code>@SyncToClient</code> 字段作为一个整体进行序列化。它同时实现了 <code>ByteStreamCodec&lt;T&gt;</code> 和 <code>DataCodec&lt;T&gt;</code>，因此可以直接在 <code>@Codec</code> 注解中引用。</p>
+
+<div class="code-block"><pre><span class="kw">private static final</span> <span class="typ">FieldDataCodec</span>&lt;<span class="typ">MyConfig</span>&gt; CONFIG_CODEC =
+    <span class="typ">FieldDataManager</span>.createCodec(<span class="typ">MyConfig</span>.class, <span class="typ">MyConfig</span>::<span class="kw">new</span>);
+
+<span class="an">@SaveToDisk</span>
+<span class="an">@SyncToClient</span>
+<span class="an">@Codec</span>(saveCodec = <span class="str">"CONFIG_CODEC"</span>, syncCodec = <span class="str">"CONFIG_CODEC"</span>)
+<span class="kw">private</span> <span class="typ">MyConfig</span> config = <span class="kw">new</span> <span class="typ">MyConfig</span>();</pre></div>
+
+<p>内部原理：<code>FieldDataCodec</code> 实现了 <code>IFieldDataHolder</code>，在 encode/decode 时通过 <code>ThreadLocal</code> 将当前 POJO 实例暴露给内部的 <code>FieldDataManager</code>，由 <code>FieldDataManager.writeAllToData()</code> / <code>readAllFromData()</code> 完成所有字段的序列化。支持可选的额外自定义数据（通过构造函数的 <code>extraStreamWriter</code> 等参数）。</p>
+
+<p>创建方式：</p>
+<div class="code-block"><pre><span class="cmt">// 简单方式</span>
+<span class="typ">FieldDataCodec</span>&lt;<span class="typ">MyObj</span>&gt; codec = <span class="typ">FieldDataManager</span>.createCodec(<span class="typ">MyObj</span>.class, <span class="typ">MyObj</span>::<span class="kw">new</span>);
+
+<span class="cmt">// 带额外自定义数据</span>
+<span class="typ">FieldDataCodec</span>&lt;<span class="typ">MyObj</span>&gt; codec = <span class="typ">FieldDataManager</span>.createCodec(
+    <span class="typ">MyObj</span>.class, <span class="typ">MyObj</span>::<span class="kw">new</span>,
+    extraStreamWriter, extraStreamReader,   <span class="cmt">// 网络自定义数据</span>
+    extraDataWriter, extraDataReader        <span class="cmt">// 磁盘自定义数据</span>
+);</pre></div>
 
 <!-- ===== DataComponent ===== -->
 <h2 id="datacomponent">DataComponent 系统</h2>
@@ -676,8 +712,144 @@ reg.freeze();
     });
 }</code></pre>
 
+<!-- ===== UTILITIES ===== -->
+<h2 id="utils-nbt">NbtUtil — NBT 转换工具（v26.7.3 重构）</h2>
+<p><code>NbtUtil</code> 提供了 Minecraft NBT 与 DataSyncLib <code>Data</code> 之间的转换，并注册了 3 个 <code>CustomData.Type</code>。不过，<strong>一般情况下不建议使用双向转换</strong>——用 CustomData 包装 NBT 对象性能更好（零拷贝，仅包装引用）。</p>
+
+<div class="note warn"><strong>⚠️ 使用建议：首选 CustomData 而非 convertToXxx</strong><br>
+CustomData 直接包装原始 NBT 对象（零拷贝），而 <code>convertToData/convertToTag</code> 会递归转换整棵树，创建全新的对象——O(n) 时间和内存开销。<br>
+<strong>仅在需要将已有 NBT 数据导入 Data 类型系统时才使用 convertToData；仅在有明确的 Data→NBT 兼容需求时才使用 convertToTag。</strong></div>
+
+<h3>CustomData 类型注册（推荐使用）</h3>
+<table>
+    <thead><tr><th>常量</th><th>ID</th><th>包装类型</th><th>用途</th></tr></thead>
+    <tbody>
+        <tr><td><code>TAG_TYPE</code></td><td>0</td><td><code>Tag</code></td><td>通用 NBT 标签（含类型 ID 前缀，运行时动态分发）</td></tr>
+        <tr><td><code>COMPOUND_TAG_TYPE</code></td><td>1</td><td><code>CompoundTag</code></td><td>复合 NBT 标签（已知类型，无 ID 前缀，更紧凑）</td></tr>
+        <tr><td><code>LIST_TAG_TYPE</code></td><td>2</td><td><code>ListTag</code></td><td>列表 NBT 标签（已知类型，无 ID 前缀，更紧凑）</td></tr>
+    </tbody>
+</table>
+
+<div class="code-block"><pre><span class="cmt">// ✅ 推荐：CustomData 零拷贝包装</span>
+<span class="typ">Data</span> data = <span class="typ">NbtUtil</span>.COMPOUND_TAG_TYPE.create(tag.copy());
+
+<span class="cmt">// ❌ 不推荐：完整转换（递归创建新对象）</span>
+<span class="typ">Data</span> data = <span class="typ">NbtUtil</span>.convertToData(tag);</pre></div>
+
+<h3>双向转换（仅在必要时使用）</h3>
+<div class="code-block"><pre><span class="cmt">// NBT → Data（一般安全，所有 NBT 类型都有对应 Data 类型）</span>
+<span class="typ">Data</span> data = <span class="typ">NbtUtil</span>.convertToData(compoundTag);
+<span class="cmt">// Data → NBT（有限制：Data 有 19 种类型，NBT 只有 13 种）</span>
+<span class="typ">Tag</span> tag = <span class="typ">NbtUtil</span>.convertToTag(data);</pre></div>
+
+<h3>Data → NBT 转换限制</h3>
+<p>NBT 只有 13 种类型，而 Data 有 19 种。以下 4 种 Data 类型<strong>无法转换回 NBT</strong>，转换时会抛出 <code>MatchException</code>：</p>
+<ul>
+    <li><code>DataMapData</code>（ID 16）— NBT 没有 Data→Data 映射</li>
+    <li><code>IntMapData</code>（ID 17）— NBT 没有 Int→Data 映射</li>
+    <li><code>LongMapData</code>（ID 18）— NBT 没有 Long→Data 映射</li>
+    <li><code>CustomData</code>（ID 15）— 用户自定义类型，NBT 无法表示</li>
+</ul>
+
+<p>支持双向转换的类型：<code>EndTag</code>↔NullData、<code>ByteTag</code>↔ByteData、<code>ShortTag</code>↔ShortData、<code>IntTag</code>↔IntData、<code>LongTag</code>↔LongData、<code>FloatTag</code>↔FloatData、<code>DoubleTag</code>↔DoubleData、<code>StringTag</code>↔StringData、<code>ByteArrayTag</code>↔ByteArrayData、<code>IntArrayTag</code>↔IntArrayData、<code>LongArrayTag</code>↔LongArrayData、<code>ListTag</code>↔ListData（元素逐一转换）、<code>CompoundTag</code>↔StringMapData（键值对逐一转换）。</p>
+
+<h2 id="utils-codecs">DataCodecs / StreamCodecs — Minecraft 类型编解码器</h2>
+<p>这两个工具类提供了常用 Minecraft 类型的预注册编解码器，供 <code>DataSyncCodec</code> 使用。</p>
+
+<table>
+    <thead><tr><th>常量</th><th>DataCodec 编码格式</th><th>StreamCodec 编码格式</th></tr></thead>
+    <tbody>
+        <tr><td><code>RESOURCE_LOCATION_CODEC</code></td><td>StringData("namespace:path")</td><td>UTF 字符串（namespace + path）</td></tr>
+        <tr><td><code>BLOCK_POS_CODEC</code></td><td>IntArrayData [x, y, z]</td><td>Long（<code>BlockPos.asLong()</code>）</td></tr>
+        <tr><td><code>TAG_CODEC</code></td><td>CustomData → NbtUtil.TAG_TYPE</td><td>1字节类型ID + NBT写入</td></tr>
+        <tr><td><code>COMPOUND_TAG_CODEC</code></td><td>CustomData → NbtUtil.COMPOUND_TAG_TYPE</td><td>直接 NBT 写入（无类型ID）</td></tr>
+        <tr><td><code>LIST_TAG_CODEC</code></td><td>CustomData → NbtUtil.LIST_TAG_TYPE</td><td>直接 NBT 写入（无类型ID）</td></tr>
+        <tr><td><code>ITEM_STACK_CODEC</code></td><td>CompoundTag（save/load）</td><td><code>FriendlyByteBuf.writeItem()</code></td></tr>
+        <tr><td><code>FLUID_STACK_CODEC</code></td><td>CompoundTag（writeToNBT）</td><td><code>FluidStack.writeToPacket()</code></td></tr>
+        <tr><td><code>COMPONENT_CODEC</code></td><td>StringData（JSON）</td><td><code>FriendlyByteBuf.writeComponent()</code></td></tr>
+    </tbody>
+</table>
+
+<p>这两个工具类也提供了 <code>of(Registry)</code> 方法，可根据 Minecraft 原版 Registry 创建对应的 codec（网络用数字 ID，持久化用 ResourceLocation key），<code>DataSyncCodec.register(Class, Registry)</code> 内部就是调用这些方法。</p>
+
+<h2 id="utils-reflect">ReflectUtil — MethodHandle 反射工具</h2>
+<p><code>ReflectUtil</code> 是整个框架的性能基石，将所有反射操作转换为 <code>MethodHandle</code> 以接近直接调用的性能。</p>
+
+<table>
+    <thead><tr><th>方法</th><th>返回类型</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td><code>createAdaptedGetter(Field)</code></td><td><code>(Object) → fieldType</code></td><td>创建适配的 getter：原始类型返回原始值，对象类型返回 Object</td></tr>
+        <tr><td><code>createAdaptedSetter(Field)</code></td><td><code>(Object, value) → void</code></td><td>创建适配的 setter，final 字段返回 null</td></tr>
+        <tr><td><code>createAdaptedMethodHandle(Method)</code></td><td><code>(Object, Object...) → Result</code></td><td>创建适配的方法句柄，所有引用参数转为 Object</td></tr>
+        <tr><td><code>getFieldGenericTypeClasses(Type)</code></td><td><code>Class[]</code></td><td>提取泛型类型参数（如 <code>List&lt;String&gt;</code> → <code>[String.class]</code>）</td></tr>
+        <tr><td><code>parse(Class, String)</code></td><td><code>Object</code></td><td>字符串值解析（用于 default 值），支持原始类型/字符串/枚举</td></tr>
+    </tbody>
+</table>
+
+<p>Getter 创建策略：依次尝试 <code>unreflectGetter</code> → <code>findGetter</code> → <code>findVarHandle(GET)</code>。Setter 同理。<code>privateLookupIn</code> 提供完整访问权限，包含私有字段。</p>
+
+<h2 id="utils-hash">HashUtil — 数组标识哈希工具</h2>
+<p>提供基于 <strong>标识</strong>（identity）而非值（value）的数组哈希和相等性比较。用于泛型编解码器缓存中 <code>Class[]</code> 数组的 HashMap key —— 两个内容相同但不同实例的 <code>Class[]</code> 应被视为不同的 key（因为泛型类型参数需要精确匹配）。</p>
+
+<table>
+    <thead><tr><th>方法</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td><code>arrayIdentityHashCode(Object[])</code></td><td><code>System.identityHashCode</code> 逐元素计算</td></tr>
+        <tr><td><code>arrayIdentityEquals(Object[], Object[])</code></td><td><code>==</code>（引用相等）逐元素比较</td></tr>
+        <tr><td><code>arrayIdentityWrapper(T[])</code></td><td>返回 <code>Supplier&lt;T[]&gt;</code>，hash/equals 使用标识语义，用作缓存 key</td></tr>
+        <tr><td><code>arrayWrapper(T[])</code></td><td>返回 <code>Supplier&lt;T[]&gt;</code>，hash/equals 使用值语义（<code>Arrays.hashCode/equals</code>）</td></tr>
+    </tbody>
+</table>
+
+<h2 id="utils-enum">EnumUtil — 枚举序列化工具</h2>
+<p>提供枚举的名称/序列化名称缓存和"固定枚举"（fixed enum）概念。</p>
+
+<h3>固定枚举 vs 非固定枚举</h3>
+<p>固定枚举（通过 <code>addFixedEnum()</code> 注册）的 ordinal 顺序不会改变，因此使用 <strong>IntData</strong>（ordinal）编码，更紧凑。非固定枚举使用 <strong>StringData</strong>（序列化名称）编码，向下兼容性更好。</p>
+
+<table>
+    <thead><tr><th>方法</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td><code>addFixedEnum(Class)</code></td><td>注册一个固定枚举类型</td></tr>
+        <tr><td><code>isFixed(Class)</code></td><td>检查枚举是否为固定类型</td></tr>
+        <tr><td><code>getSerializedName(Enum)</code></td><td>获取枚举的序列化名称（优先 <code>StringRepresentable</code>，否则 <code>name()</code>）</td></tr>
+        <tr><td><code>getSerializedEnum(Class, String)</code></td><td>通过序列化名称反向查找枚举值</td></tr>
+    </tbody>
+</table>
+
+<p>框架默认注册了 <code>LogicalSide</code> 和 <code>Direction</code> 为固定枚举。</p>
+
+<h2 id="utils-strategy">ItemStackHashStrategy / FluidStackHashStrategy</h2>
+<p>自定义 <code>Hash.Strategy</code> 实现，用于 <code>ItemStack</code> 和 <code>FluidStack</code> 的变更检测。提供 3 个比较级别：</p>
+
+<table>
+    <thead><tr><th>常量</th><th>比较内容</th><th>适用场景</th></tr></thead>
+    <tbody>
+        <tr><td><code>ITEM / FLUID</code></td><td>仅物品/流体类型</td><td>不关心数量和 NBT</td></tr>
+        <tr><td><code>ITEM_AND_TAG / FLUID_AND_TAG</code></td><td>类型 + NBT 标签</td><td>关心物品属性，不关心数量</td></tr>
+        <tr><td><code>ALL</code></td><td>类型 + 数量 + NBT 标签</td><td>完整比较（默认注册）</td></tr>
+    </tbody>
+</table>
+
+<p>null 和 ItemStack.EMPTY / FluidStack.EMPTY 被视为等价。</p>
+
+<h2 id="utils-cache">缓存体系</h2>
+<p>框架内部使用三级缓存策略：</p>
+
+<table>
+    <thead><tr><th>类</th><th>后端</th><th>线程安全</th><th>使用场景</th></tr></thead>
+    <tbody>
+        <tr><td><code>MapCache&lt;K,V&gt;</code></td><td>接口</td><td>—</td><td>定义 <code>getCache</code> / <code>getCacheNonAtomic</code></td></tr>
+        <tr><td><code>HashMapCache&lt;K,V&gt;</code></td><td>HashMap</td><td>否</td><td>单线程场景（如字段工厂缓存）</td></tr>
+        <tr><td><code>ConcurrentHashMapCache&lt;K,V&gt;</code></td><td>ConcurrentHashMap</td><td>是</td><td>并发场景（如枚举缓存）</td></tr>
+        <tr><td><code>IdentityHashMapCache&lt;K,V&gt;</code></td><td>FastUtil Reference2Reference</td><td>否</td><td>Class 对象的标识比较（如工厂注册表）</td></tr>
+    </tbody>
+</table>
+
+<p>所有缓存都采用 <strong>computeIfAbsent</strong> 模式：首次访问时执行计算函数并缓存结果，后续访问直接返回缓存值。<code>getCacheNonAtomic</code> 方法牺牲原子性换取更高吞吐。</p>
+
 <!-- ===== ANNOTATIONS ===== -->
-<h2>注解参考</h2>
+<h2 id="annotations">注解参考</h2>
 
 <h3 id="an-synctoclient">@SyncToClient</h3>
 <p>标记字段从<strong>服务端同步到客户端</strong>。内部继承了 <code>@AddToManager</code>。</p>
@@ -692,7 +864,16 @@ reg.freeze();
 </table>
 
 <h3 id="an-synctoserver">@SyncToServer</h3>
-<p>标记字段从<strong>客户端同步到服务端</strong>。属性与 <code>@SyncToClient</code> 完全相同。</p>
+<p>标记字段从<strong>客户端同步到服务端</strong>。当客户端调用 <code>DataSyncNetwork.syncBlockEntityToServer()</code> 时，变更的字段会发送给服务端处理。</p>
+<table>
+    <thead><tr><th>属性</th><th>类型</th><th>默认</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>autoUpdate</td><td>boolean</td><td>true</td><td>是否在 <code>autoOnly=true</code> 的同步调用中自动检测变更</td></tr>
+        <tr><td>notifyUpdate</td><td>boolean</td><td>false</td><td>收到同步后是否触发服务端 <code>scheduleUpdate(LogicalSide)</code></td></tr>
+        <tr><td>condition</td><td>String</td><td>""</td><td>同步条件方法名，返回 true 时跳过该字段的同步</td></tr>
+        <tr><td>listener</td><td>String</td><td>""</td><td>变更监听器方法名，签名为 <code>(T newVal, T oldVal) -> void</code></td></tr>
+    </tbody>
+</table>
 
 <h3 id="an-savetodisk">@SaveToDisk</h3>
 <p>标记字段<strong>持久化到磁盘</strong>。内部继承了 <code>@AddToManager</code>。</p>
@@ -713,12 +894,27 @@ reg.freeze();
     <tbody>
         <tr><td>@AddToManager</td><td>FIELD</td><td>元注解。标记字段纳入 FieldDataManager 管理。@SaveToDisk/@SyncToClient/@SyncToServer 均继承了此注解</td></tr>
         <tr><td>@Access</td><td>FIELD</td><td>标记非 final 字段使用 final 字段的 Access 模式。createInstance=true 时在序列化中创建新实例</td></tr>
-        <tr><td>@Codec</td><td>FIELD</td><td>指定字段的自定义编解码器。可指定静态 DataCodec/BytestreamCodec 字段名，或实例方法名（writeToData/readFromData/writeToBuffer/readFromBuffer）</td></tr>
+        <tr><td>@Codec</td><td>FIELD</td><td>指定自定义序列化方式。两种模式：① <code>saveCodec</code>/<code>syncCodec</code> 引用静态字段（如 FieldDataCodec）；② <code>writeToData</code>/<code>readFromData</code>/<code>writeToBuffer</code>/<code>readFromBuffer</code> 引用实例方法</td></tr>
         <tr><td>@Strategy</td><td>FIELD</td><td>指定变化检测的 Hash.Strategy，值为静态字段名。用于自定义类型的变化比较逻辑</td></tr>
         <tr><td>@Generic</td><td>FIELD</td><td>标记字段使用泛型类型处理。当字段为泛型类型但自动检测失败时使用</td></tr>
         <tr><td>@AdditionalHolder</td><td>FIELD</td><td>标记嵌套的 IFieldDataHolder 字段，其内部被注解的字段会被合并到当前类的 FieldDataManager 中管理</td></tr>
     </tbody>
 </table>
+
+<!-- ===== FieldDataHolderBlockEntity ===== -->
+<h2 id="field-data-holder-be">FieldDataHolderBlockEntity 基类</h2>
+<p><code>FieldDataHolderBlockEntity</code> 是推荐的基类，继承它即可自动获得字段同步和持久化能力：</p>
+
+<table>
+    <thead><tr><th>方法</th><th>自动功能</th></tr></thead>
+    <tbody>
+        <tr><td><code>getUpdateTag()</code></td><td>覆写原版方法，将 <code>@SyncToClient</code> 字段写入 <code>"field_sync"</code> NBT 数据。新玩家进入区块时自动接收当前状态</td></tr>
+        <tr><td><code>saveAdditional(tag)</code></td><td>写入 <code>VERSION</code> 和 <code>"field_save"</code> — 所有 <code>@SaveToDisk</code> 字段的序列化数据</td></tr>
+        <tr><td><code>load(tag)</code></td><td>优先读取 <code>"field_sync"</code>（区块同步），否则读取 <code>"field_save"</code>（磁盘恢复）。<code>"field_sync"</code> 优先确保新玩家获取最新状态</td></tr>
+    </tbody>
+</table>
+
+<p>手动步骤：① 在 tick 中调用 sync 方法、② 字段变更后调用 <code>setChanged()</code>、③ 改字段结构时递增 <code>VERSION</code></p>
 
 <!-- ===== USAGE ===== -->
 <h2 id="usage-blockentity">BlockEntity 用法（推荐）</h2>
@@ -840,7 +1036,7 @@ reg.freeze();
 <p>网络同步需要两步配合：</p>
 <ol>
     <li><strong>注解配置</strong> — 字段上设置 <code>autoUpdate = true</code>（默认）时，框架自动对比新旧值检测变化；设为 <code>false</code> 时需要手动 <code>markFieldsForSync("fieldName")</code></li>
-    <li><strong>主动触发同步</strong> — 调用 <code>DataSyncNetwork.syncBlockEntityToClient(be, forceAll, auto)</code> 方法触发实际的网络发送</li>
+    <li><strong>主动触发同步</strong> — 调用 <code>DataSyncNetwork.syncBlockEntityToClient(be, writeAll, autoOnly)</code> 方法触发实际的网络发送</li>
 </ol>
 <pre><code><span class="cmt">// autoUpdate = true（默认）—— 自动检测变化</span>
 <span class="an">@SyncToClient</span>
@@ -850,7 +1046,7 @@ reg.freeze();
     energy += <span class="str">10</span>;  <span class="cmt">// 直接修改，框架会自动检测到变化</span>
     <span class="kw">if</span> (level.getGameTime() % <span class="str">20</span> == <span class="str">0</span>) {
         <span class="typ">DataSyncNetwork</span>.syncBlockEntityToClient(<span class="kw">this</span>, <span class="kw">false</span>, <span class="kw">true</span>);
-        <span class="cmt">// ↑ auto=true: 内部调用 updateFieldDirtyFlags(LogicalSide.SERVER, true)
+        <span class="cmt">// ↑ autoOnly=true: 仅检查 autoUpdate=true 的字段。内部调用 updateFieldDirtyFlags(LogicalSide.SERVER, true)
         //    detectChange 自动发现 energy 变化 → 纳入同步</span>
     }
 }</code></pre>

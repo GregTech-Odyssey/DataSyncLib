@@ -30,7 +30,7 @@ public final class ByteField extends AbstractField<Byte> {
     }
 
     @Override
-    public void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean force) {
+    public void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean writeAll) {
         var value = definition.getByte(source);
         lastValue = value;
         data.writeByte(value);

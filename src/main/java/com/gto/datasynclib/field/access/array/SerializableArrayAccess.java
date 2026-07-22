@@ -28,7 +28,7 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, IDataSerializable @NotNull [] instance, boolean auto) {
+    protected boolean hasChange(@NotNull LogicalSide side, IDataSerializable @NotNull [] instance, boolean autoOnly) {
         var hashCode = HashUtil.arrayIdentityHashCode(instance);
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;
@@ -48,7 +48,7 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
     }
 
     @Override
-    protected void writeBuffer(@NotNull LogicalSide side, IDataSerializable @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean force) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, IDataSerializable @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
         for (var element : instance) {
             if (element == null || !element.isChanged()) {
                 data.writeBoolean(false);
@@ -60,7 +60,7 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
     }
 
     @Override
-    protected void readBuffer(@NotNull LogicalSide side, IDataSerializable @NotNull [] instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, IDataSerializable @NotNull [] instance, @NotNull FriendlyByteBuf data) {
         for (var element : instance) {
             if (data.readBoolean()) {
                 if (element != null) element.readBuffer(side, data);
@@ -69,7 +69,7 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
     }
 
     @Override
-    protected @NotNull Data writeData(@NotNull Object source, IDataSerializable @NotNull [] instance) {
+    protected @NotNull Data doWriteData(@NotNull Object source, IDataSerializable @NotNull [] instance) {
         var list = new ListData();
         for (var element : instance) {
             if (element != null) {
@@ -86,7 +86,7 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
     }
 
     @Override
-    protected void readData(IDataSerializable @NotNull [] instance, @NotNull Data data, int dataVersion) {
+    protected void doReadData(IDataSerializable @NotNull [] instance, @NotNull Data data, int dataVersion) {
         var list = data.getList();
         var length = Math.min(list.size(), instance.length);
         if (dataVersion == -1) {

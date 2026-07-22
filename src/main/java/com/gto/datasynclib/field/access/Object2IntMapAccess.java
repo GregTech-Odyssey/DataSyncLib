@@ -31,7 +31,7 @@ public class Object2IntMapAccess<K> extends AbstractFieldAccess<Object2IntMap> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Object2IntMap instance, boolean auto) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Object2IntMap instance, boolean autoOnly) {
         var hashCode = instance.hashCode();
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;
@@ -41,7 +41,7 @@ public class Object2IntMapAccess<K> extends AbstractFieldAccess<Object2IntMap> {
     }
 
     @Override
-    protected void writeBuffer(@NotNull LogicalSide side, @NotNull Object2IntMap instance, @NotNull FriendlyByteBuf data, boolean force) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull Object2IntMap instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
         data.writeVarInt(instance.size());
         Object2IntMaps.fastForEach(instance, e -> {
             keyCodec.streamWriter.encode(data, (K) e.getKey());
@@ -50,7 +50,7 @@ public class Object2IntMapAccess<K> extends AbstractFieldAccess<Object2IntMap> {
     }
 
     @Override
-    protected void readBuffer(@NotNull LogicalSide side, @NotNull Object2IntMap instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull Object2IntMap instance, @NotNull FriendlyByteBuf data) {
         var length = data.readVarInt();
         instance.clear();
         for (int i = 0; i < length; i++) {
@@ -61,7 +61,7 @@ public class Object2IntMapAccess<K> extends AbstractFieldAccess<Object2IntMap> {
     }
 
     @Override
-    protected @NotNull Data writeData(@NotNull Object source, @NotNull Object2IntMap instance) {
+    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull Object2IntMap instance) {
         if (instance.isEmpty()) return NullData.INSTANCE;
         var list = new ListData();
         Object2IntMaps.fastForEach(instance, e -> {
@@ -72,7 +72,7 @@ public class Object2IntMapAccess<K> extends AbstractFieldAccess<Object2IntMap> {
     }
 
     @Override
-    protected void readData(@NotNull Object2IntMap instance, @NotNull Data data, int dataVersion) {
+    protected void doReadData(@NotNull Object2IntMap instance, @NotNull Data data, int dataVersion) {
         var list = data.getList();
         var size = list.size();
         instance.clear();

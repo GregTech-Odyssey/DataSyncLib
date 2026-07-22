@@ -9,18 +9,35 @@ Using declarative annotations (`@SyncToClient`, `@SyncToServer`, `@SaveToDisk`),
 handles client-server field synchronization, change detection, and disk persistence — drastically
 reducing boilerplate code.
 
+## Architecture
+
+```
+Annotations → FieldDefinitionStorage → DataFieldDefinition[]
+                                         ↓
+IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
+                    (DCL lazy init)        (per-instance)     (AbstractField / AbstractFieldAccess)
+```
+
+- **FieldDefinitionStorage**: Scans class hierarchy for annotated fields, caches metadata globally
+- **FieldDataManager**: Per-instance lifecycle manager — detects changes, serializes to network/disk
+- **DataField hierarchy**: `AbstractField` (primitive values), `ObjField` (objects with codecs), `AbstractFieldAccess` (collections/maps/arrays)
+- **DataSyncCodec**: Unified codec registry pairing `ByteStreamCodec` (network) with `DataCodec` (persistence)
+- **Data type system**: 19-type sealed binary format, more compact than NBT, with VarInt encoding
+
 ## Key Features
 
 - **🔁 Bidirectional Sync** — `@SyncToClient` and `@SyncToServer` handle server↔client field sync automatically. Async-safe.
 - **💾 Auto Persistence** — `@SaveToDisk` fields are automatically written to/read from NBT data.
-- **📡 Incremental Sync** — Built-in dirty flag mechanism transmits only changed fields.
-- **🔧 Extensible Codec** — Unified `DataSyncCodec` registry with 30+ pre-registered types.
-- **📢 Change Notification** — Listener callbacks + NotifiableHolder system.
-- **📦 DataComponent System** — Component-based data model via `DataComponentRegistry` + `DataComponentMap`.
-- **🗂️ Registry Utility** — Generic registry with freeze/unfreeze lifecycle and built-in serialization.
+- **📡 Incremental Sync** — Built-in dirty flag mechanism transmits only changed fields via index-addressed protocol.
+- **🔧 Extensible Codec** — Unified `DataSyncCodec` registry with 30+ pre-registered types, custom codec support via `@Codec`.
+- **📢 Change Notification** — Per-field listener callbacks + `NotifiableHolder` system for reactive updates.
+- **📦 DataComponent System** — Identity-keyed component data model via `DataComponentRegistry` + `DataComponentMap` with merge semantics.
+- **🗂️ Registry Utility** — Generic registry with freeze/unfreeze lifecycle and built-in serialization (ByteStream/Data/Mojang Codec).
 - **⚡ High Performance** — MethodHandle instead of reflection, FastUtil collections, multi-level caching, VarInt compact encoding.
-- **🗜️ Data Type System** — Custom 19-type binary Data system, more compact and efficient than Tag.
+- **🗜️ Data Type System** — Custom 19-type binary Data system, more compact than NBT Tag, with custom type extension.
 - **🧩 Ready to Use** — Extend `FieldDataHolderBlockEntity` to get full capabilities out of the box.
+- **🪆 Nested Holders** — `@AdditionalHolder` recursively discovers fields in nested objects with composed getter chains.
+- **🎯 Custom Strategies** — `@Strategy` for custom hash/equality change detection on complex types (ItemStack, FluidStack, etc.).
 
 ## Quick Start
 
@@ -31,6 +48,12 @@ public class MyBlockEntity extends FieldDataHolderBlockEntity {
     @SaveToDisk
     private int energy = 0;
 
+    @SyncToClient(notifyUpdate = true)  // Triggers scheduleUpdate on client
+    private String status = "idle";
+
+    @SyncToServer(autoUpdate = false)   // Only synced when explicitly marked
+    private int clientConfig = 0;
+
     public MyBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.MY_BLOCK_ENTITY.get(), pos, state);
     }
@@ -40,29 +63,182 @@ public class MyBlockEntity extends FieldDataHolderBlockEntity {
         setChanged();  // Mark chunk for saving to disk
         DataSyncNetwork.syncBlockEntityToClient(this, false, true);  // Async-safe
     }
+
+    // Called on client when a notifyUpdate field changes
+    @Override
+    public void scheduleUpdate(LogicalSide side) {
+        if (side.isClient()) {
+            // Re-render or refresh UI
+        }
+    }
 }
 ```
 
-> **Key points:** Sync requires explicit calls to `DataSyncNetwork.syncBlockEntityToClient()` (async-safe).
-> `markFieldsForSync` is for `autoUpdate = false` fields.
-> Persistence requires manual `setChanged()` calls.
-> See `TestBlockEntity` for a complete example.
+### Advanced: Nested Holders
+
+```java
+public class MachineBlockEntity extends FieldDataHolderBlockEntity {
+
+    @AdditionalHolder  // Scans InventoryData for annotated fields
+    private InventoryData inventory = new InventoryData();
+
+    @AdditionalHolder
+    private EnergyData energy = new EnergyData();
+}
+
+class InventoryData {
+    @SaveToDisk @SyncToClient
+    private int itemCount;
+}
+
+class EnergyData {
+    @SaveToDisk @SyncToClient(condition = "shouldSyncEnergy")
+    private long storedEnergy;
+
+    private boolean shouldSyncEnergy(long value) {
+        return value > 0;  // Skip sync when empty
+    }
+}
+```
+
+### Advanced: Custom Codec
+
+```java
+// 1. Define codec (FieldDataManager auto-discovers @SaveToDisk fields on the POJO)
+private static final FieldDataCodec<MyConfig> CONFIG_CODEC =
+    FieldDataManager.createCodec(MyConfig.class, MyConfig::new);
+
+// 2. Reference on the field
+@SaveToDisk
+@SyncToClient
+@Codec(saveCodec = "CONFIG_CODEC", syncCodec = "CONFIG_CODEC")
+private MyConfig config = new MyConfig();
+
+// Fields inside MyConfig annotated with @SaveToDisk automatically participate
+class MyConfig {
+    @SaveToDisk
+    private int maxSpeed;
+    @SaveToDisk
+    private String mode;
+}
+```
+
+### Advanced: Entity Sync
+
+```java
+public class MyEntity extends Entity implements IFieldDataHolder {
+
+    private final LazyFieldDataManager fieldDataManager = new LazyFieldDataManager(this);
+
+    @SyncToClient
+    private int state = 0;
+
+    @Override
+    public FieldDataManager getFieldDataManager() {
+        return fieldDataManager.get();
+    }
+
+    @Override
+    public void tick() {
+        if (!level().isClientSide()) {
+            state = calculateState();
+            DataSyncNetwork.syncEntityToClient(this);
+        }
+    }
+}
+```
+
+> **Key points:**
+> - Sync requires explicit calls to `DataSyncNetwork.syncBlockEntityToClient()` (async-safe).
+> - `autoUpdate = false` fields need `markFieldsForSync()` calls to trigger sync.
+> - Persistence requires manual `setChanged()` calls on the BlockEntity.
+> - `syncBlockEntityToClient(be, false, true)`: `false` = incremental (only changed), `true` = only fields with `autoUpdate=true`.
+> - See `TestBlockEntity` for a complete example with all features.
+
+## Annotation Reference
+
+| Annotation | Purpose | Key Attributes |
+|------------|---------|---------------|
+| `@SyncToClient` | Server→Client sync | `autoUpdate` (default true), `notifyUpdate`, `condition`, `listener` |
+| `@SyncToServer` | Client→Server sync | `autoUpdate` (default true), `notifyUpdate`, `condition`, `listener` |
+| `@SaveToDisk` | Disk persistence | `key`, `condition`, `saveNull`, `defaultValue`, `defaultValueGetter` |
+| `@Access` | Force access-mode (for containers) | `createInstance` |
+| `@AdditionalHolder` | Recursively scan nested object fields | — |
+| `@Codec` | Custom serialization | `saveCodec` / `syncCodec` / `writeToData` / `readFromData` etc. |
+| `@Strategy` | Custom change detection strategy | `value` (static field name) |
+| `@Generic` | Force generic-type factory resolution | — |
+| `@AddToManager` | Add to manager without auto sync/persist | — |
+
+## Data Flow
+
+### Sync Flow (Server→Client)
+
+```
+Server tick()
+  ├── Modify field values
+  ├── DataSyncNetwork.syncBlockEntityToClient(be, false, true)
+  │     ├── FieldDataManager.updateFieldDirtyFlags(SERVER, auto)
+  │     │     └── Iterate syncToClientFields → detectChange()
+  │     │           Compare current vs last snapshot → mark changed
+  │     ├── FieldDataManager.writeToNetworkBuffer(SERVER, writeAll)
+  │     │     ├── writeCustomSyncData()            → custom data
+  │     │     └── Iterate: writeVarInt(index) + value → byte[]
+  │     └── CHANNEL.send(TRACKING_CHUNK, packet)
+  │
+Client receive
+  ├── handleBlockEntityS2C()
+        ├── applyBlockEntitySyncData()
+        │     └── FieldDataManager.readFromNetworkBuffer(CLIENT, data)
+        │           ├── readCustomSyncData()
+        │           ├── while buf: readVarInt(index) → field.readFromBuffer()
+        │           └── notifyUpdate → scheduleUpdate()
+```
+
+### Persistence Flow
+
+```
+BlockEntity.saveAdditional(tag)
+  └── tag.putByteArray("field_save", writeToData().writeToBytes())
+        └── FieldDataManager.writeToData()
+              ├── writeCustomSaveData()
+              └── Iterate saveFields → field.writeToData()
+                    └── Produces StringMapData(key → Data)
+
+BlockEntity.load(tag)
+  ├── Prefer "field_sync" (chunk-load sync data)
+  └── Fallback "field_save" (disk persistence data)
+        └── FieldDataManager.readFromData(data, VERSION)
+              ├── readCustomSaveData()
+              └── Iterate saveFields → field.readFromData()
+```
 
 ## Documentation
 
-👉 **[Full Documentation - English (HTML)](docs/index_en.html)** | 👉 **[完整文档 - 中文 (HTML)](docs/index.html)**
+### 📖 Full Documentation (open in browser)
+The detailed documentation is provided as standalone HTML pages (open them directly in your browser,
+not through the IDE's file viewer):
 
-Covers: architecture design, sync & persistence flow, data flow, all core interfaces, complete annotation reference,
-DataComponent system, Registry utility, performance design (MethodHandle / FastUtil / Data type system / multi-level caching),
-usage guide (BlockEntity / Entity / plain class / nested holders), advanced features, full API reference.
+| Language | File | Content |
+|----------|------|---------|
+| 中文 | **[docs/index.html](docs/index.html)** | Architecture, data flow, API reference, annotation reference, usage guide |
+| English | **[docs/index_en.html](docs/index_en.html)** | Architecture, data flow, API reference, usage guide |
 
-## Tech Stack
+> **How to open:** Right-click the file in your IDE and select "Open in Browser", or
+> double-click the file in your file explorer. These are styled HTML pages with
+> sidebar navigation — they are not designed to be viewed as raw source.
+
+### 🌐 Translations
+- **[README_zh.md](README_zh.md)** — 中文版 README（Chinese README with full examples and data flow diagrams）
+
+## Dependencies
 
 | Component | Version |
 |-----------|---------|
 | Minecraft | 1.20.1 |
-| Forge    | 47.4.21 |
-| Java     | 21      |
+| Forge | 47.4.21 |
+| Java | 21 |
+| FastUtil | (bundled with Forge) |
+| Lombok | (compile-time only) |
 
 ## License
 

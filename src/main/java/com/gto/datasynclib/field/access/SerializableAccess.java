@@ -41,27 +41,27 @@ public final class SerializableAccess extends AbstractFieldAccess<IDataSerializa
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull IDataSerializable instance, boolean auto) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull IDataSerializable instance, boolean autoOnly) {
         return instance.detectChange();
     }
 
     @Override
-    protected void writeBuffer(@NotNull LogicalSide side, @NotNull IDataSerializable instance, @NotNull FriendlyByteBuf data, boolean force) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull IDataSerializable instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
         instance.writeBuffer(side, data);
     }
 
     @Override
-    protected void readBuffer(@NotNull LogicalSide side, @NotNull IDataSerializable instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull IDataSerializable instance, @NotNull FriendlyByteBuf data) {
         instance.readBuffer(side, data);
     }
 
     @Override
-    protected @NotNull Data writeData(@NotNull Object source, @NotNull IDataSerializable instance) {
+    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull IDataSerializable instance) {
         return instance.writeData();
     }
 
     @Override
-    protected void readData(@NotNull IDataSerializable instance, @NotNull Data data, int dataVersion) {
+    protected void doReadData(@NotNull IDataSerializable instance, @NotNull Data data, int dataVersion) {
         instance.readData(data, dataVersion);
     }
 }

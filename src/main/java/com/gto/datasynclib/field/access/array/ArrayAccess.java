@@ -28,7 +28,7 @@ public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, T @NotNull [] instance, boolean auto) {
+    protected boolean hasChange(@NotNull LogicalSide side, T @NotNull [] instance, boolean autoOnly) {
         var hashCode = Arrays.hashCode(instance);
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;
@@ -38,7 +38,7 @@ public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
     }
 
     @Override
-    protected void writeBuffer(@NotNull LogicalSide side, T @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean force) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, T @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
         for (var element : instance) {
             if (element == null) {
                 data.writeBoolean(false);
@@ -50,7 +50,7 @@ public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
     }
 
     @Override
-    protected void readBuffer(@NotNull LogicalSide side, T @NotNull [] instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, T @NotNull [] instance, @NotNull FriendlyByteBuf data) {
         var length = instance.length;
         for (int i = 0; i < length; i++) {
             if (data.readBoolean()) {
@@ -62,7 +62,7 @@ public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
     }
 
     @Override
-    protected @NotNull Data writeData(@NotNull Object source, T @NotNull [] instance) {
+    protected @NotNull Data doWriteData(@NotNull Object source, T @NotNull [] instance) {
         if (definition.hasDefaultValue() && Arrays.equals(instance, definition.getDefaultValue(source)))
             return NullData.NONE;
         var list = new ListData();
@@ -81,7 +81,7 @@ public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
     }
 
     @Override
-    protected void readData(T @NotNull [] instance, @NotNull Data data, int dataVersion) {
+    protected void doReadData(T @NotNull [] instance, @NotNull Data data, int dataVersion) {
         var list = data.getList();
         var length = Math.min(list.size(), instance.length);
         for (int i = 0; i < length; i++) {

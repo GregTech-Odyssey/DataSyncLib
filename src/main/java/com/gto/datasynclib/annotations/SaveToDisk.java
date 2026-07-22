@@ -6,9 +6,27 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Extended from {@link AddToManager}
- * Marks a field to be persisted to disk.
- * Annotated fields will be automatically saved and loaded.
+ * Marks a field for automatic persistence to disk (NBT compound data).
+ *
+ * <p>Annotated fields are automatically written to NBT on chunk save
+ * (via {@code BlockEntity.saveAdditional()}) and read back on chunk load
+ * (via {@code BlockEntity.load()}). The field value is serialized using the
+ * registered {@link com.gto.datasynclib.DataSyncCodec} for the field's type,
+ * or via a custom codec specified with {@link Codec @Codec}.</p>
+ *
+ * <h3>Default value optimization:</h3>
+ * <p>If {@link #defaultValue()} or {@link #defaultValueGetter()} is specified,
+ * the field value is compared against the default. When they match, the field
+ * is <em>not</em> written to disk, saving space. This is useful for fields
+ * whose initial/default state is common (e.g., 0, empty, false).</p>
+ *
+ * <h3>Save condition:</h3>
+ * <p>{@link #condition()} references a method with signature {@code (T) -> boolean}.
+ * When the method returns {@code true}, the field is <em>skipped</em> entirely.</p>
+ *
+ * @see SyncToClient
+ * @see SyncToServer
+ * @see Codec
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.FIELD)
