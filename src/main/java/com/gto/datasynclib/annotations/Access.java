@@ -41,8 +41,8 @@ public @interface Access {
      * in {@link com.gto.datasynclib.field.access.AbstractFieldAccess#readFromData}.</p>
      *
      * @return {@code true} if the instance itself should be persisted and restored,
-     *         {@code false} (default) if the instance always exists and only its
-     *         contents need serialization
+     * {@code false} (default) if the instance always exists and only its
+     * contents need serialization
      */
     boolean createInstance() default false;
 }

@@ -55,8 +55,7 @@ final class FieldAnnotationMetadata {
     private final boolean hasAccessAnnotation;
     private final boolean createAccessInstance;
 
-    FieldAnnotationMetadata(Class<?> clazz, Field field, SaveToDisk saveToDisk, SyncToClient syncToClient, SyncToServer syncToServer) {
-        var type = field.getType();
+    FieldAnnotationMetadata(Class<?> clazz, Field field, Class<?> type, SaveToDisk saveToDisk, SyncToClient syncToClient, SyncToServer syncToServer) {
         var access = field.getAnnotation(Access.class);
         var generic = field.getAnnotation(Generic.class);
         this.hasGeneric = generic != null;

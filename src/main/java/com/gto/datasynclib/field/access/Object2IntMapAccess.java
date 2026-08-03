@@ -13,8 +13,19 @@ import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Synchronizes a FastUtil Object2IntMap.
- * Has a key codec for object keys with raw int values.
+ * Synchronizes a FastUtil {@link it.unimi.dsi.fastutil.objects.Object2IntMap}.
+ *
+ * <p>Uses the generic type's key codec ({@link DataSyncCodec}) for serializing map keys,
+ * while int values are written/read directly as VarInts (no codec needed for the value type).
+ * Change detection uses {@link Object#hashCode()} comparison of the entire map.</p>
+ *
+ * <h3>Network format:</h3>
+ * <p>{@code VarInt(size) + forEach(keyCodec.encode(key), VarInt(value))}.
+ * The map is cleared and re-populated on receive.</p>
+ *
+ * <h3>Persistence format:</h3>
+ * <p>Interleaved key-value pairs in a {@link com.gto.datasynclib.datastream.data.ListData}:
+ * {@code [keyData0, IntData(value0), keyData1, IntData(value1), ...]}</p>
  */
 public class Object2IntMapAccess<K> extends AbstractFieldAccess<Object2IntMap> {
 
@@ -45,7 +56,7 @@ public class Object2IntMapAccess<K> extends AbstractFieldAccess<Object2IntMap> {
         data.writeVarInt(instance.size());
         Object2IntMaps.fastForEach(instance, e -> {
             keyCodec.streamWriter.encode(data, (K) e.getKey());
-            data.writeInt(e.getIntValue());
+            data.writeVarInt(e.getIntValue());
         });
     }
 
@@ -55,7 +66,7 @@ public class Object2IntMapAccess<K> extends AbstractFieldAccess<Object2IntMap> {
         instance.clear();
         for (int i = 0; i < length; i++) {
             var key = keyCodec.streamReader.decode(data);
-            var value = data.readInt();
+            var value = data.readVarInt();
             instance.put(key, value);
         }
     }

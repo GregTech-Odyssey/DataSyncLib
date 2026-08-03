@@ -88,7 +88,7 @@ public interface IFieldDataHolder {
      * The default implementation is empty; subclasses can override to implement
      * custom data synchronization.
      *
-     * @param buf   the network data buffer
+     * @param buf      the network data buffer
      * @param writeAll whether to force writing all data (ignoring dirty flags)
      */
     default void writeCustomSyncData(FriendlyByteBuf buf, boolean writeAll) {

@@ -13,6 +13,8 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Function;
 
 /**
  * NBT ↔ Data conversion utilities and {@link com.gto.datasynclib.datastream.data.CustomData} type registrations.
@@ -53,6 +55,19 @@ import java.util.HashMap;
  */
 @UtilityClass
 public class NbtUtil {
+
+    /**
+     * Convenience function that exposes a {@link CompoundTag}'s backing map.
+     * Used with {@link com.gto.datasynclib.annotations.Conversion @Conversion} to
+     * manage a {@code CompoundTag} field as a {@code Map<String, Tag>} for sync/persistence.
+     *
+     * <p>Usage:
+     * <pre>{@code
+     * @Conversion(getFunction = "COMPOUND_TAG_MAP")
+     * private final CompoundTag data = new CompoundTag();
+     * }</pre>
+     */
+    public final Function<CompoundTag, Map<String, Tag>> COMPOUND_TAG_MAP = t -> t.tags;
 
     /**
      * Wraps any {@link Tag} with a 1-byte type-ID prefix for run-time dispatch.

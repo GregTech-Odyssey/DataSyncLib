@@ -10,9 +10,21 @@ import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Synchronizes a FastUtil IntCollection (primitive int collection).
- * Change detection uses hashCode() comparison.
- * Data serialization uses IntArrayData.
+ * Synchronizes a FastUtil {@link it.unimi.dsi.fastutil.ints.IntCollection} (primitive int collection).
+ *
+ * <h3>Change detection:</h3>
+ * <p>Uses {@link Object#hashCode()} comparison — the collection's hash is computed once
+ * per sync cycle and compared against the last known hash. This is fast but can produce
+ * false positives on hash collisions (extremely rare for int collections).</p>
+ *
+ * <h3>Network format:</h3>
+ * <p>VarInt-prefixed length followed by VarInt values. The collection is cleared and
+ * re-populated on the receiving end (in-place mutation).</p>
+ *
+ * <h3>Persistence format:</h3>
+ * <p>Writes as {@link com.gto.datasynclib.datastream.data.IntArrayData} (compact
+ * VarInt-encoded int array). Returns {@link com.gto.datasynclib.datastream.data.NullData#INSTANCE}
+ * for empty collections.</p>
  */
 public final class IntCollectionAccess extends AbstractFieldAccess<IntCollection> {
 
@@ -35,7 +47,7 @@ public final class IntCollectionAccess extends AbstractFieldAccess<IntCollection
     @Override
     protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull IntCollection instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
         data.writeVarInt(instance.size());
-        instance.forEach(data::writeInt);
+        instance.forEach(data::writeVarInt);
     }
 
     @Override
@@ -43,7 +55,7 @@ public final class IntCollectionAccess extends AbstractFieldAccess<IntCollection
         var length = data.readVarInt();
         instance.clear();
         for (int i = 0; i < length; i++) {
-            instance.add(data.readInt());
+            instance.add(data.readVarInt());
         }
     }
 

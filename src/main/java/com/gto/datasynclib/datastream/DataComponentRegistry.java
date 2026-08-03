@@ -7,7 +7,6 @@ import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.StringMapData;
 import com.gto.datasynclib.util.Registry;
 import com.mojang.serialization.Codec;
-import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
@@ -64,7 +63,8 @@ public final class DataComponentRegistry extends Registry<String, DataComponentK
         for (int i = 0; i < size; i++) {
             var keyId = buf.readVarInt();
             var key = get(keyId);
-            if (key == null || key.codec == null) throw new RuntimeException("Invalid data component key id " + keyId+" {"+key+"}");
+            if (key == null || key.codec == null)
+                throw new RuntimeException("Invalid data component key id " + keyId + " {" + key + "}");
             var value = key.codec.streamReader.decode(buf);
             if (value != null) map.put(key, value);
         }

@@ -195,7 +195,7 @@ public class FieldDataManager {
     /**
      * Updates dirty flags for fields based on changes
      *
-     * @param side the logical side
+     * @param side     the logical side
      * @param autoOnly if {@code true}, only fields with {@code autoUpdate = true}
      *                 are checked; if {@code false}, all sync fields are checked
      *                 regardless of their {@code autoUpdate} setting
@@ -227,7 +227,7 @@ public class FieldDataManager {
     /**
      * Writes field data to network buffer.
      *
-     * @param side    the logical side determining which fields to serialize
+     * @param side     the logical side determining which fields to serialize
      * @param writeAll if {@code true}, all managed fields are written regardless of
      *                 dirty state (full sync); if {@code false}, only changed fields
      *                 that have been marked dirty are written (incremental sync)

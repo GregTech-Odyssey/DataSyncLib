@@ -75,8 +75,8 @@ public interface DataField<T> {
      * Detects whether the field's value has changed by comparing the current value
      * against a previously-stored snapshot.
      *
-     * @param side   the logical side initiating the detection
-     * @param source the owning object
+     * @param side     the logical side initiating the detection
+     * @param source   the owning object
      * @param autoOnly {@code true} to only detect changes on fields whose
      *                 {@code autoUpdate} annotation is enabled; {@code false} to
      *                 force detection on all fields regardless of annotation
@@ -89,9 +89,9 @@ public interface DataField<T> {
      * The implementation should also update its internal snapshot for future
      * change detection.
      *
-     * @param side    the logical side performing the write
-     * @param source  the owning object
-     * @param data    the network buffer to write to
+     * @param side     the logical side performing the write
+     * @param source   the owning object
+     * @param data     the network buffer to write to
      * @param writeAll {@code true} to write regardless of dirty state (full sync);
      *                 {@code false} for incremental sync
      */
@@ -113,7 +113,7 @@ public interface DataField<T> {
      *
      * @param source the owning object
      * @return the serialized data, or {@link com.gto.datasynclib.datastream.data.NullData#NONE}
-     *         to suppress this field from being written
+     * to suppress this field from being written
      */
     @NotNull
     Data writeToData(@NotNull Object source);

@@ -154,12 +154,12 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
 
         @Override
         public void encode(FriendlyByteBuf buf, Integer obj) {
-            buf.writeInt(obj);
+            buf.writeVarInt(obj);
         }
 
         @Override
         public Integer decode(FriendlyByteBuf buf) {
-            return buf.readInt();
+            return buf.readVarInt();
         }
 
         static {
@@ -304,7 +304,7 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         public void encode(FriendlyByteBuf buf, int[] obj) {
             buf.writeVarInt(obj.length);
             for (var i : obj) {
-                buf.writeInt(i);
+                buf.writeVarInt(i);
             }
         }
 
@@ -313,7 +313,7 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
             var length = buf.readVarInt();
             var ints = new int[length];
             for (int i = 0; i < length; i++) {
-                ints[i] = buf.readInt();
+                ints[i] = buf.readVarInt();
             }
             return ints;
         }

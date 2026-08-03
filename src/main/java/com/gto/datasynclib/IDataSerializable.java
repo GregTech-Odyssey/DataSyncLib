@@ -42,7 +42,7 @@ public interface IDataSerializable {
      * values with previous snapshots or stored state.
      *
      * @return {@code true} if changes are detected and the object should be included
-     *         in the next synchronization
+     * in the next synchronization
      */
     boolean detectChange();
 

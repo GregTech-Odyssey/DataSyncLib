@@ -165,7 +165,7 @@ repositories {
 }
 
 dependencies {
-    implementation fg.deobf("com.gto:datasynclib-forge-1.20.1:26.7.4")
+    implementation fg.deobf("com.gto:datasynclib-forge-1.20.1:26.7.5")
 }
 ```
 

@@ -10,6 +10,8 @@ import it.unimi.dsi.fastutil.Hash;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import org.jetbrains.annotations.Nullable;
 
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -34,6 +36,8 @@ import java.util.function.*;
  * for change detection on complex types.</p>
  */
 public final class FieldDefinitionStorage {
+
+    private static final MethodHandles.Lookup LOOKUP = MethodHandles.lookup();
 
     private static final ArrayList<DataField.CustomGenericFactory<?>> GENERIC_FIELDS = new ArrayList<>();
 
@@ -205,85 +209,182 @@ public final class FieldDefinitionStorage {
         return storage;
     }
 
-    private static Function<Object, Object> createNestedSourceFunction(Field field, @Nullable Function<Object, Object> parentSource) {
-        var getter = ReflectUtil.createAdaptedGetter(field);
+    /**
+     * Creates a composed getter function that chains through a nested
+     * {@code @AdditionalHolder} field to reach the true owning object.
+     *
+     * <p>The returned function first applies the {@code parentSource} (if any) to
+     * resolve the parent holder, then reads this field from that parent via a
+     * {@link VarHandle}. This supports arbitrary-depth nesting.</p>
+     *
+     * @param lookup       the private-access lookup for the declaring class
+     * @param field        the {@code @AdditionalHolder}-annotated field
+     * @param parentSource the parent's source function chain, or {@code null} at top level
+     * @return a composed function that resolves to the nested field's value
+     */
+    private static Function<Object, Object> createNestedSourceFunction(MethodHandles.Lookup lookup, Field field, @Nullable Function<Object, Object> parentSource) {
+        var getter = ReflectUtil.createVarHandle(lookup, field);
         return o -> {
             try {
-                return getter.invokeExact(parentSource == null ? o : parentSource.apply(o));
+                return getter.get(parentSource == null ? o : parentSource.apply(o));
             } catch (Throwable e) {
                 throw new RuntimeException(e);
             }
         };
     }
 
+    /**
+     * Recursively scans a class and its superclasses for annotated fields, building
+     * {@link DataFieldDefinition} instances.
+     *
+     * <h3>Scanning process:</h3>
+     * <ol>
+     *   <li>Obtains a {@link java.lang.invoke.MethodHandles.Lookup} with private access
+     *       to the target class</li>
+     *   <li>Iterates declared fields, skipping statics</li>
+     *   <li>For {@code @AdditionalHolder} fields, recursively scans the nested type
+     *       with a composed source-accessor function chain</li>
+     *   <li>For annotated fields ({@code @SaveToDisk}, {@code @SyncToClient},
+     *       {@code @SyncToServer}, or {@code @AddToManager}), resolves any
+     *       {@code @Conversion} annotation:
+     *       <ul>
+     *         <li>Looks up the static {@code getFunction} field (required)</li>
+     *         <li>Infers the managed type from the function's second generic parameter</li>
+     *         <li>Optionally looks up the static {@code setFunction} field (silently
+     *             skipped if absent — common for final/access-mode fields)</li>
+     *       </ul>
+     *   </li>
+     *   <li>Constructs a {@link DataFieldDefinition} via the appropriate factory path
+     *       (access-mode, custom codec, generic, or standard)</li>
+     * </ol>
+     *
+     * @param clazz       the class to scan
+     * @param definitions the list to append discovered definitions to
+     * @param source      a function chain resolving the owning object from the root holder,
+     *                    or {@code null} for top-level fields (where the holder IS the owner)
+     */
     private static void scanFields(Class<?> clazz, ArrayList<DataFieldDefinition<?>> definitions, @Nullable Function<Object, Object> source) {
+        MethodHandles.Lookup lookup;
+        try {
+            lookup = MethodHandles.privateLookupIn(clazz, LOOKUP);
+        } catch (IllegalAccessException e) {
+            throw new RuntimeException(e);
+        }
         for (var field : clazz.getDeclaredFields()) {
             if (Modifier.isStatic(field.getModifiers())) continue;
+            var type = field.getType();
             if (field.isAnnotationPresent(AdditionalHolder.class)) {
                 field.setAccessible(true);
-                scanFields(field.getType(), definitions, createNestedSourceFunction(field, source));
+                scanFields(type, definitions, createNestedSourceFunction(lookup, field, source));
             }
             var savetoDisk = field.getAnnotation(SaveToDisk.class);
             var syncToClient = field.getAnnotation(SyncToClient.class);
             var syncToServer = field.getAnnotation(SyncToServer.class);
             if (savetoDisk == null && syncToClient == null && syncToServer == null && field.getAnnotation(AddToManager.class) == null)
                 continue;
-            var definition = createFieldDefinition(field, source, new FieldAnnotationMetadata(clazz, field, savetoDisk, syncToClient, syncToServer));
+            var conversion = field.getAnnotation(Conversion.class);
+            Field conversionField = null;
+            Function conversionGetFunction = null;
+            Function conversionSetFunction = null;
+            if (conversion != null) {
+                try {
+                    // Resolve the forward conversion function: static Function<FieldType, ManagedType>
+                    conversionField = clazz.getDeclaredField(conversion.getFunction());
+                    conversionField.setAccessible(true);
+                    conversionGetFunction = (Function) conversionField.get(null);
+                    // The managed type is the return type (2nd generic param) of the Function
+                    type = ReflectUtil.getFieldGenericTypeClasses(conversionField.getGenericType())[1];
+                    try {
+                        // Resolve the reverse conversion function: static Function<ManagedType, FieldType>
+                        // This is optional — if absent, the setter path won't use conversion
+                        var f = clazz.getDeclaredField(conversion.setFunction());
+                        f.setAccessible(true);
+                        conversionSetFunction = (Function) f.get(null);
+                    } catch (NoSuchFieldException ignored) {
+                        // setFunction is optional; silently skip for final/access-mode fields
+                    }
+                } catch (NoSuchFieldException | IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+            var definition = createFieldDefinition(lookup, field, type, source, new FieldAnnotationMetadata(clazz, field, type, savetoDisk, syncToClient, syncToServer), conversionField, conversionGetFunction, conversionSetFunction);
             if (definition != null) definitions.add(definition);
         }
     }
 
-    private static DataFieldDefinition<?> createFieldDefinition(Field field, @Nullable Function<Object, Object> source, FieldAnnotationMetadata annotations) {
+    private static DataFieldDefinition<?> createFieldDefinition(MethodHandles.Lookup lookup, Field field, Class<?> type, @Nullable Function<Object, Object> source, FieldAnnotationMetadata annotations, Field conversionField, Function conversionGetFunction, Function conversionSetFunction) {
         try {
             Class<?>[] genericType;
             field.setAccessible(true);
             try {
-                genericType = ReflectUtil.getFieldGenericTypeClasses(field.getGenericType());
+                if (conversionField != null) {
+                    genericType = ReflectUtil.getFieldGenericTypeClasses(ReflectUtil.getFieldGenericType(conversionField.getGenericType())[1]);
+                } else {
+                    genericType = ReflectUtil.getFieldGenericTypeClasses(field.getGenericType());
+                }
             } catch (Throwable e) {
                 genericType = new Class<?>[0];
             }
             boolean isFinal = Modifier.isFinal(field.getModifiers());
-            if (isFinal && field.getType().isPrimitive())
+            if (isFinal && type.isPrimitive())
                 throw new IllegalStateException("Field is isPrimitive not access");
             if (annotations.hasAccessAnnotation() || isFinal) {
-                return createAccessFieldDefinition(field, source, annotations, genericType, isFinal);
+                return createAccessFieldDefinition(lookup, field, type, source, annotations, genericType, isFinal, conversionGetFunction, conversionSetFunction);
             } else if (annotations.hasCustomCodec()) {
-                return new DataFieldDefinition<>(field, ObjCodecField::new, source, annotations, genericType, false, true, STRATEGIES);
+                return new DataFieldDefinition<>(lookup, field, type, ObjCodecField::new, source, annotations, genericType, false, true, STRATEGIES, conversionGetFunction, conversionSetFunction);
             } else if (annotations.hasGeneric()) {
                 if (genericType.length == 0)
                     throw new IllegalStateException("Field is annotated with @Generic, but it has no generic type");
-                return createGenericFieldDefinition(field, source, annotations, genericType, false);
+                return createGenericFieldDefinition(lookup, field, type, source, annotations, genericType, false, conversionGetFunction, conversionSetFunction);
             } else {
-                return createFieldDefinition(field, source, annotations, genericType, false);
+                return createFieldDefinition(lookup, field, type, source, annotations, genericType, false, conversionGetFunction, conversionSetFunction);
             }
         } catch (Throwable e) {
             throw new RuntimeException("Failed to create definition for field: " + ReflectUtil.getFieldDetailedName(field), e);
         }
     }
 
-    private static DataFieldDefinition<?> createAccessFieldDefinition(Field field, @Nullable Function<Object, Object> source, FieldAnnotationMetadata annotations, Class<?>[] genericType, boolean isFinal) {
-        var factory = ACCESS_CACHE.getCache(field.getType());
-        return new DataFieldDefinition<>(field, factory, source, annotations, genericType, isFinal, annotations.createAccessInstance(), STRATEGIES);
+    private static DataFieldDefinition<?> createAccessFieldDefinition(MethodHandles.Lookup lookup, Field field, Class<?> type, @Nullable Function<Object, Object> source, FieldAnnotationMetadata annotations, Class<?>[] genericType, boolean isFinal, Function conversionGetFunction, Function conversionSetFunction) {
+        var factory = ACCESS_CACHE.getCache(type);
+        return new DataFieldDefinition<>(lookup, field, type, factory, source, annotations, genericType, isFinal, annotations.createAccessInstance(), STRATEGIES, conversionGetFunction, conversionSetFunction);
     }
 
-    private static DataFieldDefinition<?> createGenericFieldDefinition(Field field, @Nullable Function<Object, Object> source, FieldAnnotationMetadata annotations, Class<?>[] genericType, boolean isFinal) {
-        var factory = GENERIC_FIELDS_CACHE.getCache(field.getType()).getCache(HashUtil.arrayIdentityWrapper(genericType));
-        return new DataFieldDefinition<>(field, factory, source, annotations, genericType, isFinal, true, STRATEGIES);
+    private static DataFieldDefinition<?> createGenericFieldDefinition(MethodHandles.Lookup lookup, Field field, Class<?> type, @Nullable Function<Object, Object> source, FieldAnnotationMetadata annotations, Class<?>[] genericType, boolean isFinal, Function conversionGetFunction, Function conversionSetFunction) {
+        var factory = GENERIC_FIELDS_CACHE.getCache(type).getCache(HashUtil.arrayIdentityWrapper(genericType));
+        return new DataFieldDefinition<>(lookup, field, type, factory, source, annotations, genericType, isFinal, true, STRATEGIES, conversionGetFunction, conversionSetFunction);
     }
 
-    private static DataFieldDefinition<?> createFieldDefinition(Field field, @Nullable Function<Object, Object> source, FieldAnnotationMetadata annotations, Class<?>[] genericType, boolean isFinal) {
-        var type = field.getType();
+    /**
+     * Resolves a field to a factory with a three-tier fallback strategy:
+     * <ol>
+     *   <li><strong>Standard factory</strong> — lookup in {@link #FIELDS_CACHE} by exact type.
+     *       This covers pre-registered types (primitives, objects with known codecs)</li>
+     *   <li><strong>Generic factory</strong> — if the type has generic parameters and a
+     *       matching {@code CustomGenericFactory} is registered. Falls through to step 3
+     *       if no generic params exist</li>
+     *   <li><strong>Access factory</strong> — lookup in {@link #ACCESS_CACHE} as a last resort.
+     *       This handles containers, IFieldDataHolder types, and other access-mode fields</li>
+     * </ol>
+     *
+     * <p>The fallback chain exists because field types are not always known at registration
+     * time — custom types, parameterized generics, and interface implementations often need
+     * to match against a predicate rather than an exact class.</p>
+     */
+    private static DataFieldDefinition<?> createFieldDefinition(MethodHandles.Lookup lookup, Field field, Class<?> type, @Nullable Function<Object, Object> source, FieldAnnotationMetadata annotations, Class<?>[] genericType, boolean isFinal, Function conversionGetFunction, Function conversionSetFunction) {
         try {
+            // Tier 1: try standard (exact-type) factory
             var factory = FIELDS_CACHE.getCache(type);
-            return new DataFieldDefinition<>(field, factory, source, annotations, genericType, isFinal, true, STRATEGIES);
+            return new DataFieldDefinition<>(lookup, field, type, factory, source, annotations, genericType, isFinal, true, STRATEGIES, conversionGetFunction, conversionSetFunction);
         } catch (Throwable e) {
             try {
+                // Tier 2: try generic factory if type parameters exist
                 if (genericType.length > 0) {
-                    return createGenericFieldDefinition(field, source, annotations, genericType, isFinal);
+                    return createGenericFieldDefinition(lookup, field, type, source, annotations, genericType, isFinal, conversionGetFunction, conversionSetFunction);
                 }
                 throw e;
             } catch (Throwable e2) {
-                return createAccessFieldDefinition(field, source, annotations, genericType, isFinal);
+                // Tier 3: fall back to access-mode factory
+                return createAccessFieldDefinition(lookup, field, type, source, annotations, genericType, isFinal, conversionGetFunction, conversionSetFunction);
             }
         }
     }

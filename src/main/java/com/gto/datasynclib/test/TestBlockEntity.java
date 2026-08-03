@@ -9,10 +9,12 @@ import com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity;
 import com.gto.datasynclib.listener.ObjNotifiableHolder;
 import com.gto.datasynclib.network.DataSyncNetwork;
 import com.gto.datasynclib.util.FieldDataCodec;
+import com.gto.datasynclib.util.NbtUtil;
 import lombok.Getter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -22,6 +24,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.*;
+import java.util.function.Function;
 
 class TestBlockEntity extends FieldDataHolderBlockEntity {
 
@@ -58,9 +61,18 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     @SyncToServer
     private final ObjNotifiableHolder<String> objectHolder = ObjNotifiableHolder.create(DataSyncCodec.STRING_CODEC);
 
+    /**
+     * {@code @Conversion} example: the field is a {@code CompoundTag}, but the sync system
+     * manages it as a {@code Map<String, Tag>} via this static Function. No setFunction is
+     * needed because the field is {@code final} (the map is mutated in-place through the
+     * {@code CompoundTag} API — {@code tagData.putInt(...)} etc.).
+     */
+    private static final Function<CompoundTag, Map<String, Tag>> COMPOUND_TAG_MAP_FUNCTION = NbtUtil.COMPOUND_TAG_MAP;
+
     @SyncToClient
     @SaveToDisk
-    private CompoundTag tagData = new CompoundTag();
+    @Conversion(getFunction = "COMPOUND_TAG_MAP_FUNCTION")
+    private final CompoundTag tagData = new CompoundTag();
 
     public TestBlockEntity(BlockPos worldPosition, BlockState blockState) {
         super(ModBlockEntities.TEST_BLOCK_ENTITY.get(), worldPosition, blockState);

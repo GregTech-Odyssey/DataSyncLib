@@ -13,7 +13,19 @@ import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Synchronizes a FastUtil Reference2IntMap (identity-based key comparison).
+ * Synchronizes a FastUtil {@link it.unimi.dsi.fastutil.objects.Reference2IntMap} (identity-based key comparison).
+ *
+ * <p>Identical to {@link Object2IntMapAccess} in serialization format, but works with
+ * reference-identity maps ({@code ==} key comparison instead of {@code equals()}).
+ * Uses the generic type's key codec for key serialization and VarInts for values.</p>
+ *
+ * <h3>Network format:</h3>
+ * <p>{@code VarInt(size) + forEach(keyCodec.encode(key), VarInt(value))}.</p>
+ *
+ * <h3>Persistence format:</h3>
+ * <p>Interleaved key-value pairs in a {@link com.gto.datasynclib.datastream.data.ListData}.</p>
+ *
+ * @see Object2IntMapAccess
  */
 public class Reference2IntMapAccess<K> extends AbstractFieldAccess<Reference2IntMap> {
 
@@ -44,7 +56,7 @@ public class Reference2IntMapAccess<K> extends AbstractFieldAccess<Reference2Int
         data.writeVarInt(instance.size());
         Reference2IntMaps.fastForEach(instance, e -> {
             keyCodec.streamWriter.encode(data, (K) e.getKey());
-            data.writeInt(e.getIntValue());
+            data.writeVarInt(e.getIntValue());
         });
     }
 
@@ -54,7 +66,7 @@ public class Reference2IntMapAccess<K> extends AbstractFieldAccess<Reference2Int
         instance.clear();
         for (int i = 0; i < length; i++) {
             var key = keyCodec.streamReader.decode(data);
-            var value = data.readInt();
+            var value = data.readVarInt();
             instance.put(key, value);
         }
     }

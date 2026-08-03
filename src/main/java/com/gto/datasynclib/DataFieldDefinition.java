@@ -7,6 +7,8 @@ import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.lang.reflect.Field;
 import java.util.Comparator;
 import java.util.Map;
@@ -81,6 +83,35 @@ public final class DataFieldDefinition<T> {
      */
     @Nullable
     public final Function<Object, Object> source;
+
+    /**
+     * Forward conversion function resolved from {@link com.gto.datasynclib.annotations.Conversion @Conversion}
+     * annotation's {@code getFunction}. Converts from the field's declared type to the managed type
+     * when <strong>reading</strong> the field value (e.g., {@code CompoundTag → Map<String, Tag>}).
+     *
+     * <p>This is applied automatically in {@link #get(Object)}: if non-null, the raw value from
+     * the VarHandle getter is passed through this function before being returned. The downstream
+     * codecs, strategies, and factories all operate on the <em>converted</em> type.</p>
+     *
+     * <p>{@code null} if the field has no {@code @Conversion} annotation.</p>
+     */
+    @Nullable
+    public final Function<Object, T> conversionGet;
+
+    /**
+     * Reverse conversion function resolved from {@link com.gto.datasynclib.annotations.Conversion @Conversion}
+     * annotation's {@code setFunction}. Converts from the managed type back to the field's
+     * declared type when <strong>writing</strong> the field value (e.g., {@code Map<String, Tag> → CompoundTag}).
+     *
+     * <p>This is applied automatically in {@link #set(Object, Object)}: if non-null, the incoming
+     * value is passed through this function before being written to the field via the VarHandle setter.</p>
+     *
+     * <p>{@code null} if the field has no {@code @Conversion} annotation, or if the annotation's
+     * {@code setFunction} was empty/absent (common for {@code final} or access-mode fields).</p>
+     */
+    @Nullable
+    public final Function<T, Object> conversionSet;
+
     /**
      * Whether this field is persisted to disk (annotated with {@code @SaveToDisk}).
      */
@@ -119,13 +150,13 @@ public final class DataFieldDefinition<T> {
     private final MethodHandle readFromData;
     private final MethodHandle writeToBuffer;
     private final MethodHandle readFromBuffer;
-    private final MethodHandle getter;
-    private final MethodHandle setter;
+    private final VarHandle getter;
+    private final VarHandle setter;
     private final MethodHandle clientListenerHandle;
     private final MethodHandle serverListenerHandle;
 
     @SuppressWarnings("unchecked")
-    DataFieldDefinition(Field field, DataField.Factory<T> factory, @Nullable Function<Object, Object> source, FieldAnnotationMetadata fieldAnnotations, Class<?>[] genericType, boolean isFinal, boolean createInstance, Map<Class<?>, Hash.Strategy<?>> strategies) {
+    DataFieldDefinition(MethodHandles.Lookup lookup, Field field, Class<?> type, DataField.Factory<T> factory, @Nullable Function<Object, Object> source, FieldAnnotationMetadata fieldAnnotations, Class<?>[] genericType, boolean isFinal, boolean createInstance, Map<Class<?>, Hash.Strategy<?>> strategies, @Nullable Function<Object, T> conversionGet, @Nullable Function<T, Object> conversionSet) {
         this.field = field;
         this.factory = factory;
         this.source = source;
@@ -140,30 +171,32 @@ public final class DataFieldDefinition<T> {
         this.autoSyncToClient = fieldAnnotations.autoSyncToClient();
         this.autoSyncToServer = fieldAnnotations.autoSyncToServer();
         this.createInstance = createInstance;
-        this.codec = (isFinal || !createInstance) ? null : fieldAnnotations.dataCodec() != null ? DataSyncCodec.of(fieldAnnotations.streamCodec(), fieldAnnotations.dataCodec()) : (DataSyncCodec<T>) DataSyncCodec.get(field.getType());
+        this.conversionGet = conversionGet;
+        this.conversionSet = conversionSet;
+        this.codec = (isFinal || !createInstance) ? null : fieldAnnotations.dataCodec() != null ? DataSyncCodec.of(fieldAnnotations.streamCodec(), fieldAnnotations.dataCodec()) : (DataSyncCodec<T>) DataSyncCodec.get(type);
         this.genericType = genericType;
         this.genericCodecs = new DataSyncCodec[genericType.length];
         this.isFinal = isFinal;
-        this.strategy = fieldAnnotations.strategy() != null ? fieldAnnotations.strategy() : (Hash.Strategy<T>) strategies.getOrDefault(field.getType(), OBJECT_STRATEGY);
+        this.strategy = fieldAnnotations.strategy() != null ? fieldAnnotations.strategy() : (Hash.Strategy<T>) strategies.getOrDefault(type, OBJECT_STRATEGY);
         for (int i = 0; i < genericType.length; i++) {
             this.genericCodecs[i] = DataSyncCodec.get(genericType[i]);
         }
 
-        this.defaultValueHandle = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.defaultValueGetter());
+        this.defaultValueHandle = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.defaultValueGetter());
 
-        this.getter = ReflectUtil.createAdaptedGetter(field);
-        this.setter = isFinal ? null : ReflectUtil.createAdaptedSetter(field);
+        this.getter = ReflectUtil.createVarHandle(lookup, field);
+        this.setter = isFinal ? null : ReflectUtil.createVarHandle(lookup, field);
 
-        this.writeToData = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.writeToData(), Data.class);
-        this.readFromData = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.readFromData());
-        this.writeToBuffer = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.writeToBuffer());
-        this.readFromBuffer = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.readFromBuffer());
+        this.writeToData = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.writeToData(), Data.class);
+        this.readFromData = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.readFromData());
+        this.writeToBuffer = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.writeToBuffer());
+        this.readFromBuffer = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.readFromBuffer());
 
-        this.clientListenerHandle = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.clientUpdateListener());
-        this.serverListenerHandle = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.serverUpdateListener());
-        this.saveCondition = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.saveCondition(), boolean.class);
-        this.syncToClientCondition = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.syncToClientCondition(), boolean.class);
-        this.syncToServerCondition = ReflectUtil.createAdaptedMethodHandle(fieldAnnotations.syncToServerCondition(), boolean.class);
+        this.clientListenerHandle = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.clientUpdateListener());
+        this.serverListenerHandle = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.serverUpdateListener());
+        this.saveCondition = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.saveCondition(), boolean.class);
+        this.syncToClientCondition = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.syncToClientCondition(), boolean.class);
+        this.syncToServerCondition = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.syncToServerCondition(), boolean.class);
     }
 
     public boolean hasDefaultValue() {
@@ -184,7 +217,7 @@ public final class DataFieldDefinition<T> {
     public byte getDefaultByteValue(Object source) {
         if (defaultValueHandle != null) {
             try {
-                return (Byte) defaultValueHandle.invokeExact(source);
+                return (byte) defaultValueHandle.invokeExact(source);
             } catch (Throwable e) {
                 throw new RuntimeException(e);
             }
@@ -195,7 +228,7 @@ public final class DataFieldDefinition<T> {
     public short getDefaultShortValue(Object source) {
         if (defaultValueHandle != null) {
             try {
-                return (Short) defaultValueHandle.invokeExact(source);
+                return (short) defaultValueHandle.invokeExact(source);
             } catch (Throwable e) {
                 throw new RuntimeException(e);
             }
@@ -449,150 +482,107 @@ public final class DataFieldDefinition<T> {
         }
     }
 
+    /**
+     * Reads the field's value from the given source object.
+     *
+     * <p>If a {@link #conversionGet} function is configured (via {@code @Conversion}),
+     * the raw field value is passed through the function before being returned.
+     * This means callers always receive the <em>managed</em> type, not the stored type.</p>
+     *
+     * @param source the object instance to read the field from
+     * @return the field value, after optional conversion
+     */
     @SuppressWarnings("unchecked")
     public T get(Object source) {
-        try {
-            return (T) getter.invokeExact(source);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to get field: " + field, e);
-        }
+        var obj = (T) getter.get(source);
+        if (conversionGet != null) return conversionGet.apply(obj);
+        return obj;
     }
 
+    /**
+     * Writes a value to the field on the given source object.
+     *
+     * <p>If a {@link #conversionSet} function is configured (via {@code @Conversion}),
+     * the value is first passed through the reverse conversion before being written to
+     * the actual field. For example, a {@code Map<String, Tag>} value would be converted
+     * back to {@code CompoundTag} before storage.</p>
+     *
+     * <p>This is a no-op if the field is {@code final} ({@code setter == null}).</p>
+     *
+     * @param source the object instance to write the field to
+     * @param value  the value to set (in the managed type, before reverse conversion)
+     */
     public void set(Object source, T value) {
         if (setter == null) return;
-        try {
-            setter.invokeExact(source, value);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to set field: " + field, e);
+        if (conversionSet != null) {
+            setter.set(source, conversionSet.apply(value));
+        } else {
+            setter.set(source, value);
         }
     }
 
     public int getInt(Object source) {
-        try {
-            return (int) getter.invokeExact(source);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to get int field: " + field, e);
-        }
+        return (int) getter.get(source);
     }
 
     public void setInt(Object source, int value) {
-        try {
-            setter.invokeExact(source, value);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to set int field: " + field, e);
-        }
+        setter.set(source, value);
     }
 
     public long getLong(Object source) {
-        try {
-            return (long) getter.invokeExact(source);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to get long field: " + field, e);
-        }
+        return (long) getter.get(source);
     }
 
     public void setLong(Object source, long value) {
-        try {
-            setter.invokeExact(source, value);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to set long field: " + field, e);
-        }
+        setter.set(source, value);
     }
 
     public float getFloat(Object source) {
-        try {
-            return (float) getter.invokeExact(source);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to get float field: " + field, e);
-        }
+        return (float) getter.get(source);
     }
 
     public void setFloat(Object source, float value) {
-        try {
-            setter.invokeExact(source, value);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to set float field: " + field, e);
-        }
+        setter.set(source, value);
     }
 
     public double getDouble(Object source) {
-        try {
-            return (double) getter.invokeExact(source);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to get double field: " + field, e);
-        }
+        return (double) getter.get(source);
     }
 
     public void setDouble(Object source, double value) {
-        try {
-            setter.invokeExact(source, value);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to set double field: " + field, e);
-        }
+        setter.set(source, value);
     }
 
     public boolean getBoolean(Object source) {
-        try {
-            return (boolean) getter.invokeExact(source);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to get boolean field: " + field, e);
-        }
+        return (boolean) getter.get(source);
     }
 
     public void setBoolean(Object source, boolean value) {
-        try {
-            setter.invokeExact(source, value);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to set boolean field: " + field, e);
-        }
+        setter.set(source, value);
     }
 
     public short getShort(Object source) {
-        try {
-            return (short) getter.invokeExact(source);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to get short field: " + field, e);
-        }
+        return (short) getter.get(source);
     }
 
     public void setShort(Object source, short value) {
-        try {
-            setter.invokeExact(source, value);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to set short field: " + field, e);
-        }
+        setter.set(source, value);
     }
 
     public byte getByte(Object source) {
-        try {
-            return (byte) getter.invokeExact(source);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to get byte field: " + field, e);
-        }
+        return (byte) getter.get(source);
     }
 
     public void setByte(Object source, byte value) {
-        try {
-            setter.invokeExact(source, value);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to set byte field: " + field, e);
-        }
+        setter.set(source, value);
     }
 
     public char getChar(Object source) {
-        try {
-            return (char) getter.invokeExact(source);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to get char field: " + field, e);
-        }
+        return (char) getter.get(source);
     }
 
     public void setChar(Object source, char value) {
-        try {
-            setter.invokeExact(source, value);
-        } catch (Throwable e) {
-            throw new RuntimeException("Failed to set char field: " + field, e);
-        }
+        setter.set(source, value);
     }
 
     public MethodHandle getListener(LogicalSide side) {

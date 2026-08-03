@@ -12,6 +12,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.NotNull;
+
 /**
  * Ready-to-use {@link net.minecraft.world.level.block.entity.BlockEntity} base class
  * that implements {@link com.gto.datasynclib.IFieldDataHolder} for automatic field

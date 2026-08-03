@@ -12,7 +12,22 @@ import org.jetbrains.annotations.NotNull;
 import java.util.Arrays;
 
 /**
- * Synchronizes an int[] primitive array.
+ * Synchronizes an {@code int[]} primitive array with <strong>in-place</strong> mutation.
+ *
+ * <h3>Change detection:</h3>
+ * <p>Uses {@link Arrays#hashCode(int[])} for fast content-based change detection.
+ * The array reference is fixed ({@code final} field), so only content changes are tracked.</p>
+ *
+ * <h3>Network format:</h3>
+ * <p>Individual VarInt-encoded elements, one per array slot. The array length is NOT
+ * transmitted — both sides must agree on the length (typically fixed-size arrays).
+ * Each element is written/read in order, overwriting the existing array contents in-place.</p>
+ *
+ * <h3>Persistence format:</h3>
+ * <p>Writes as {@link com.gto.datasynclib.datastream.data.IntArrayData}. Skips writing
+ * if the array matches the configured default value. On read, uses
+ * {@link System#arraycopy} to copy up to {@code min(dataLength, arrayLength)} elements,
+ * safely handling length mismatches from data migration.</p>
  */
 public final class IntArrayAccess extends AbstractFieldAccess<int[]> {
 
@@ -35,7 +50,7 @@ public final class IntArrayAccess extends AbstractFieldAccess<int[]> {
     @Override
     protected void doWriteBuffer(@NotNull LogicalSide side, int @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
         for (var element : instance) {
-            data.writeInt(element);
+            data.writeVarInt(element);
         }
     }
 
@@ -43,7 +58,7 @@ public final class IntArrayAccess extends AbstractFieldAccess<int[]> {
     protected void doReadBuffer(@NotNull LogicalSide side, int @NotNull [] instance, @NotNull FriendlyByteBuf data) {
         var length = instance.length;
         for (int i = 0; i < length; i++) {
-            instance[i] = data.readInt();
+            instance[i] = data.readVarInt();
         }
     }
 

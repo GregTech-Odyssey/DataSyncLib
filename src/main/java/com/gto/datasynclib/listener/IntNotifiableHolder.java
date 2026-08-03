@@ -64,7 +64,7 @@ public final class IntNotifiableHolder extends IntHolder implements IDataSeriali
 
     @Override
     public void writeBuffer(LogicalSide side, @NotNull FriendlyByteBuf data) {
-        data.writeInt(value);
+        data.writeVarInt(value);
         senderListener.onSync(side, lastValue, value);
         lastValue = value;
     }
@@ -72,7 +72,7 @@ public final class IntNotifiableHolder extends IntHolder implements IDataSeriali
     @Override
     public void readBuffer(LogicalSide side, @NotNull FriendlyByteBuf data) {
         var oldValue = value;
-        value = data.readInt();
+        value = data.readVarInt();
         receiverListener.onSync(side, oldValue, value);
     }
 

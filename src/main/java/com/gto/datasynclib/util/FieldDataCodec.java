@@ -44,7 +44,7 @@ import java.util.function.Supplier;
  * @param <T> the POJO type this codec can encode and decode
  * @see com.gto.datasynclib.FieldDataManager#createCodec(Class, java.util.function.Supplier)
  */
-public class FieldDataCodec<T> implements DataCodec<T>,ByteStreamCodec<T>,IFieldDataHolder{
+public class FieldDataCodec<T> implements DataCodec<T>, ByteStreamCodec<T>, IFieldDataHolder {
 
     private final Supplier<T> constructor;
     private final LazyFieldDataManager fieldDataManager;

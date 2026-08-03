@@ -24,9 +24,8 @@ import org.jetbrains.annotations.NotNull;
  *     .setSenderListener((side, oldVal, newVal) -> logChange(newVal));
  * }</pre>
  *
- * @param <T>       the implementing type (returned by setters for chaining)
+ * @param <T>        the implementing type (returned by setters for chaining)
  * @param <LISTENER> the functional listener type (e.g., {@link ObjSyncListener})
- *
  * @see com.gto.datasynclib.listener.ObjNotifiableHolder
  * @see com.gto.datasynclib.listener.IntNotifiableHolder
  */

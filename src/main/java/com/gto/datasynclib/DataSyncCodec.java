@@ -15,6 +15,7 @@ import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -155,28 +156,57 @@ public final class DataSyncCodec<T> {
     }
 
     /**
-     * Creates a codec from separate stream and data encoder/decoder components.
+     * Creates a codec from <strong>separate</strong> stream and data encoder/decoder components.
+     *
+     * <p>This is the most flexible factory — use it when the network and persistence
+     * formats differ (e.g., registry entries use integer IDs on the wire but string keys
+     * on disk). Each component is independent: the stream writer/reader work with
+     * {@link FriendlyByteBuf}, and the data writer/reader work with {@link com.gto.datasynclib.datastream.data.Data Data}.</p>
+     *
+     * @param streamWriter encodes to network buffer
+     * @param streamReader decodes from network buffer
+     * @param dataWriter   encodes to persistent Data
+     * @param dataReader   decodes from persistent Data
      */
     public static <T> DataSyncCodec<T> of(ByteStreamEncoder<? super T> streamWriter, ByteStreamDecoder<? extends T> streamReader, DataEncoder<? super T> dataWriter, DataDecoder<? extends T> dataReader) {
         return new DataSyncCodec<>(streamWriter, streamReader, dataWriter, dataReader);
     }
 
     /**
-     * Creates a codec from separate stream and data codecs.
+     * Creates a codec from separate stream and data codecs (each implementing both
+     * encode and decode for its respective medium).
+     *
+     * <p>Use when you have distinct optimized codecs for network and persistence.
+     * If both paths use the same codec, use {@link #of(ByteStreamCodec)} or
+     * {@link #of(DataCodec)} instead.</p>
+     *
+     * @param streamCodec bidirectional network serializer
+     * @param dataCodec   bidirectional persistence serializer
      */
     public static <T> DataSyncCodec<T> of(ByteStreamCodec<T> streamCodec, DataCodec<T> dataCodec) {
         return new DataSyncCodec<>(streamCodec, streamCodec, dataCodec, dataCodec);
     }
 
     /**
-     * Creates a codec from a stream codec, deriving the data codec automatically.
+     * Creates a codec from a network stream codec, <strong>automatically deriving</strong>
+     * the data codec by serializing to/from byte arrays via {@link com.gto.datasynclib.datastream.data.Data#writeData Data.writeData}
+     * / {@link com.gto.datasynclib.datastream.data.Data#readData Data.readData}.
+     *
+     * <p>Use when you have a working network codec and want a quick persistence path
+     * without writing a separate Data codec. The data format will be a byte array.</p>
      */
     public static <T> DataSyncCodec<T> of(ByteStreamCodec<T> streamCodec) {
         return of(streamCodec, DataCodec.of(streamCodec));
     }
 
     /**
-     * Creates a codec from a data codec, deriving the stream codec automatically.
+     * Creates a codec from a data codec, <strong>automatically deriving</strong>
+     * the stream codec by serializing to/from bytes via
+     * {@link com.gto.datasynclib.datastream.data.Data#writeData Data.writeData} /
+     * {@link com.gto.datasynclib.datastream.data.Data#readData Data.readData}.
+     *
+     * <p>Use when you have a working persistence codec and want a quick network path.
+     * The network format will be a length-prefixed byte array of the Data encoding.</p>
      */
     public static <T> DataSyncCodec<T> of(DataCodec<T> dataCodec) {
         return of(ByteStreamCodec.of(dataCodec), dataCodec);
@@ -205,10 +235,23 @@ public final class DataSyncCodec<T> {
     }
 
     /**
-     * Retrieves codec for the specified type
+     * Retrieves the codec for the specified type.
+     *
+     * <p>Lookup order:
+     * <ol>
+     *   <li>Primitive types — always return {@code null} (primitives don't have codecs;
+     *       use the wrapper type instead)</li>
+     *   <li>Enum types — auto-generated on first access via {@link #ENUM_CACHE}. Uses
+     *       ordinal-based encoding on the wire and either ordinal-based or name-based
+     *       encoding on disk (depending on whether the enum type is "fixed")</li>
+     *   <li>Non-primitive object arrays — auto-generated on first access via
+     *       {@link #ARRAY_CACHE}. Encodes length-prefixed with null markers</li>
+     *   <li>Registered types — looked up in {@link #CODECS} by exact class match</li>
+     * </ol>
      *
      * @param type the class type
-     * @return the registered codec, or null if not found
+     * @return the registered or auto-generated codec, or {@code null} if not found
+     * (primitives always return null)
      */
     @Nullable
     public static <T> DataSyncCodec<T> get(Class<T> type) {
@@ -241,13 +284,16 @@ public final class DataSyncCodec<T> {
     /**
      * Registers a codec for the specified type with separate encoder/decoder components.
      *
-     * @param type         the class to register for
+     * <p>This is the most general registration method. Use when the network and persistence
+     * formats differ. For simpler cases, see the convenience overloads.</p>
+     *
+     * @param type         the class to register for (exact match, not assignable-from)
      * @param streamWriter encoder for network buffers
      * @param streamReader decoder for network buffers
      * @param dataWriter   encoder for persistent Data objects
      * @param dataReader   decoder for persistent Data objects
      * @param <T>          the type
-     * @return the registered codec
+     * @return the registered codec (also returned by future {@link #get(Class)} calls)
      */
     public static <T> DataSyncCodec<T> register(Class<T> type, ByteStreamEncoder<T> streamWriter, ByteStreamDecoder<T> streamReader, DataEncoder<T> dataWriter, DataDecoder<T> dataReader) {
         var codec = new DataSyncCodec<>(streamWriter, streamReader, dataWriter, dataReader);
@@ -353,6 +399,7 @@ public final class DataSyncCodec<T> {
 
     public static final DataSyncCodec<BlockPos> BLOCK_POS_CODEC = register(BlockPos.class, StreamCodecs.BLOCK_POS_CODEC, DataCodecs.BLOCK_POS_CODEC);
 
+    public static final DataSyncCodec<Tag> TAG_CODEC = register(Tag.class, StreamCodecs.TAG_CODEC, DataCodecs.TAG_CODEC);
     public static final DataSyncCodec<CompoundTag> COMPOUND_TAG_CODEC = register(CompoundTag.class, StreamCodecs.COMPOUND_TAG_CODEC, DataCodecs.COMPOUND_TAG_CODEC);
     public static final DataSyncCodec<ListTag> LIST_TAG_CODEC = register(ListTag.class, StreamCodecs.LIST_TAG_CODEC, DataCodecs.LIST_TAG_CODEC);
 
