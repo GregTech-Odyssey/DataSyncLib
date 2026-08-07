@@ -1,6 +1,6 @@
 # Changelog
 
-## 26.7.6 (2026-08-07)
+## 26.8.1 (2026-08-07)
 
 ### New Features
 - **`@AdditionalHolder(childManager = true)`**: New child-manager mode. The annotated sub-object is no longer flattened into the parent manager; it gets a dedicated `FieldDataManager` (wrapped in `ChildFieldDataHolder`) and is handled as a single field through `ChildManagerAccess` (equivalent to `FieldDataHolderAccess` but for arbitrary sub-objects). Supports nested child managers.
