@@ -14,6 +14,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Generic named registry mapping {@link Comparable} keys to values with automatic
@@ -29,8 +30,9 @@ import java.util.function.Consumer;
  * <h3>Serialization:</h3>
  * <ul>
  *   <li>{@link #streamCodec()} — encodes/decodes by integer ID (compact, for network)</li>
- *   <li>{@link #dataCodec(com.gto.datasynclib.datastream.codec.DataCodec)} — encodes/decodes by key
- *       (self-describing, for disk persistence)</li>
+ *   <li>{@link #dataCodec()} — encodes/decodes by key (self-describing, for disk persistence).
+ *       The key {@link DataCodec} is provided at construction time and the resulting
+ *       value codec is computed once and cached.</li>
  *   <li>{@link #codec(com.mojang.serialization.Codec)} — Mojang DFU codec via key xmap</li>
  * </ul>
  *
@@ -55,8 +57,30 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
     @Getter
     protected volatile boolean frozen = true;
 
-    public Registry(String name) {
-        this.name = name;
+    /**
+     * Resolves a registered value to its registry key. Defaults to a reverse lookup through
+     * {@link #valueKeys}; subclasses may supply a custom {@link Function} at construction
+     * (e.g. reading a key field directly from the value) to avoid the map lookup.
+     */
+    protected final Function<? super V, ? extends K> keyGetter;
+
+    /**
+     * Cached {@link DataCodec} for this registry's <em>values</em>, encoding by key via
+     * {@link #keyGetter}. Built once at construction time and reused by {@link #dataCodec()}.
+     */
+    protected final DataCodec<V> dataCodec;
+
+    public Registry(String name, DataCodec<K> keyCodec) {
+        this(name, keyCodec, this::getKeyByMap);
+    }
+
+    public Registry(String name, DataCodec<K> keyCodec, Function<? super V, ? extends K> keyGetter) {
+        this.name = Objects.requireNonNull(name, "name");
+        this.keyGetter = Objects.requireNonNull(keyGetter, "keyGetter");
+        Objects.requireNonNull(keyCodec, "keyCodec");
+        this.dataCodec = DataCodec.of(
+                obj -> keyCodec.encode(keyGetter.apply(obj)),
+                (data, dataVersion) -> keyValues.get(keyCodec.decode(data, dataVersion)));
     }
 
     @SuppressWarnings("BooleanMethodIsAlwaysInverted")
@@ -147,7 +171,14 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
         return entry.priority;
     }
 
-    public K getKey(V value) {
+    public final K getKey(V value) {
+        return keyGetter.apply(value);
+    }
+
+    /**
+     * Default {@link #keyGetter}: resolves the key by reverse lookup in {@link #valueKeys}.
+     */
+    protected final K getKeyByMap(V value) {
         var entry = valueKeys.get(value);
         if (entry == null) throw new NullPointerException("Value not found in registry: " + value);
         return entry.value;
@@ -184,8 +215,15 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
         keyValues.forEach(action);
     }
 
-    public DataCodec<V> dataCodec(DataCodec<K> keyCodec) {
-        return DataCodec.of(obj -> keyCodec.encode(getKey(obj)), (data, dataVersion) -> keyValues.get(keyCodec.decode(data, dataVersion)));
+    /**
+     * Returns the cached {@link DataCodec} built at construction time, encoding/decoding by key
+     * via {@link #keyGetter}. Values are encoded as their registry key (self-describing, for disk
+     * persistence); decoding looks the value back up by key from {@link #keyValues}.
+     *
+     * @return the cached value-level {@link DataCodec}
+     */
+    public DataCodec<V> dataCodec() {
+        return dataCodec;
     }
 
     public final ByteStreamCodec<V> streamCodec() {

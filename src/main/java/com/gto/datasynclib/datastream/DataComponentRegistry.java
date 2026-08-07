@@ -33,7 +33,9 @@ import java.util.function.Consumer;
 public final class DataComponentRegistry extends Registry<String, DataComponentKey<?>> implements ByteStreamCodec<DataComponentMap>, DataCodec<DataComponentMap> {
 
     public DataComponentRegistry(String name) {
-        super(name + "_data_component");
+        // Values (DataComponentKey) carry their String key as a public final 'name' field,
+        // so read it directly instead of doing a reverse map lookup.
+        super(name + "_data_component", DataCodec.STRING_CODEC, key -> key.name);
     }
 
     public <T> DataComponentKey<T> register(String name, DataSyncCodec<T> codec) {
