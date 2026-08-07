@@ -8,6 +8,7 @@ import com.gto.datasynclib.field.object.ObjCodecField;
 import com.gto.datasynclib.network.DataSyncNetwork;
 import com.gto.datasynclib.test.ModBlockEntities;
 import com.gto.datasynclib.test.ModBlocks;
+import com.gto.datasynclib.test.ModEntityTypes;
 import com.gto.datasynclib.test.ModItems;
 import com.gto.datasynclib.util.EnumUtil;
 import com.gto.datasynclib.util.FluidStackHashStrategy;
@@ -150,5 +151,6 @@ public final class DataSyncLib {
         ModBlocks.BLOCKS.register(modEventBus);
         ModBlockEntities.BLOCK_ENTITIES.register(modEventBus);
         ModItems.ITEMS.register(modEventBus);
+        ModEntityTypes.ENTITY_TYPES.register(modEventBus);
     }
 }

@@ -96,8 +96,15 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
         }
     }
 
+    /** Runs the in-dev self-test suite exactly once per JVM. */
+    private static volatile boolean selfTestsRun = false;
+
     protected void serverTick(ServerLevel level) {
         updateTick();
+        if (!selfTestsRun) {
+            selfTestsRun = true;
+            DataSyncSelfTests.runAll();
+        }
         if (level.getGameTime() % 20 == 0) {
             isDirty = true;
             ++b.a;

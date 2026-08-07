@@ -1,6 +1,7 @@
 package com.gto.datasynclib.util;
 
 import lombok.experimental.UtilityClass;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.invoke.MethodHandle;
@@ -103,6 +104,179 @@ public final class ReflectUtil {
             case ParameterizedType parameterizedType -> getRawType(parameterizedType.getRawType());
             case null, default -> null;
         };
+    }
+
+    /**
+     * Resolves a {@code Type}, substituting type variables from the given binding map, while
+     * preserving full type information (parameterized types, arrays, wildcards). Unbound type
+     * variables are returned as-is.
+     *
+     * @param type     the type to resolve
+     * @param bindings a map of type variable → concrete type (may be {@code null}/empty)
+     * @return the resolved type, or the original if nothing needed substituting
+     */
+    public Type resolveType(@Nullable Type type, @Nullable java.util.Map<TypeVariable<?>, Type> bindings) {
+        if (type == null || bindings == null || bindings.isEmpty()) return type;
+        if (type instanceof TypeVariable<?> variable) {
+            var bound = bindings.get(variable);
+            return bound == null ? type : resolveType(bound, bindings);
+        }
+        if (type instanceof GenericArrayType array) {
+            // Preserve array shape; the component is resolved best-effort to a raw class.
+            return resolveType(array.getGenericComponentType(), bindings) instanceof Class<?> component
+                    ? java.lang.reflect.Array.newInstance(component, 0).getClass()
+                    : type;
+        }
+        if (type instanceof ParameterizedType parameterized) {
+            Type[] args = parameterized.getActualTypeArguments();
+            boolean changed = false;
+            Type[] resolved = new Type[args.length];
+            for (int i = 0; i < args.length; i++) {
+                resolved[i] = resolveType(args[i], bindings);
+                changed |= resolved[i] != args[i];
+            }
+            if (!changed) return type;
+            return ParameterizedType.make(parameterized.getRawType(), resolved, parameterized.getOwnerType());
+        }
+        return type;
+    }
+
+    /**
+     * Recursively collects the concrete type-variable bindings along a class's generic
+     * superclass/interfaces chain, from the given immediate {@code slot} upward toward
+     * {@code Object}. The {@code out} map accumulates type variable → resolved type.
+     *
+     * <p>Example: for {@code class A<T> extends HashMap<String, T>}, given the field type
+     * {@code A<Integer>}, this records {@code T → Integer}, then walks {@code A}'s superclass
+     * {@code HashMap<String, T>} (which fixes {@code K=String}, {@code V=T}).</p>
+     *
+     * @param slot     the parameterized type whose variables are currently bound
+     * @param raw      the raw class corresponding to {@code slot}
+     * @param out      accumulating map of type variable → concrete type
+     * @return whether a change was made to {@code out}; used to detect already-registered entries
+     */
+    public boolean resolveSuperTypeBindings(@Nullable Type slot, @Nullable Class<?> raw, @NotNull java.util.Map<TypeVariable<?>, Type> out) {
+        if (raw == null || raw == Object.class) return false;
+        boolean changed = false;
+        Type[] actual = null;
+        if (slot instanceof ParameterizedType parameterized) {
+            actual = parameterized.getActualTypeArguments();
+        }
+        TypeVariable<?>[] variables = raw.getTypeParameters();
+        for (int i = 0; i < variables.length; i++) {
+            Type value = actual != null && i < actual.length ? actual[i] : variables[i];
+            value = resolveType(value, out);
+            Type previous = out.put(variables[i], value);
+            changed |= previous != value;
+        }
+        // Recurse into superclass (and interfaces for completeness).
+        Type genericSuperclass = raw.getGenericSuperclass();
+        changed |= resolveSuperTypeBindings(genericSuperclass, raw.getSuperclass(), out);
+        for (Type genericInterface : raw.getGenericInterfaces()) {
+            Class<?> iface = getRawType(genericInterface);
+            if (iface != null) changed |= resolveSuperTypeBindings(genericInterface, iface, out);
+        }
+        return changed;
+    }
+
+    /**
+     * Resolves {@code fieldType} to the {@link ParameterizedType} that {@code targetRaw}
+     * occupies in its generic hierarchy, with all type variables substituted by their concrete
+     * bindings drawn from {@code fieldType}. Returns the resolved parameterized supertype, or
+     * {@code targetRaw} as a plain class if {@code targetRaw} is not generic / not found.
+     *
+     * <h3>Example</h3>
+     * <pre>{@code class A<T> extends HashMap<String, T> { }}</pre>
+     * Given a field declared as {@code A<Integer>}:
+     * <pre>{@code getResolvedSuperType(field.getGenericType(), HashMap.class) }
+     * // → ParameterizedType HashMap<String, Integer></pre>
+     *
+     * @param fieldType the declared generic type of a field (may be a {@code Class} or {@code ParameterizedType})
+     * @param targetRaw the raw class of the ancestor to resolve to (may be {@code null}
+     *                  to resolve the field type's own generic arguments)
+     * @return the resolved parameterized type, or {@code null} if it cannot be resolved
+     */
+    @Nullable
+    public ParameterizedType getResolvedSuperType(@Nullable Type fieldType, @Nullable Class<?> targetRaw) {
+        if (fieldType == null) return null;
+        // Build the full binding map from the field's own concrete arguments through the hierarchy
+        // (classes, interfaces, arbitrary depth).
+        var bindings = new java.util.LinkedHashMap<TypeVariable<?>, Type>();
+        if (fieldType instanceof ParameterizedType parameterized) {
+            resolveSuperTypeBindings(parameterized, getRawType(parameterized.getRawType()), bindings);
+        } else if (fieldType instanceof Class<?> clazz) {
+            resolveSuperTypeBindings(null, clazz, bindings);
+        }
+        Class<?> startRaw = getRawType(fieldType);
+        if (targetRaw == null || targetRaw == startRaw) {
+            // No ancestor requested: resolve the field type's own generic arguments.
+            if (fieldType instanceof ParameterizedType parameterized) {
+                return (ParameterizedType) resolveType(parameterized, bindings);
+            }
+            return null;
+        }
+        // Find the (possibly deep) parameterized slot for targetRaw along the whole
+        // class/interface hierarchy, then substitute its type variables.
+        ParameterizedType ancestor = findAncestorParameterized(fieldType, startRaw, targetRaw, new java.util.HashSet<>());
+        if (ancestor == null) return null;
+        return (ParameterizedType) resolveType(ancestor, bindings);
+    }
+
+    /**
+     * Convenience: returns the resolved {@link Class} type arguments of {@code targetRaw} within
+     * {@code fieldType}'s generic hierarchy. For {@code A<T> extends HashMap<String, T>} with a
+     * field {@code A<Integer>}, this returns {@code [String.class, Integer.class]}.
+     *
+     * @param fieldType the declared generic type of the field
+     * @param targetRaw the raw ancestor class whose arguments to produce
+     * @return resolved concrete argument classes (may contain {@code null} for unresolvable entries)
+     */
+    public Class<?>[] getResolvedGenericArguments(@Nullable Type fieldType, @Nullable Class<?> targetRaw) {
+        var resolved = getResolvedSuperType(fieldType, targetRaw);
+        if (resolved == null) return new Class<?>[0];
+        Type[] args = resolved.getActualTypeArguments();
+        Class<?>[] result = new Class<?>[args.length];
+        for (int i = 0; i < args.length; i++) {
+            result[i] = getRawType(args[i]);
+        }
+        return result;
+    }
+
+    /**
+     * Finds the {@link ParameterizedType} for {@code targetRaw} along {@code type}'s generic
+     * hierarchy — both superclass <em>and</em> implemented interfaces, at arbitrary depth.
+     * Returns {@code null} if {@code targetRaw} is not a generic ancestor of {@code startRaw}.
+     *
+     * <p>For example {@code class A<T> implements List<T>} resolves {@code List<T>} given
+     * {@code targetRaw = List.class}.</p>
+     *
+     * @param type       the type whose generic hierarchy to search (a {@code Class} or {@code ParameterizedType})
+     * @param startRaw   the raw class of {@code type}
+     * @param targetRaw  the raw ancestor (class or interface) to locate
+     * @param seen       set of already-visited raw classes to guard against cycles
+     * @return the parameterized slot for {@code targetRaw}, or {@code null}
+     */
+    @Nullable
+    private ParameterizedType findAncestorParameterized(@Nullable Type type, @Nullable Class<?> startRaw, Class<?> targetRaw, java.util.Set<Class<?>> seen) {
+        if (startRaw == null || startRaw == Object.class || !seen.add(startRaw)) return null;
+        // Direct match on this node.
+        if (startRaw == targetRaw) {
+            return type instanceof ParameterizedType parameterized ? parameterized : null;
+        }
+        // Search superclass.
+        Type genericSuperclass = startRaw.getGenericSuperclass();
+        if (genericSuperclass != null) {
+            Class<?> supRaw = getRawType(genericSuperclass);
+            var res = findAncestorParameterized(genericSuperclass, supRaw, targetRaw, seen);
+            if (res != null) return res;
+        }
+        // Search implemented interfaces (generic or not).
+        for (Type genericInterface : startRaw.getGenericInterfaces()) {
+            Class<?> ifaceRaw = getRawType(genericInterface);
+            var res = findAncestorParameterized(genericInterface, ifaceRaw, targetRaw, seen);
+            if (res != null) return res;
+        }
+        return null;
     }
 
     /**

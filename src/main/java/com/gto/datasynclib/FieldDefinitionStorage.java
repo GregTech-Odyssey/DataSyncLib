@@ -1,6 +1,7 @@
 package com.gto.datasynclib;
 
 import com.gto.datasynclib.annotations.*;
+import com.gto.datasynclib.field.access.ChildManagerAccess;
 import com.gto.datasynclib.field.object.ObjCodecField;
 import com.gto.datasynclib.util.HashUtil;
 import com.gto.datasynclib.util.ReflectUtil;
@@ -273,15 +274,28 @@ public final class FieldDefinitionStorage {
         for (var field : clazz.getDeclaredFields()) {
             if (Modifier.isStatic(field.getModifiers())) continue;
             var type = field.getType();
-            if (field.isAnnotationPresent(AdditionalHolder.class)) {
+            var additionalHolder = field.getAnnotation(AdditionalHolder.class);
+            boolean childManager = additionalHolder != null && additionalHolder.childManager();
+            if (additionalHolder != null) {
                 field.setAccessible(true);
-                scanFields(type, definitions, createNestedSourceFunction(lookup, field, source));
+                // childManager mode: the field's object owns a dedicated sub-manager; do NOT
+                // flatten its annotated fields into the parent. A single field definition
+                // (routed to ChildManagerAccess) is created below instead.
+                if (!childManager) {
+                    scanFields(type, definitions, createNestedSourceFunction(lookup, field, source));
+                }
             }
             var savetoDisk = field.getAnnotation(SaveToDisk.class);
             var syncToClient = field.getAnnotation(SyncToClient.class);
             var syncToServer = field.getAnnotation(SyncToServer.class);
             if (savetoDisk == null && syncToClient == null && syncToServer == null && field.getAnnotation(AddToManager.class) == null)
                 continue;
+            if (childManager) {
+                // Child-manager field: serialized as a single field via its own sub-manager.
+                var definition = createChildManagerFieldDefinition(lookup, field, type, source, savetoDisk, syncToClient, syncToServer);
+                if (definition != null) definitions.add(definition);
+                continue;
+            }
             var conversion = field.getAnnotation(Conversion.class);
             Field conversionField = null;
             Function conversionGetFunction = null;
@@ -309,6 +323,46 @@ public final class FieldDefinitionStorage {
             }
             var definition = createFieldDefinition(lookup, field, type, source, new FieldAnnotationMetadata(clazz, field, type, savetoDisk, syncToClient, syncToServer), conversionField, conversionGetFunction, conversionSetFunction);
             if (definition != null) definitions.add(definition);
+        }
+    }
+
+    /**
+     * Builds a {@link DataFieldDefinition} for an {@code @AdditionalHolder(childManager = true)}
+     * field. Unlike flattened {@code @AdditionalHolder} fields, whose inner annotations are
+     * hoisted into the parent manager, a child-manager field is serialized as a single unit:
+     * its object owns a dedicated {@link FieldDataManager} (via
+     * {@link ChildFieldDataHolder}), managed through {@link ChildManagerAccess
+     * ChildManagerAccess}.
+     *
+     * <p>Persistence and synchronization of the whole sub-object follow the annotations placed
+     * on the field itself ({@code @SaveToDisk}, {@code @SyncToClient}, {@code @SyncToServer}).</p>
+     *
+     * @param lookup       private-access lookup for the declaring class
+     * @param field        the {@code @AdditionalHolder(childManager = true)} annotated field
+     * @param type         the field's type (the sub-object's class)
+     * @param source       parent source chain, or {@code null} at top level
+     * @param savetoDisk   the field's {@code @SaveToDisk} annotation (may be {@code null})
+     * @param syncToClient the field's {@code @SyncToClient} annotation (may be {@code null})
+     * @param syncToServer the field's {@code @SyncToServer} annotation (may be {@code null})
+     * @return a child-manager {@link DataFieldDefinition}, or {@code null} if none of the
+     *         persistence/sync annotations are present (nothing for the parent to manage)
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static DataFieldDefinition<?> createChildManagerFieldDefinition(MethodHandles.Lookup lookup, Field field, Class<?> type, @Nullable Function<Object, Object> source, @Nullable SaveToDisk savetoDisk, @Nullable SyncToClient syncToClient, @Nullable SyncToServer syncToServer) {
+        try {
+            field.setAccessible(true);
+            Class<?>[] genericType = ReflectUtil.getFieldGenericTypeClasses(field.getGenericType());
+            boolean isFinal = Modifier.isFinal(field.getModifiers());
+            var annotations = new FieldAnnotationMetadata(field.getDeclaringClass(), field, type, savetoDisk, syncToClient, syncToServer);
+            // ChildManagerAccess is generic over the field's raw type; use a raw factory.
+            DataField.Factory factory = ChildManagerAccess::new;
+            return new DataFieldDefinition<>(
+                    lookup, field, type, factory,
+                    source, annotations, genericType,
+                    isFinal, annotations.createAccessInstance(), STRATEGIES,
+                    null, null);
+        } catch (Throwable e) {
+            throw new RuntimeException("Failed to create child-manager definition for field: " + ReflectUtil.getFieldDetailedName(field), e);
         }
     }
 

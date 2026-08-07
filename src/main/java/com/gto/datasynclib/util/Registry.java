@@ -1,5 +1,6 @@
 package com.gto.datasynclib.util;
 
+import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.util.holder.IntObjectHolder;
@@ -70,14 +71,45 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
      */
     protected final DataCodec<V> dataCodec;
 
+    /**
+     * The concrete runtime class of this registry's values ({@code V}), when known.
+     * When non-{@code null} and {@link #freeze()} completes, this registry's
+     * {@link #streamCodec()} + {@link #dataCodec()} are <em>automatically registered</em>
+     * into the global {@link DataSyncCodec} under this type, so any field of type
+     * {@code V} can be serialized without manual codec registration.
+     */
+    @Nullable
+    protected final Class<V> valueType;
+
+    /**
+     * Builds the global {@link DataSyncCodec} bridging this registry's
+     * {@link #streamCodec()} and {@link #dataCodec()}.
+     *
+     * @return the registered global codec, or {@code null} if {@code valueType} is unknown
+     */
+    @Nullable
+    public final DataSyncCodec<V> registerToGlobalCodecs() {
+        if (valueType == null) return null;
+        return DataSyncCodec.register(valueType, streamCodec(), dataCodec());
+    }
+
     public Registry(String name, DataCodec<K> keyCodec) {
-        this(name, keyCodec, this::getKeyByMap);
+        this(name, keyCodec, this::getKeyByMap, null);
     }
 
     public Registry(String name, DataCodec<K> keyCodec, Function<? super V, ? extends K> keyGetter) {
+        this(name, keyCodec, keyGetter, null);
+    }
+
+    public Registry(String name, DataCodec<K> keyCodec, @Nullable Class<V> valueType) {
+        this(name, keyCodec, this::getKeyByMap, valueType);
+    }
+
+    public Registry(String name, DataCodec<K> keyCodec, Function<? super V, ? extends K> keyGetter, @Nullable Class<V> valueType) {
         this.name = Objects.requireNonNull(name, "name");
         this.keyGetter = Objects.requireNonNull(keyGetter, "keyGetter");
         Objects.requireNonNull(keyCodec, "keyCodec");
+        this.valueType = valueType;
         this.dataCodec = DataCodec.of(
                 obj -> keyCodec.encode(keyGetter.apply(obj)),
                 (data, dataVersion) -> keyValues.get(keyCodec.decode(data, dataVersion)));
@@ -102,6 +134,9 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
             throw new IllegalStateException("Registry %s cannot be set to frozen state in current context!".formatted(name));
         frozen = true;
         build();
+        // Auto-register this registry's stream + data codecs into the global DataSyncCodec
+        // when the value runtime type is known, so fields of type V serialize via this registry.
+        if (valueType != null) registerToGlobalCodecs();
     }
 
     protected void clear() {
