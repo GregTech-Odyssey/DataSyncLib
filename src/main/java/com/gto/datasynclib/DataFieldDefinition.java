@@ -150,8 +150,7 @@ public final class DataFieldDefinition<T> {
     private final MethodHandle readFromData;
     private final MethodHandle writeToBuffer;
     private final MethodHandle readFromBuffer;
-    private final VarHandle getter;
-    private final VarHandle setter;
+    private final VarHandle handle;
     private final MethodHandle clientListenerHandle;
     private final MethodHandle serverListenerHandle;
 
@@ -184,8 +183,7 @@ public final class DataFieldDefinition<T> {
 
         this.defaultValueHandle = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.defaultValueGetter());
 
-        this.getter = ReflectUtil.createVarHandle(lookup, field);
-        this.setter = isFinal ? null : ReflectUtil.createVarHandle(lookup, field);
+        this.handle = ReflectUtil.createVarHandle(lookup, field);
 
         this.writeToData = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.writeToData(), Data.class);
         this.readFromData = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.readFromData());
@@ -494,7 +492,7 @@ public final class DataFieldDefinition<T> {
      */
     @SuppressWarnings("unchecked")
     public T get(Object source) {
-        var obj = (T) getter.get(source);
+        var obj = (T) handle.get(source);
         if (conversionGet != null) return conversionGet.apply(obj);
         return obj;
     }
@@ -513,76 +511,76 @@ public final class DataFieldDefinition<T> {
      * @param value  the value to set (in the managed type, before reverse conversion)
      */
     public void set(Object source, T value) {
-        if (setter == null) return;
+        if (isFinal) return;
         if (conversionSet != null) {
-            setter.set(source, conversionSet.apply(value));
+            handle.set(source, conversionSet.apply(value));
         } else {
-            setter.set(source, value);
+            handle.set(source, value);
         }
     }
 
     public int getInt(Object source) {
-        return (int) getter.get(source);
+        return (int) handle.get(source);
     }
 
     public void setInt(Object source, int value) {
-        setter.set(source, value);
+        handle.set(source, value);
     }
 
     public long getLong(Object source) {
-        return (long) getter.get(source);
+        return (long) handle.get(source);
     }
 
     public void setLong(Object source, long value) {
-        setter.set(source, value);
+        handle.set(source, value);
     }
 
     public float getFloat(Object source) {
-        return (float) getter.get(source);
+        return (float) handle.get(source);
     }
 
     public void setFloat(Object source, float value) {
-        setter.set(source, value);
+        handle.set(source, value);
     }
 
     public double getDouble(Object source) {
-        return (double) getter.get(source);
+        return (double) handle.get(source);
     }
 
     public void setDouble(Object source, double value) {
-        setter.set(source, value);
+        handle.set(source, value);
     }
 
     public boolean getBoolean(Object source) {
-        return (boolean) getter.get(source);
+        return (boolean) handle.get(source);
     }
 
     public void setBoolean(Object source, boolean value) {
-        setter.set(source, value);
+        handle.set(source, value);
     }
 
     public short getShort(Object source) {
-        return (short) getter.get(source);
+        return (short) handle.get(source);
     }
 
     public void setShort(Object source, short value) {
-        setter.set(source, value);
+        handle.set(source, value);
     }
 
     public byte getByte(Object source) {
-        return (byte) getter.get(source);
+        return (byte) handle.get(source);
     }
 
     public void setByte(Object source, byte value) {
-        setter.set(source, value);
+        handle.set(source, value);
     }
 
     public char getChar(Object source) {
-        return (char) getter.get(source);
+        return (char) handle.get(source);
     }
 
     public void setChar(Object source, char value) {
-        setter.set(source, value);
+        handle.set(source, value);
     }
 
     public MethodHandle getListener(LogicalSide side) {

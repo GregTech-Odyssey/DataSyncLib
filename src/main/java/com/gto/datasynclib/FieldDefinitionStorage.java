@@ -292,8 +292,8 @@ public final class FieldDefinitionStorage {
                 continue;
             if (childManager) {
                 // Child-manager field: serialized as a single field via its own sub-manager.
-                var definition = createChildManagerFieldDefinition(lookup, field, type, source, savetoDisk, syncToClient, syncToServer);
-                if (definition != null) definitions.add(definition);
+                var definition = createChildManagerFieldDefinition(clazz,lookup, field, type, source, savetoDisk, syncToClient, syncToServer);
+                definitions.add(definition);
                 continue;
             }
             var conversion = field.getAnnotation(Conversion.class);
@@ -348,17 +348,14 @@ public final class FieldDefinitionStorage {
      *         persistence/sync annotations are present (nothing for the parent to manage)
      */
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static DataFieldDefinition<?> createChildManagerFieldDefinition(MethodHandles.Lookup lookup, Field field, Class<?> type, @Nullable Function<Object, Object> source, @Nullable SaveToDisk savetoDisk, @Nullable SyncToClient syncToClient, @Nullable SyncToServer syncToServer) {
+    private static DataFieldDefinition<?> createChildManagerFieldDefinition(Class<?> clazz,MethodHandles.Lookup lookup, Field field, Class<?> type, @Nullable Function<Object, Object> source, @Nullable SaveToDisk savetoDisk, @Nullable SyncToClient syncToClient, @Nullable SyncToServer syncToServer) {
         try {
             field.setAccessible(true);
-            Class<?>[] genericType = ReflectUtil.getFieldGenericTypeClasses(field.getGenericType());
             boolean isFinal = Modifier.isFinal(field.getModifiers());
-            var annotations = new FieldAnnotationMetadata(field.getDeclaringClass(), field, type, savetoDisk, syncToClient, syncToServer);
-            // ChildManagerAccess is generic over the field's raw type; use a raw factory.
-            DataField.Factory factory = ChildManagerAccess::new;
+            var annotations = new FieldAnnotationMetadata(clazz, field, type, savetoDisk, syncToClient, syncToServer);
             return new DataFieldDefinition<>(
-                    lookup, field, type, factory,
-                    source, annotations, genericType,
+                    lookup, field, type,  ChildManagerAccess::new,
+                    source, annotations, new Class[0],
                     isFinal, annotations.createAccessInstance(), STRATEGIES,
                     null, null);
         } catch (Throwable e) {

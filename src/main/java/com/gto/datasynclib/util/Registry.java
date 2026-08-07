@@ -84,25 +84,14 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
     /**
      * Builds the global {@link DataSyncCodec} bridging this registry's
      * {@link #streamCodec()} and {@link #dataCodec()}.
-     *
-     * @return the registered global codec, or {@code null} if {@code valueType} is unknown
      */
-    @Nullable
-    public final DataSyncCodec<V> registerToGlobalCodecs() {
-        if (valueType == null) return null;
-        return DataSyncCodec.register(valueType, streamCodec(), dataCodec());
-    }
-
-    public Registry(String name, DataCodec<K> keyCodec) {
-        this(name, keyCodec, this::getKeyByMap, null);
+    public final void registerToGlobalCodecs() {
+        if (valueType == null) return;
+        DataSyncCodec.register(valueType, streamCodec(), dataCodec());
     }
 
     public Registry(String name, DataCodec<K> keyCodec, Function<? super V, ? extends K> keyGetter) {
         this(name, keyCodec, keyGetter, null);
-    }
-
-    public Registry(String name, DataCodec<K> keyCodec, @Nullable Class<V> valueType) {
-        this(name, keyCodec, this::getKeyByMap, valueType);
     }
 
     public Registry(String name, DataCodec<K> keyCodec, Function<? super V, ? extends K> keyGetter, @Nullable Class<V> valueType) {
@@ -112,6 +101,16 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
         this.valueType = valueType;
         this.dataCodec = DataCodec.of(
                 obj -> keyCodec.encode(keyGetter.apply(obj)),
+                (data, dataVersion) -> keyValues.get(keyCodec.decode(data, dataVersion)));
+    }
+
+    public Registry(String name, DataCodec<K> keyCodec,  @Nullable Class<V> valueType) {
+        this.name = Objects.requireNonNull(name, "name");
+        this.keyGetter = this::getKeyByMap;
+        Objects.requireNonNull(keyCodec, "keyCodec");
+        this.valueType = valueType;
+        this.dataCodec = DataCodec.of(
+                obj -> keyCodec.encode(this.getKeyByMap(obj)),
                 (data, dataVersion) -> keyValues.get(keyCodec.decode(data, dataVersion)));
     }
 

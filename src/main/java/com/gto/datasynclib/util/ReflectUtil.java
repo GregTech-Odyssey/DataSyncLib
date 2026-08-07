@@ -1,5 +1,6 @@
 package com.gto.datasynclib.util;
 
+import com.google.gson.internal.$Gson$Types;
 import lombok.experimental.UtilityClass;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -117,26 +118,31 @@ public final class ReflectUtil {
      */
     public Type resolveType(@Nullable Type type, @Nullable java.util.Map<TypeVariable<?>, Type> bindings) {
         if (type == null || bindings == null || bindings.isEmpty()) return type;
-        if (type instanceof TypeVariable<?> variable) {
-            var bound = bindings.get(variable);
-            return bound == null ? type : resolveType(bound, bindings);
-        }
-        if (type instanceof GenericArrayType array) {
-            // Preserve array shape; the component is resolved best-effort to a raw class.
-            return resolveType(array.getGenericComponentType(), bindings) instanceof Class<?> component
-                    ? java.lang.reflect.Array.newInstance(component, 0).getClass()
-                    : type;
-        }
-        if (type instanceof ParameterizedType parameterized) {
-            Type[] args = parameterized.getActualTypeArguments();
-            boolean changed = false;
-            Type[] resolved = new Type[args.length];
-            for (int i = 0; i < args.length; i++) {
-                resolved[i] = resolveType(args[i], bindings);
-                changed |= resolved[i] != args[i];
+        switch (type) {
+            case TypeVariable<?> variable -> {
+                var bound = bindings.get(variable);
+                return bound == null ? type : resolveType(bound, bindings);
             }
-            if (!changed) return type;
-            return ParameterizedType.make(parameterized.getRawType(), resolved, parameterized.getOwnerType());
+            case GenericArrayType array -> {
+                // Preserve array shape; the component is resolved best-effort to a raw class.
+                return resolveType(array.getGenericComponentType(), bindings) instanceof Class<?> component
+                        ? Array.newInstance(component, 0).getClass()
+                        : type;
+                // Preserve array shape; the component is resolved best-effort to a raw class.
+            }
+            case ParameterizedType parameterized -> {
+                Type[] args = parameterized.getActualTypeArguments();
+                boolean changed = false;
+                Type[] resolved = new Type[args.length];
+                for (int i = 0; i < args.length; i++) {
+                    resolved[i] = resolveType(args[i], bindings);
+                    changed |= resolved[i] != args[i];
+                }
+                if (!changed) return type;
+                return $Gson$Types.newParameterizedTypeWithOwner(parameterized.getOwnerType(), parameterized.getRawType(),resolved);
+            }
+            default -> {
+            }
         }
         return type;
     }

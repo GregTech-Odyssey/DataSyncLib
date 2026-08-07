@@ -264,7 +264,7 @@ public final class DataSyncSelfTests {
     }
 
     /** Runs every self-test and reports failures. */
-    public void runAll() {
+    public void run() {
         testDiskRoundTrip();
         testNetworkRoundTrip();
         testNullAndDefaultSkipping();
@@ -324,7 +324,7 @@ public final class DataSyncSelfTests {
         byte[] bytes = src.manager.writeToNetworkBuffer(LogicalSide.SERVER, true);
 
         SyncHolder dst = new SyncHolder();
-        dst.manager.readFromNetworkBuffer(LogicalSide.SERVER, bytes);
+        dst.manager.readFromNetworkBuffer(LogicalSide.CLIENT, bytes);
 
         expect("net.counter", src.counter, dst.counter);
         expect("net.name", src.name, dst.name);
@@ -389,6 +389,6 @@ public final class DataSyncSelfTests {
 
     /** Convenience: run from anywhere. */
     public static void runAll() {
-        new DataSyncSelfTests().runAll();
+        new DataSyncSelfTests().run();
     }
 }

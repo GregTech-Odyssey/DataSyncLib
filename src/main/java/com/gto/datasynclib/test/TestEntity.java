@@ -4,6 +4,7 @@ import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.annotations.AdditionalHolder;
 import com.gto.datasynclib.annotations.SaveToDisk;
+import com.gto.datasynclib.annotations.SyncToClient;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.network.DataSyncNetwork;
 import net.minecraft.nbt.CompoundTag;
@@ -32,20 +33,22 @@ import net.minecraft.world.level.Level;
  */
 public class TestEntity extends Entity implements IFieldDataHolder {
 
-    private static final EntityDataAccessor<Boolean> DATA_SYNC_FLAG =
-            SynchedEntityData.defineId(TestEntity.class, EntityDataSerializers.BOOLEAN);
 
     @SaveToDisk
+    @SyncToClient
     private int syncTicks;
 
     @SaveToDisk
+    @SyncToClient
     private float speed;
 
     @SaveToDisk
+    @SyncToClient
     private String title = "";
 
     // Child-manager mode: managed by a dedicated sub-manager, not flattened into this entity's manager.
     @SaveToDisk
+    @SyncToClient
     @AdditionalHolder(childManager = true)
     private final TestEntitySub sub = new TestEntitySub();
 
@@ -54,8 +57,8 @@ public class TestEntity extends Entity implements IFieldDataHolder {
     }
 
     @Override
-    protected void defineSynchedData(SynchedEntityData.Builder builder) {
-        builder.define(DATA_SYNC_FLAG, false);
+    protected void defineSynchedData() {
+
     }
 
     @Override
@@ -89,14 +92,12 @@ public class TestEntity extends Entity implements IFieldDataHolder {
 
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
-        super.addAdditionalSaveData(tag);
         tag.putInt(DATA_VERSION_KEY, DATA_VERSION);
         tag.putByteArray(DATA_KEY, getFieldDataManager().writeToData().writeToBytes());
     }
 
     @Override
     public void readAdditionalSaveData(CompoundTag tag) {
-        super.readAdditionalSaveData(tag);
         if (tag.contains(DATA_KEY)) {
             getFieldDataManager().readFromData(
                     Data.readData(tag.getByteArray(DATA_KEY)),

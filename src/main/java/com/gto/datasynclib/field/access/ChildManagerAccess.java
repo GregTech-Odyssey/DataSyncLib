@@ -48,7 +48,7 @@ public final class ChildManagerAccess<T> extends AbstractFieldAccess<T> {
      * (non-final field) is observed, the previous adapter is dropped to avoid a leak.
      */
     @Nullable
-    protected IFieldDataHolder asHolder(@Nullable T raw) {
+    private IFieldDataHolder asHolder(@Nullable T raw) {
         if (raw == null) {
             cachedTarget = null;
             cachedHolder = null;
