@@ -139,7 +139,7 @@ public final class ReflectUtil {
                     changed |= resolved[i] != args[i];
                 }
                 if (!changed) return type;
-                return $Gson$Types.newParameterizedTypeWithOwner(parameterized.getOwnerType(), parameterized.getRawType(),resolved);
+                return $Gson$Types.newParameterizedTypeWithOwner(parameterized.getOwnerType(), parameterized.getRawType(), resolved);
             }
             default -> {
             }
@@ -156,9 +156,9 @@ public final class ReflectUtil {
      * {@code A<Integer>}, this records {@code T → Integer}, then walks {@code A}'s superclass
      * {@code HashMap<String, T>} (which fixes {@code K=String}, {@code V=T}).</p>
      *
-     * @param slot     the parameterized type whose variables are currently bound
-     * @param raw      the raw class corresponding to {@code slot}
-     * @param out      accumulating map of type variable → concrete type
+     * @param slot the parameterized type whose variables are currently bound
+     * @param raw  the raw class corresponding to {@code slot}
+     * @param out  accumulating map of type variable → concrete type
      * @return whether a change was made to {@code out}; used to detect already-registered entries
      */
     public boolean resolveSuperTypeBindings(@Nullable Type slot, @Nullable Class<?> raw, @NotNull java.util.Map<TypeVariable<?>, Type> out) {
@@ -256,10 +256,10 @@ public final class ReflectUtil {
      * <p>For example {@code class A<T> implements List<T>} resolves {@code List<T>} given
      * {@code targetRaw = List.class}.</p>
      *
-     * @param type       the type whose generic hierarchy to search (a {@code Class} or {@code ParameterizedType})
-     * @param startRaw   the raw class of {@code type}
-     * @param targetRaw  the raw ancestor (class or interface) to locate
-     * @param seen       set of already-visited raw classes to guard against cycles
+     * @param type      the type whose generic hierarchy to search (a {@code Class} or {@code ParameterizedType})
+     * @param startRaw  the raw class of {@code type}
+     * @param targetRaw the raw ancestor (class or interface) to locate
+     * @param seen      set of already-visited raw classes to guard against cycles
      * @return the parameterized slot for {@code targetRaw}, or {@code null}
      */
     @Nullable

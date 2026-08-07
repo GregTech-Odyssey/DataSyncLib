@@ -22,6 +22,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 
 import java.util.*;
 import java.util.function.Function;
@@ -48,6 +49,9 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
 
     @SaveToDisk
     private final Map<Integer, Boolean> map = new HashMap<>();
+
+    @SaveToDisk
+    private AABB aabb = new AABB(1, 4, 5, 6, 1, 5);
 
     @SaveToDisk
     @Codec(saveCodec = "A_CODEC", syncCodec = "A_CODEC")
@@ -96,7 +100,9 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
         }
     }
 
-    /** Runs the in-dev self-test suite exactly once per JVM. */
+    /**
+     * Runs the in-dev self-test suite exactly once per JVM.
+     */
     private static volatile boolean selfTestsRun = false;
 
     protected void serverTick(ServerLevel level) {
@@ -110,6 +116,7 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
             ++b.a;
             b.c.value = b.a + "";
             a = new A(b.a);
+            aabb = new AABB(1, 4, 5, 6, 1, b.a);
             tagData.putInt("aaa", tagData.getInt("aaa") + 1);
             DataSyncNetwork.syncBlockEntityToClient(this, false, true);
         }

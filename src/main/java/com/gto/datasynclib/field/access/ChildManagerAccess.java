@@ -32,7 +32,9 @@ import org.jetbrains.annotations.Nullable;
  */
 public final class ChildManagerAccess<T> extends AbstractFieldAccess<T> {
 
-    /** Current sub-object being managed and its cached child-manager holder (single slot). */
+    /**
+     * Current sub-object being managed and its cached child-manager holder (single slot).
+     */
     private Object cachedTarget;
     private IFieldDataHolder cachedHolder;
 

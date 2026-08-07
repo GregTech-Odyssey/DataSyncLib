@@ -25,7 +25,7 @@ public interface DataEncoder<T> {
     @NotNull
     Data encode(T obj);
 
-    static <K, V> DataEncoder<V> convert(DataEncoder<? super K> serializer, Function<V, K> converter) {
+    static <K, V> DataEncoder<V> convert(DataEncoder<? super K> serializer, Function<? super V, ? extends K> converter) {
         return obj -> serializer.encode(converter.apply(obj));
     }
 

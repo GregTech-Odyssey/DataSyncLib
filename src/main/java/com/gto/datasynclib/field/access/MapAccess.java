@@ -25,7 +25,8 @@ public final class MapAccess<K, V> extends AbstractFieldAccess<Map> {
     @SuppressWarnings("unchecked")
     public MapAccess(DataFieldDefinition<Map> definition) {
         super(definition);
-        if (definition.genericType.length < 2) throw new IllegalArgumentException("Map type parameters not found");
+        if (definition.genericType.length < 2)
+            throw new IllegalArgumentException("Map type parameters not found " + definition.field);
         this.keyCodec = (DataSyncCodec<K>) definition.genericCodecs[0];
         this.valueCodec = (DataSyncCodec<V>) definition.genericCodecs[1];
         if (this.keyCodec == null)

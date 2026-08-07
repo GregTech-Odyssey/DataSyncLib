@@ -38,7 +38,11 @@ public record ListData(List<Data> value) implements CollectionData, Iterable<Dat
     }
 
     public static ListData of(Data... datas) {
-        return new ListData(new ArrayList<>(Arrays.asList(datas)));
+        return new ListData(Arrays.asList(datas));
+    }
+
+    public static ListData of(List<Data> datas) {
+        return new ListData(datas);
     }
 
     public static ListData of(Collection<Data> datas) {

@@ -292,7 +292,7 @@ public final class FieldDefinitionStorage {
                 continue;
             if (childManager) {
                 // Child-manager field: serialized as a single field via its own sub-manager.
-                var definition = createChildManagerFieldDefinition(clazz,lookup, field, type, source, savetoDisk, syncToClient, syncToServer);
+                var definition = createChildManagerFieldDefinition(clazz, lookup, field, type, source, savetoDisk, syncToClient, syncToServer);
                 definitions.add(definition);
                 continue;
             }
@@ -307,7 +307,7 @@ public final class FieldDefinitionStorage {
                     conversionField.setAccessible(true);
                     conversionGetFunction = (Function) conversionField.get(null);
                     // The managed type is the return type (2nd generic param) of the Function
-                    type = ReflectUtil.getFieldGenericTypeClasses(conversionField.getGenericType())[1];
+                    type = ReflectUtil.getResolvedGenericArguments(conversionField.getGenericType(), Function.class)[1];
                     try {
                         // Resolve the reverse conversion function: static Function<ManagedType, FieldType>
                         // This is optional — if absent, the setter path won't use conversion
@@ -345,16 +345,16 @@ public final class FieldDefinitionStorage {
      * @param syncToClient the field's {@code @SyncToClient} annotation (may be {@code null})
      * @param syncToServer the field's {@code @SyncToServer} annotation (may be {@code null})
      * @return a child-manager {@link DataFieldDefinition}, or {@code null} if none of the
-     *         persistence/sync annotations are present (nothing for the parent to manage)
+     * persistence/sync annotations are present (nothing for the parent to manage)
      */
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private static DataFieldDefinition<?> createChildManagerFieldDefinition(Class<?> clazz,MethodHandles.Lookup lookup, Field field, Class<?> type, @Nullable Function<Object, Object> source, @Nullable SaveToDisk savetoDisk, @Nullable SyncToClient syncToClient, @Nullable SyncToServer syncToServer) {
+    private static DataFieldDefinition<?> createChildManagerFieldDefinition(Class<?> clazz, MethodHandles.Lookup lookup, Field field, Class<?> type, @Nullable Function<Object, Object> source, @Nullable SaveToDisk savetoDisk, @Nullable SyncToClient syncToClient, @Nullable SyncToServer syncToServer) {
         try {
             field.setAccessible(true);
             boolean isFinal = Modifier.isFinal(field.getModifiers());
             var annotations = new FieldAnnotationMetadata(clazz, field, type, savetoDisk, syncToClient, syncToServer);
             return new DataFieldDefinition<>(
-                    lookup, field, type,  ChildManagerAccess::new,
+                    lookup, field, type, ChildManagerAccess::new,
                     source, annotations, new Class[0],
                     isFinal, annotations.createAccessInstance(), STRATEGIES,
                     null, null);

@@ -1,7 +1,7 @@
 package com.gto.datasynclib.datastream.codec;
 
 import com.gto.datasynclib.datastream.data.*;
-import com.mojang.datafixers.util.Pair;
+import com.mojang.datafixers.util.*;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.DynamicOps;
@@ -14,6 +14,7 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
 /**
@@ -119,6 +120,792 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
             @Override
             public @NotNull Data encode(V obj) {
                 return codec.encode(encodeConverter.apply(obj));
+            }
+        };
+    }
+
+    /**
+     * Creates a codec that writes nothing on encode and always returns
+     * the given constant on decode.
+     *
+     * @param <T>   the value type
+     * @param value the constant value to return on every decode
+     * @return a codec that returns {@link NullData#INSTANCE} on encode and {@code value} on decode
+     */
+    static <T> DataCodec<T> unit(T value) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return NullData.INSTANCE;
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                return value;
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from a single field, using
+     * {@link ListData} as the container.
+     */
+    static <T, F1> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            Function<? super F1, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(codec1.encode(getter1.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(codec1.decode(list.get(0), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from two fields.
+     */
+    static <T, F1, F2> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            BiFunction<? super F1, ? super F2, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from three fields.
+     */
+    static <T, F1, F2, F3> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            DataCodec<F3> codec3, Function<? super T, ? extends F3> getter3,
+            Function3<? super F1, ? super F2, ? super F3, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)),
+                        codec3.encode(getter3.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion),
+                        codec3.decode(list.get(2), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from four fields.
+     */
+    static <T, F1, F2, F3, F4> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            DataCodec<F3> codec3, Function<? super T, ? extends F3> getter3,
+            DataCodec<F4> codec4, Function<? super T, ? extends F4> getter4,
+            Function4<? super F1, ? super F2, ? super F3, ? super F4, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)),
+                        codec3.encode(getter3.apply(obj)),
+                        codec4.encode(getter4.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion),
+                        codec3.decode(list.get(2), dataVersion),
+                        codec4.decode(list.get(3), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from five fields.
+     */
+    static <T, F1, F2, F3, F4, F5> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            DataCodec<F3> codec3, Function<? super T, ? extends F3> getter3,
+            DataCodec<F4> codec4, Function<? super T, ? extends F4> getter4,
+            DataCodec<F5> codec5, Function<? super T, ? extends F5> getter5,
+            Function5<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)),
+                        codec3.encode(getter3.apply(obj)),
+                        codec4.encode(getter4.apply(obj)),
+                        codec5.encode(getter5.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion),
+                        codec3.decode(list.get(2), dataVersion),
+                        codec4.decode(list.get(3), dataVersion),
+                        codec5.decode(list.get(4), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from six fields.
+     */
+    static <T, F1, F2, F3, F4, F5, F6> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            DataCodec<F3> codec3, Function<? super T, ? extends F3> getter3,
+            DataCodec<F4> codec4, Function<? super T, ? extends F4> getter4,
+            DataCodec<F5> codec5, Function<? super T, ? extends F5> getter5,
+            DataCodec<F6> codec6, Function<? super T, ? extends F6> getter6,
+            Function6<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)),
+                        codec3.encode(getter3.apply(obj)),
+                        codec4.encode(getter4.apply(obj)),
+                        codec5.encode(getter5.apply(obj)),
+                        codec6.encode(getter6.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion),
+                        codec3.decode(list.get(2), dataVersion),
+                        codec4.decode(list.get(3), dataVersion),
+                        codec5.decode(list.get(4), dataVersion),
+                        codec6.decode(list.get(5), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Creates a polymorphic codec that dispatches based on a discriminator value.
+     * Encoded as a {@link ListData} with two elements: the discriminator and the typed payload.
+     */
+    static <T, D> DataCodec<T> dispatch(
+            DataCodec<D> discriminatorCodec,
+            Function<? super T, ? extends D> discriminator,
+            Function<? super D, ? extends DataCodec<? extends T>> codecGetter) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                D type = discriminator.apply(obj);
+                DataCodec<? extends T> codec = codecGetter.apply(type);
+                return ListData.of(
+                        discriminatorCodec.encode(type),
+                        ((DataCodec<T>) codec).encode(obj));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                D type = discriminatorCodec.decode(list.get(0), dataVersion);
+                DataCodec<? extends T> codec = codecGetter.apply(type);
+                return codec.decode(list.get(1), dataVersion);
+            }
+        };
+    }
+
+    /**
+     * Creates a codec that can reference itself, enabling serialization of recursive
+     * data structures.
+     */
+    static <T> DataCodec<T> recursive(Function<DataCodec<T>, DataCodec<T>> wrapped) {
+        return new DataCodec<>() {
+            private DataCodec<T> resolved;
+
+            private DataCodec<T> resolve() {
+                if (resolved == null) resolved = wrapped.apply(this);
+                return resolved;
+            }
+
+            @Override
+            public @NotNull Data encode(T obj) {
+                return resolve().encode(obj);
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                return resolve().decode(data, dataVersion);
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from seven fields.
+     */
+    static <T, F1, F2, F3, F4, F5, F6, F7> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            DataCodec<F3> codec3, Function<? super T, ? extends F3> getter3,
+            DataCodec<F4> codec4, Function<? super T, ? extends F4> getter4,
+            DataCodec<F5> codec5, Function<? super T, ? extends F5> getter5,
+            DataCodec<F6> codec6, Function<? super T, ? extends F6> getter6,
+            DataCodec<F7> codec7, Function<? super T, ? extends F7> getter7,
+            Function7<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)),
+                        codec3.encode(getter3.apply(obj)),
+                        codec4.encode(getter4.apply(obj)),
+                        codec5.encode(getter5.apply(obj)),
+                        codec6.encode(getter6.apply(obj)),
+                        codec7.encode(getter7.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion),
+                        codec3.decode(list.get(2), dataVersion),
+                        codec4.decode(list.get(3), dataVersion),
+                        codec5.decode(list.get(4), dataVersion),
+                        codec6.decode(list.get(5), dataVersion),
+                        codec7.decode(list.get(6), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from eight fields.
+     */
+    static <T, F1, F2, F3, F4, F5, F6, F7, F8> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            DataCodec<F3> codec3, Function<? super T, ? extends F3> getter3,
+            DataCodec<F4> codec4, Function<? super T, ? extends F4> getter4,
+            DataCodec<F5> codec5, Function<? super T, ? extends F5> getter5,
+            DataCodec<F6> codec6, Function<? super T, ? extends F6> getter6,
+            DataCodec<F7> codec7, Function<? super T, ? extends F7> getter7,
+            DataCodec<F8> codec8, Function<? super T, ? extends F8> getter8,
+            Function8<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)),
+                        codec3.encode(getter3.apply(obj)),
+                        codec4.encode(getter4.apply(obj)),
+                        codec5.encode(getter5.apply(obj)),
+                        codec6.encode(getter6.apply(obj)),
+                        codec7.encode(getter7.apply(obj)),
+                        codec8.encode(getter8.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion),
+                        codec3.decode(list.get(2), dataVersion),
+                        codec4.decode(list.get(3), dataVersion),
+                        codec5.decode(list.get(4), dataVersion),
+                        codec6.decode(list.get(5), dataVersion),
+                        codec7.decode(list.get(6), dataVersion),
+                        codec8.decode(list.get(7), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from nine fields.
+     */
+    static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            DataCodec<F3> codec3, Function<? super T, ? extends F3> getter3,
+            DataCodec<F4> codec4, Function<? super T, ? extends F4> getter4,
+            DataCodec<F5> codec5, Function<? super T, ? extends F5> getter5,
+            DataCodec<F6> codec6, Function<? super T, ? extends F6> getter6,
+            DataCodec<F7> codec7, Function<? super T, ? extends F7> getter7,
+            DataCodec<F8> codec8, Function<? super T, ? extends F8> getter8,
+            DataCodec<F9> codec9, Function<? super T, ? extends F9> getter9,
+            Function9<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)),
+                        codec3.encode(getter3.apply(obj)),
+                        codec4.encode(getter4.apply(obj)),
+                        codec5.encode(getter5.apply(obj)),
+                        codec6.encode(getter6.apply(obj)),
+                        codec7.encode(getter7.apply(obj)),
+                        codec8.encode(getter8.apply(obj)),
+                        codec9.encode(getter9.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion),
+                        codec3.decode(list.get(2), dataVersion),
+                        codec4.decode(list.get(3), dataVersion),
+                        codec5.decode(list.get(4), dataVersion),
+                        codec6.decode(list.get(5), dataVersion),
+                        codec7.decode(list.get(6), dataVersion),
+                        codec8.decode(list.get(7), dataVersion),
+                        codec9.decode(list.get(8), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from ten fields.
+     */
+    static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            DataCodec<F3> codec3, Function<? super T, ? extends F3> getter3,
+            DataCodec<F4> codec4, Function<? super T, ? extends F4> getter4,
+            DataCodec<F5> codec5, Function<? super T, ? extends F5> getter5,
+            DataCodec<F6> codec6, Function<? super T, ? extends F6> getter6,
+            DataCodec<F7> codec7, Function<? super T, ? extends F7> getter7,
+            DataCodec<F8> codec8, Function<? super T, ? extends F8> getter8,
+            DataCodec<F9> codec9, Function<? super T, ? extends F9> getter9,
+            DataCodec<F10> codec10, Function<? super T, ? extends F10> getter10,
+            Function10<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? super F10, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)),
+                        codec3.encode(getter3.apply(obj)),
+                        codec4.encode(getter4.apply(obj)),
+                        codec5.encode(getter5.apply(obj)),
+                        codec6.encode(getter6.apply(obj)),
+                        codec7.encode(getter7.apply(obj)),
+                        codec8.encode(getter8.apply(obj)),
+                        codec9.encode(getter9.apply(obj)),
+                        codec10.encode(getter10.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion),
+                        codec3.decode(list.get(2), dataVersion),
+                        codec4.decode(list.get(3), dataVersion),
+                        codec5.decode(list.get(4), dataVersion),
+                        codec6.decode(list.get(5), dataVersion),
+                        codec7.decode(list.get(6), dataVersion),
+                        codec8.decode(list.get(7), dataVersion),
+                        codec9.decode(list.get(8), dataVersion),
+                        codec10.decode(list.get(9), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from eleven fields.
+     */
+    static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            DataCodec<F3> codec3, Function<? super T, ? extends F3> getter3,
+            DataCodec<F4> codec4, Function<? super T, ? extends F4> getter4,
+            DataCodec<F5> codec5, Function<? super T, ? extends F5> getter5,
+            DataCodec<F6> codec6, Function<? super T, ? extends F6> getter6,
+            DataCodec<F7> codec7, Function<? super T, ? extends F7> getter7,
+            DataCodec<F8> codec8, Function<? super T, ? extends F8> getter8,
+            DataCodec<F9> codec9, Function<? super T, ? extends F9> getter9,
+            DataCodec<F10> codec10, Function<? super T, ? extends F10> getter10,
+            DataCodec<F11> codec11, Function<? super T, ? extends F11> getter11,
+            Function11<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? super F10, ? super F11, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)),
+                        codec3.encode(getter3.apply(obj)),
+                        codec4.encode(getter4.apply(obj)),
+                        codec5.encode(getter5.apply(obj)),
+                        codec6.encode(getter6.apply(obj)),
+                        codec7.encode(getter7.apply(obj)),
+                        codec8.encode(getter8.apply(obj)),
+                        codec9.encode(getter9.apply(obj)),
+                        codec10.encode(getter10.apply(obj)),
+                        codec11.encode(getter11.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion),
+                        codec3.decode(list.get(2), dataVersion),
+                        codec4.decode(list.get(3), dataVersion),
+                        codec5.decode(list.get(4), dataVersion),
+                        codec6.decode(list.get(5), dataVersion),
+                        codec7.decode(list.get(6), dataVersion),
+                        codec8.decode(list.get(7), dataVersion),
+                        codec9.decode(list.get(8), dataVersion),
+                        codec10.decode(list.get(9), dataVersion),
+                        codec11.decode(list.get(10), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from twelve fields.
+     */
+    static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            DataCodec<F3> codec3, Function<? super T, ? extends F3> getter3,
+            DataCodec<F4> codec4, Function<? super T, ? extends F4> getter4,
+            DataCodec<F5> codec5, Function<? super T, ? extends F5> getter5,
+            DataCodec<F6> codec6, Function<? super T, ? extends F6> getter6,
+            DataCodec<F7> codec7, Function<? super T, ? extends F7> getter7,
+            DataCodec<F8> codec8, Function<? super T, ? extends F8> getter8,
+            DataCodec<F9> codec9, Function<? super T, ? extends F9> getter9,
+            DataCodec<F10> codec10, Function<? super T, ? extends F10> getter10,
+            DataCodec<F11> codec11, Function<? super T, ? extends F11> getter11,
+            DataCodec<F12> codec12, Function<? super T, ? extends F12> getter12,
+            Function12<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? super F10, ? super F11, ? super F12, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)),
+                        codec3.encode(getter3.apply(obj)),
+                        codec4.encode(getter4.apply(obj)),
+                        codec5.encode(getter5.apply(obj)),
+                        codec6.encode(getter6.apply(obj)),
+                        codec7.encode(getter7.apply(obj)),
+                        codec8.encode(getter8.apply(obj)),
+                        codec9.encode(getter9.apply(obj)),
+                        codec10.encode(getter10.apply(obj)),
+                        codec11.encode(getter11.apply(obj)),
+                        codec12.encode(getter12.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion),
+                        codec3.decode(list.get(2), dataVersion),
+                        codec4.decode(list.get(3), dataVersion),
+                        codec5.decode(list.get(4), dataVersion),
+                        codec6.decode(list.get(5), dataVersion),
+                        codec7.decode(list.get(6), dataVersion),
+                        codec8.decode(list.get(7), dataVersion),
+                        codec9.decode(list.get(8), dataVersion),
+                        codec10.decode(list.get(9), dataVersion),
+                        codec11.decode(list.get(10), dataVersion),
+                        codec12.decode(list.get(11), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from thirteen fields.
+     */
+    static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            DataCodec<F3> codec3, Function<? super T, ? extends F3> getter3,
+            DataCodec<F4> codec4, Function<? super T, ? extends F4> getter4,
+            DataCodec<F5> codec5, Function<? super T, ? extends F5> getter5,
+            DataCodec<F6> codec6, Function<? super T, ? extends F6> getter6,
+            DataCodec<F7> codec7, Function<? super T, ? extends F7> getter7,
+            DataCodec<F8> codec8, Function<? super T, ? extends F8> getter8,
+            DataCodec<F9> codec9, Function<? super T, ? extends F9> getter9,
+            DataCodec<F10> codec10, Function<? super T, ? extends F10> getter10,
+            DataCodec<F11> codec11, Function<? super T, ? extends F11> getter11,
+            DataCodec<F12> codec12, Function<? super T, ? extends F12> getter12,
+            DataCodec<F13> codec13, Function<? super T, ? extends F13> getter13,
+            Function13<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? super F10, ? super F11, ? super F12, ? super F13, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)),
+                        codec3.encode(getter3.apply(obj)),
+                        codec4.encode(getter4.apply(obj)),
+                        codec5.encode(getter5.apply(obj)),
+                        codec6.encode(getter6.apply(obj)),
+                        codec7.encode(getter7.apply(obj)),
+                        codec8.encode(getter8.apply(obj)),
+                        codec9.encode(getter9.apply(obj)),
+                        codec10.encode(getter10.apply(obj)),
+                        codec11.encode(getter11.apply(obj)),
+                        codec12.encode(getter12.apply(obj)),
+                        codec13.encode(getter13.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion),
+                        codec3.decode(list.get(2), dataVersion),
+                        codec4.decode(list.get(3), dataVersion),
+                        codec5.decode(list.get(4), dataVersion),
+                        codec6.decode(list.get(5), dataVersion),
+                        codec7.decode(list.get(6), dataVersion),
+                        codec8.decode(list.get(7), dataVersion),
+                        codec9.decode(list.get(8), dataVersion),
+                        codec10.decode(list.get(9), dataVersion),
+                        codec11.decode(list.get(10), dataVersion),
+                        codec12.decode(list.get(11), dataVersion),
+                        codec13.decode(list.get(12), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from fourteen fields.
+     */
+    static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13, F14> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            DataCodec<F3> codec3, Function<? super T, ? extends F3> getter3,
+            DataCodec<F4> codec4, Function<? super T, ? extends F4> getter4,
+            DataCodec<F5> codec5, Function<? super T, ? extends F5> getter5,
+            DataCodec<F6> codec6, Function<? super T, ? extends F6> getter6,
+            DataCodec<F7> codec7, Function<? super T, ? extends F7> getter7,
+            DataCodec<F8> codec8, Function<? super T, ? extends F8> getter8,
+            DataCodec<F9> codec9, Function<? super T, ? extends F9> getter9,
+            DataCodec<F10> codec10, Function<? super T, ? extends F10> getter10,
+            DataCodec<F11> codec11, Function<? super T, ? extends F11> getter11,
+            DataCodec<F12> codec12, Function<? super T, ? extends F12> getter12,
+            DataCodec<F13> codec13, Function<? super T, ? extends F13> getter13,
+            DataCodec<F14> codec14, Function<? super T, ? extends F14> getter14,
+            Function14<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? super F10, ? super F11, ? super F12, ? super F13, ? super F14, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)),
+                        codec3.encode(getter3.apply(obj)),
+                        codec4.encode(getter4.apply(obj)),
+                        codec5.encode(getter5.apply(obj)),
+                        codec6.encode(getter6.apply(obj)),
+                        codec7.encode(getter7.apply(obj)),
+                        codec8.encode(getter8.apply(obj)),
+                        codec9.encode(getter9.apply(obj)),
+                        codec10.encode(getter10.apply(obj)),
+                        codec11.encode(getter11.apply(obj)),
+                        codec12.encode(getter12.apply(obj)),
+                        codec13.encode(getter13.apply(obj)),
+                        codec14.encode(getter14.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion),
+                        codec3.decode(list.get(2), dataVersion),
+                        codec4.decode(list.get(3), dataVersion),
+                        codec5.decode(list.get(4), dataVersion),
+                        codec6.decode(list.get(5), dataVersion),
+                        codec7.decode(list.get(6), dataVersion),
+                        codec8.decode(list.get(7), dataVersion),
+                        codec9.decode(list.get(8), dataVersion),
+                        codec10.decode(list.get(9), dataVersion),
+                        codec11.decode(list.get(10), dataVersion),
+                        codec12.decode(list.get(11), dataVersion),
+                        codec13.decode(list.get(12), dataVersion),
+                        codec14.decode(list.get(13), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from fifteen fields.
+     */
+    static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13, F14, F15> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            DataCodec<F3> codec3, Function<? super T, ? extends F3> getter3,
+            DataCodec<F4> codec4, Function<? super T, ? extends F4> getter4,
+            DataCodec<F5> codec5, Function<? super T, ? extends F5> getter5,
+            DataCodec<F6> codec6, Function<? super T, ? extends F6> getter6,
+            DataCodec<F7> codec7, Function<? super T, ? extends F7> getter7,
+            DataCodec<F8> codec8, Function<? super T, ? extends F8> getter8,
+            DataCodec<F9> codec9, Function<? super T, ? extends F9> getter9,
+            DataCodec<F10> codec10, Function<? super T, ? extends F10> getter10,
+            DataCodec<F11> codec11, Function<? super T, ? extends F11> getter11,
+            DataCodec<F12> codec12, Function<? super T, ? extends F12> getter12,
+            DataCodec<F13> codec13, Function<? super T, ? extends F13> getter13,
+            DataCodec<F14> codec14, Function<? super T, ? extends F14> getter14,
+            DataCodec<F15> codec15, Function<? super T, ? extends F15> getter15,
+            Function15<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? super F10, ? super F11, ? super F12, ? super F13, ? super F14, ? super F15, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)),
+                        codec3.encode(getter3.apply(obj)),
+                        codec4.encode(getter4.apply(obj)),
+                        codec5.encode(getter5.apply(obj)),
+                        codec6.encode(getter6.apply(obj)),
+                        codec7.encode(getter7.apply(obj)),
+                        codec8.encode(getter8.apply(obj)),
+                        codec9.encode(getter9.apply(obj)),
+                        codec10.encode(getter10.apply(obj)),
+                        codec11.encode(getter11.apply(obj)),
+                        codec12.encode(getter12.apply(obj)),
+                        codec13.encode(getter13.apply(obj)),
+                        codec14.encode(getter14.apply(obj)),
+                        codec15.encode(getter15.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion),
+                        codec3.decode(list.get(2), dataVersion),
+                        codec4.decode(list.get(3), dataVersion),
+                        codec5.decode(list.get(4), dataVersion),
+                        codec6.decode(list.get(5), dataVersion),
+                        codec7.decode(list.get(6), dataVersion),
+                        codec8.decode(list.get(7), dataVersion),
+                        codec9.decode(list.get(8), dataVersion),
+                        codec10.decode(list.get(9), dataVersion),
+                        codec11.decode(list.get(10), dataVersion),
+                        codec12.decode(list.get(11), dataVersion),
+                        codec13.decode(list.get(12), dataVersion),
+                        codec14.decode(list.get(13), dataVersion),
+                        codec15.decode(list.get(14), dataVersion));
+            }
+        };
+    }
+
+    /**
+     * Composes a codec for type {@code T} from sixteen fields.
+     */
+    static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13, F14, F15, F16> DataCodec<T> composite(
+            DataCodec<F1> codec1, Function<? super T, ? extends F1> getter1,
+            DataCodec<F2> codec2, Function<? super T, ? extends F2> getter2,
+            DataCodec<F3> codec3, Function<? super T, ? extends F3> getter3,
+            DataCodec<F4> codec4, Function<? super T, ? extends F4> getter4,
+            DataCodec<F5> codec5, Function<? super T, ? extends F5> getter5,
+            DataCodec<F6> codec6, Function<? super T, ? extends F6> getter6,
+            DataCodec<F7> codec7, Function<? super T, ? extends F7> getter7,
+            DataCodec<F8> codec8, Function<? super T, ? extends F8> getter8,
+            DataCodec<F9> codec9, Function<? super T, ? extends F9> getter9,
+            DataCodec<F10> codec10, Function<? super T, ? extends F10> getter10,
+            DataCodec<F11> codec11, Function<? super T, ? extends F11> getter11,
+            DataCodec<F12> codec12, Function<? super T, ? extends F12> getter12,
+            DataCodec<F13> codec13, Function<? super T, ? extends F13> getter13,
+            DataCodec<F14> codec14, Function<? super T, ? extends F14> getter14,
+            DataCodec<F15> codec15, Function<? super T, ? extends F15> getter15,
+            DataCodec<F16> codec16, Function<? super T, ? extends F16> getter16,
+            Function16<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? super F10, ? super F11, ? super F12, ? super F13, ? super F14, ? super F15, ? super F16, ? extends T> constructor) {
+        return new DataCodec<>() {
+            @Override
+            public @NotNull Data encode(T obj) {
+                return ListData.of(
+                        codec1.encode(getter1.apply(obj)),
+                        codec2.encode(getter2.apply(obj)),
+                        codec3.encode(getter3.apply(obj)),
+                        codec4.encode(getter4.apply(obj)),
+                        codec5.encode(getter5.apply(obj)),
+                        codec6.encode(getter6.apply(obj)),
+                        codec7.encode(getter7.apply(obj)),
+                        codec8.encode(getter8.apply(obj)),
+                        codec9.encode(getter9.apply(obj)),
+                        codec10.encode(getter10.apply(obj)),
+                        codec11.encode(getter11.apply(obj)),
+                        codec12.encode(getter12.apply(obj)),
+                        codec13.encode(getter13.apply(obj)),
+                        codec14.encode(getter14.apply(obj)),
+                        codec15.encode(getter15.apply(obj)),
+                        codec16.encode(getter16.apply(obj)));
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                var list = data.getList();
+                return constructor.apply(
+                        codec1.decode(list.get(0), dataVersion),
+                        codec2.decode(list.get(1), dataVersion),
+                        codec3.decode(list.get(2), dataVersion),
+                        codec4.decode(list.get(3), dataVersion),
+                        codec5.decode(list.get(4), dataVersion),
+                        codec6.decode(list.get(5), dataVersion),
+                        codec7.decode(list.get(6), dataVersion),
+                        codec8.decode(list.get(7), dataVersion),
+                        codec9.decode(list.get(8), dataVersion),
+                        codec10.decode(list.get(9), dataVersion),
+                        codec11.decode(list.get(10), dataVersion),
+                        codec12.decode(list.get(11), dataVersion),
+                        codec13.decode(list.get(12), dataVersion),
+                        codec14.decode(list.get(13), dataVersion),
+                        codec15.decode(list.get(14), dataVersion),
+                        codec16.decode(list.get(15), dataVersion));
             }
         };
     }

@@ -154,10 +154,7 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
                 return NullData.INSTANCE;
             } else {
                 if (definition.skipSave(source, value)) return NullData.NONE;
-                var list = new ListData(2);
-                list.add(definition.encode(source, value));
-                list.add(doWriteData(source, value));
-                return list;
+                return ListData.of(definition.encode(source, value), doWriteData(source, value));
             }
         } else {
             if (value == null) return NullData.NONE;

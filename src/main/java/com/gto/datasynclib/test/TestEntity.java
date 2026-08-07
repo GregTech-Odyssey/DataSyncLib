@@ -8,9 +8,6 @@ import com.gto.datasynclib.annotations.SyncToClient;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.network.DataSyncNetwork;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.syncher.EntityDataAccessor;
-import net.minecraft.network.syncher.EntityDataSerializers;
-import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityDimensions;
 import net.minecraft.world.entity.EntityType;
@@ -44,7 +41,7 @@ public class TestEntity extends Entity implements IFieldDataHolder {
 
     @SaveToDisk
     @SyncToClient
-    private String title = "";
+    private final String title = "";
 
     // Child-manager mode: managed by a dedicated sub-manager, not flattened into this entity's manager.
     @SaveToDisk
@@ -78,7 +75,9 @@ public class TestEntity extends Entity implements IFieldDataHolder {
 
     // ==================== IFieldDataHolder — disk + manager ====================
 
-    /** Key under which the whole child-manager-backed payload is stored in entity NBT. */
+    /**
+     * Key under which the whole child-manager-backed payload is stored in entity NBT.
+     */
     private static final String DATA_KEY = "dsl_data";
     private static final String DATA_VERSION_KEY = "dsl_data_version";
     private static final int DATA_VERSION = 0;

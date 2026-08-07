@@ -4,7 +4,10 @@ import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.annotations.*;
+import com.gto.datasynclib.annotations.AdditionalHolder;
+import com.gto.datasynclib.annotations.SaveToDisk;
+import com.gto.datasynclib.annotations.SyncToClient;
+import com.gto.datasynclib.annotations.SyncToServer;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.StringMapData;
@@ -38,7 +41,9 @@ public final class DataSyncSelfTests {
 
     private final List<String> failures = new ArrayList<>();
 
-    /** A plain, non-holder POJO holding several annotated fields. */
+    /**
+     * A plain, non-holder POJO holding several annotated fields.
+     */
     static class FlatSub {
         @SaveToDisk
         @SyncToClient
@@ -48,7 +53,9 @@ public final class DataSyncSelfTests {
         String s = "";
     }
 
-    /** A non-holder sub-object managed by a child manager via {@code @AdditionalHolder(childManager = true)}. */
+    /**
+     * A non-holder sub-object managed by a child manager via {@code @AdditionalHolder(childManager = true)}.
+     */
     static class ChildSub {
         @SaveToDisk
         @SyncToClient
@@ -116,7 +123,9 @@ public final class DataSyncSelfTests {
         }
     }
 
-    /** A holder for testing default-value and null skipping. */
+    /**
+     * A holder for testing default-value and null skipping.
+     */
     static class DefaultHolder implements IFieldDataHolder {
 
         private final FieldDataManager manager = new FieldDataManager(this);
@@ -140,47 +149,147 @@ public final class DataSyncSelfTests {
         }
     }
 
-    /** A generic hierarchy: {@code A<T> extends HashMap<String, T>}. */
+    /**
+     * A generic hierarchy: {@code A<T> extends HashMap<String, T>}.
+     */
     static class A<T> extends HashMap<String, T> {
     }
 
-    /** A generic class implementing a generic interface ({@code List<String>}): {@code MyList<T> implements List<String>}. */
+    /**
+     * A generic class implementing a generic interface ({@code List<String>}): {@code MyList<T> implements List<String>}.
+     */
     static class MyList<T> implements List<String> {
-        @Override public int size() { return 0; }
-        @Override public boolean isEmpty() { return true; }
-        @Override public boolean contains(Object o) { return false; }
-        @Override public java.util.Iterator<String> iterator() { return Collections.emptyIterator(); }
-        @Override public Object[] toArray() { return new Object[0]; }
-        @Override public <T1> T1[] toArray(T1[] a) { return a; }
-        @Override public boolean add(String s) { return false; }
-        @Override public boolean remove(Object o) { return false; }
-        @Override public boolean containsAll(Collection<?> c) { return false; }
-        @Override public boolean addAll(Collection<? extends String> c) { return false; }
-        @Override public boolean addAll(int index, Collection<? extends String> c) { return false; }
-        @Override public boolean removeAll(Collection<?> c) { return false; }
-        @Override public boolean retainAll(Collection<?> c) { return false; }
-        @Override public void clear() { }
-        @Override public String get(int index) { return null; }
-        @Override public String set(int index, String element) { return null; }
-        @Override public void add(int index, String element) { }
-        @Override public String remove(int index) { return null; }
-        @Override public int indexOf(Object o) { return -1; }
-        @Override public int lastIndexOf(Object o) { return -1; }
-        @Override public ListIterator<String> listIterator() { return Collections.emptyListIterator(); }
-        @Override public ListIterator<String> listIterator(int index) { return Collections.emptyListIterator(); }
-        @Override public List<String> subList(int fromIndex, int toIndex) { return Collections.emptyList(); }
+        @Override
+        public int size() {
+            return 0;
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return true;
+        }
+
+        @Override
+        public boolean contains(Object o) {
+            return false;
+        }
+
+        @Override
+        public java.util.Iterator<String> iterator() {
+            return Collections.emptyIterator();
+        }
+
+        @Override
+        public Object[] toArray() {
+            return new Object[0];
+        }
+
+        @Override
+        public <T1> T1[] toArray(T1[] a) {
+            return a;
+        }
+
+        @Override
+        public boolean add(String s) {
+            return false;
+        }
+
+        @Override
+        public boolean remove(Object o) {
+            return false;
+        }
+
+        @Override
+        public boolean containsAll(Collection<?> c) {
+            return false;
+        }
+
+        @Override
+        public boolean addAll(Collection<? extends String> c) {
+            return false;
+        }
+
+        @Override
+        public boolean addAll(int index, Collection<? extends String> c) {
+            return false;
+        }
+
+        @Override
+        public boolean removeAll(Collection<?> c) {
+            return false;
+        }
+
+        @Override
+        public boolean retainAll(Collection<?> c) {
+            return false;
+        }
+
+        @Override
+        public void clear() {
+        }
+
+        @Override
+        public String get(int index) {
+            return null;
+        }
+
+        @Override
+        public String set(int index, String element) {
+            return null;
+        }
+
+        @Override
+        public void add(int index, String element) {
+        }
+
+        @Override
+        public String remove(int index) {
+            return null;
+        }
+
+        @Override
+        public int indexOf(Object o) {
+            return -1;
+        }
+
+        @Override
+        public int lastIndexOf(Object o) {
+            return -1;
+        }
+
+        @Override
+        public ListIterator<String> listIterator() {
+            return Collections.emptyListIterator();
+        }
+
+        @Override
+        public ListIterator<String> listIterator(int index) {
+            return Collections.emptyListIterator();
+        }
+
+        @Override
+        public List<String> subList(int fromIndex, int toIndex) {
+            return Collections.emptyList();
+        }
     }
 
-    /** Generic class extending another generic class: {@code Box<U> extends BaseContainer<U, U>}. */
+    /**
+     * Generic class extending another generic class: {@code Box<U> extends BaseContainer<U, U>}.
+     */
     static class BaseContainer<X, Y> {
     }
 
     static class Box<U> extends BaseContainer<U, U> {
     }
 
-    /** A generic interface used standalone: {@code MyIterable<T> extends Iterable<T>}. */
+    /**
+     * A generic interface used standalone: {@code MyIterable<T> extends Iterable<T>}.
+     */
     static class Itr<T> implements Iterable<T> {
-        @Override public java.util.Iterator<T> iterator() { return Collections.emptyIterator(); }
+        @Override
+        public java.util.Iterator<T> iterator() {
+            return Collections.emptyIterator();
+        }
     }
 
     /**
@@ -229,15 +338,10 @@ public final class DataSyncSelfTests {
         return index < args.length && args[index] != null ? args[index].getSimpleName() : "";
     }
 
-    /** A plain value type used to test global codec auto-registration from a {@link Registry}. */
-    static class MyTag {
-        final String name;
-        final int value;
-
-        MyTag(String name, int value) {
-            this.name = name;
-            this.value = value;
-        }
+    /**
+     * A plain value type used to test global codec auto-registration from a {@link Registry}.
+     */
+    record MyTag(String name, int value) {
     }
 
     private void testRegistryGlobalCodec() {
@@ -263,7 +367,9 @@ public final class DataSyncSelfTests {
         }
     }
 
-    /** Runs every self-test and reports failures. */
+    /**
+     * Runs every self-test and reports failures.
+     */
     public void run() {
         testDiskRoundTrip();
         testNetworkRoundTrip();
@@ -387,7 +493,9 @@ public final class DataSyncSelfTests {
         }
     }
 
-    /** Convenience: run from anywhere. */
+    /**
+     * Convenience: run from anywhere.
+     */
     public static void runAll() {
         new DataSyncSelfTests().run();
     }

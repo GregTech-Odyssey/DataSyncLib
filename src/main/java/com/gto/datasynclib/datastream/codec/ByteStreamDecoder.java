@@ -27,11 +27,11 @@ public interface ByteStreamDecoder<T> {
 
     T decode(FriendlyByteBuf buf);
 
-    static <K, V> ByteStreamDecoder<V> convert(ByteStreamDecoder<K> serializer, Function<K, V> converter) {
+    static <K, V> ByteStreamDecoder<V> convert(ByteStreamDecoder<? extends K> serializer, Function<? super K, ? extends V> converter) {
         return dis -> converter.apply(serializer.decode(dis));
     }
 
-    static <K, V> ByteStreamDecoder<Reference2ReferenceOpenHashMap<K, V>> map(ByteStreamDecoder<K> keySerializer, ByteStreamDecoder<V> valueSerializer) {
+    static <K, V> ByteStreamDecoder<Reference2ReferenceOpenHashMap<K, V>> map(ByteStreamDecoder<? extends K> keySerializer, ByteStreamDecoder<? extends V> valueSerializer) {
         return dis -> {
             int size = dis.readVarInt();
             Reference2ReferenceOpenHashMap<K, V> map = new Reference2ReferenceOpenHashMap<>(size);
@@ -42,7 +42,7 @@ public interface ByteStreamDecoder<T> {
         };
     }
 
-    static <K, V, M extends Map<K, V>> ByteStreamDecoder<M> map(IntFunction<M> function, ByteStreamDecoder<K> keySerializer, ByteStreamDecoder<V> valueSerializer) {
+    static <K, V, M extends Map<K, V>> ByteStreamDecoder<M> map(IntFunction<M> function, ByteStreamDecoder<? extends K> keySerializer, ByteStreamDecoder<? extends V> valueSerializer) {
         return dis -> {
             int size = dis.readVarInt();
             var map = function.apply(size);
@@ -53,7 +53,7 @@ public interface ByteStreamDecoder<T> {
         };
     }
 
-    static <E> ByteStreamDecoder<List<E>> list(ByteStreamDecoder<E> serializer) {
+    static <E> ByteStreamDecoder<List<E>> list(ByteStreamDecoder<? extends E> serializer) {
         return dis -> {
             int size = dis.readVarInt();
             var array = new Object[size];
@@ -62,7 +62,7 @@ public interface ByteStreamDecoder<T> {
         };
     }
 
-    static <E, L extends List<E>> ByteStreamDecoder<L> list(IntFunction<L> function, ByteStreamDecoder<E> serializer) {
+    static <E, L extends List<E>> ByteStreamDecoder<L> list(IntFunction<L> function, ByteStreamDecoder<? extends E> serializer) {
         return dis -> {
             int size = dis.readVarInt();
             var list = function.apply(size);
@@ -71,7 +71,7 @@ public interface ByteStreamDecoder<T> {
         };
     }
 
-    static <E> ByteStreamDecoder<ReferenceOpenHashSet<E>> set(ByteStreamDecoder<E> serializer) {
+    static <E> ByteStreamDecoder<ReferenceOpenHashSet<E>> set(ByteStreamDecoder<? extends E> serializer) {
         return dis -> {
             int size = dis.readVarInt();
             var set = new ReferenceOpenHashSet<E>(size);
@@ -80,7 +80,7 @@ public interface ByteStreamDecoder<T> {
         };
     }
 
-    static <E, S extends Set<E>> ByteStreamDecoder<S> set(Int2ObjectFunction<S> function, ByteStreamDecoder<E> serializer) {
+    static <E, S extends Set<E>> ByteStreamDecoder<S> set(Int2ObjectFunction<S> function, ByteStreamDecoder<? extends E> serializer) {
         return dis -> {
             int size = dis.readVarInt();
             var set = function.apply(size);

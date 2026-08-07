@@ -104,7 +104,7 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
                 (data, dataVersion) -> keyValues.get(keyCodec.decode(data, dataVersion)));
     }
 
-    public Registry(String name, DataCodec<K> keyCodec,  @Nullable Class<V> valueType) {
+    public Registry(String name, DataCodec<K> keyCodec, @Nullable Class<V> valueType) {
         this.name = Objects.requireNonNull(name, "name");
         this.keyGetter = this::getKeyByMap;
         Objects.requireNonNull(keyCodec, "keyCodec");

@@ -3,6 +3,7 @@ package com.gto.datasynclib.util;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.IntArrayData;
+import com.gto.datasynclib.datastream.data.LongData;
 import com.gto.datasynclib.datastream.data.StringData;
 import lombok.experimental.UtilityClass;
 import net.minecraft.core.BlockPos;
@@ -13,6 +14,7 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraftforge.fluids.FluidStack;
 import org.jetbrains.annotations.NotNull;
 
@@ -44,6 +46,23 @@ public class DataCodecs {
 
         static {
             DataCodec.registerCodec(BlockPos.class, BLOCK_POS_CODEC);
+        }
+    };
+
+    public static final DataCodec<ChunkPos> CHUNK_POS_CODEC = new DataCodec<>() {
+
+        @Override
+        public ChunkPos decode(@NotNull Data data, int dataVersion) {
+            return new ChunkPos(data.getLong());
+        }
+
+        @Override
+        public @NotNull Data encode(ChunkPos obj) {
+            return LongData.valueOf(obj.toLong());
+        }
+
+        static {
+            DataCodec.registerCodec(ChunkPos.class, CHUNK_POS_CODEC);
         }
     };
 

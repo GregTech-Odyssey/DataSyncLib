@@ -34,7 +34,7 @@ public interface DataDecoder<T> {
         return decode(data, 0);
     }
 
-    static <K, V> DataDecoder<V> convert(DataDecoder<? extends K> serializer, Function<K, V> converter) {
+    static <K, V> DataDecoder<V> convert(DataDecoder<? extends K> serializer, Function<? super K, ? extends V> converter) {
         return (dis, dataVersion) -> converter.apply(serializer.decode(dis, dataVersion));
     }
 

@@ -32,7 +32,7 @@ import java.lang.annotation.Target;
  *
  * <pre>{@code
  * class Machine extends FieldDataHolderBlockEntity {
- *     @AdditionalHolder                    // flat: fields inside InventoryComponent go to parent
+ *     @AdditionalHolder // flat: fields inside InventoryComponent go to parent
  *     private InventoryComponent flat = new InventoryComponent();
  *
  *     @AdditionalHolder(childManager = true) // child manager: whole object handled as one field
@@ -57,7 +57,7 @@ public @interface AdditionalHolder {
      * as a single field (no field-level flattening into the parent).</p>
      *
      * @return {@code true} to generate a child manager for this field; {@code false} (default)
-     *         to flatten its fields into the parent manager
+     * to flatten its fields into the parent manager
      */
     boolean childManager() default false;
 }

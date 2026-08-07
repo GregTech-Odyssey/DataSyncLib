@@ -11,6 +11,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraftforge.fluids.FluidStack;
 
 /**
@@ -29,9 +30,14 @@ public class StreamCodecs {
         stream.writeLong(obj.asLong());
     }, stream -> BlockPos.of(stream.readLong()));
 
+    public static final ByteStreamCodec<ChunkPos> CHUNK_POS_CODEC = ByteStreamCodec.of((stream, obj) -> {
+        stream.writeLong(obj.toLong());
+    }, stream -> new ChunkPos(stream.readLong()));
+
     static {
         ByteStreamCodec.registerCodec(ResourceLocation.class, RESOURCE_LOCATION_CODEC);
         ByteStreamCodec.registerCodec(BlockPos.class, BLOCK_POS_CODEC);
+        ByteStreamCodec.registerCodec(ChunkPos.class, CHUNK_POS_CODEC);
     }
 
     public static final ByteStreamCodec<Tag> TAG_CODEC = new ByteStreamCodec<>() {
