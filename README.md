@@ -36,7 +36,9 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 - **⚡ High Performance** — MethodHandle instead of reflection, FastUtil collections, multi-level caching, VarInt compact encoding.
 - **🗜️ Data Type System** — Custom 19-type binary Data system, more compact than NBT Tag, with custom type extension.
 - **🧩 Ready to Use** — Extend `FieldDataHolderBlockEntity` to get full capabilities out of the box.
-- **🪆 Nested Holders** — `@AdditionalHolder` recursively discovers fields in nested objects with composed getter chains.
+- **🪆 Nested Holders** — `@AdditionalHolder` recursively discovers fields in nested objects with composed getter chains; `childManager` mode gives a sub-object its own dedicated `FieldDataManager`.
+- **🧬 Generic Hierarchy Resolution** — `ReflectUtil` resolves full generic arguments along superclasses/interfaces (e.g. `A<T> extends HashMap<String,T>` → `[String, T]`).
+- **♻️ Registry Global Codec** — `Registry` auto-registers its stream + data codecs into the global `DataSyncCodec` when frozen with a known value type.
 - **🎯 Custom Strategies** — `@Strategy` for custom hash/equality change detection on complex types (ItemStack, FluidStack, etc.).
 
 ## Quick Start
@@ -84,6 +86,12 @@ public class MachineBlockEntity extends FieldDataHolderBlockEntity {
 
     @AdditionalHolder
     private EnergyData energy = new EnergyData();
+
+    // Child-manager mode: sub-object gets its own FieldDataManager, NOT flattened.
+    @SaveToDisk
+    @SyncToClient
+    @AdditionalHolder(childManager = true)
+    private ModuleData module = new ModuleData();
 }
 
 class InventoryData {
@@ -99,7 +107,19 @@ class EnergyData {
         return value > 0;  // Skip sync when empty
     }
 }
+
+class ModuleData { // managed by its own child manager (no need to implement IFieldDataHolder)
+    @SaveToDisk @SyncToClient
+    private int ticks;
+    @SaveToDisk
+    private boolean enabled = true;
+}
 ```
+
+> **`@AdditionalHolder` modes:**
+> - **Flat (default)** — recursively hoists the sub-object's annotated fields into the parent manager, resolved via composed getters.
+> - **`childManager = true`** — the sub-object is NOT flattened; a dedicated `FieldDataManager` is generated for it (wrapped in `ChildFieldDataHolder`) and the whole object is treated as one field for network/disk. The sub-object need not implement `IFieldDataHolder`. Nested child managers are supported.
+
 
 ### Advanced: Custom Codec
 
@@ -155,6 +175,36 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 > - `syncBlockEntityToClient(be, false, true)`: `false` = incremental (only changed), `true` = only fields with `autoUpdate=true`.
 > - See `TestBlockEntity` for a complete example with all features.
 
+### Advanced: Registry Global Codec Auto-Registration
+
+`Registry` is a generic registry that assigns stable integer IDs (for the compact network `streamCodec`) and encodes by key (for the self-describing disk `dataCodec`). When you supply the **value's runtime type**, `freeze()` automatically registers both codecs into the global `DataSyncCodec`.
+
+```java
+Registry<String, ResearchTag> TAGS = new Registry<>(
+        "gtocore:research_tag", DataCodec.STRING_CODEC,  // key codec (encode/decode by key)
+        t -> t.name,                                     // keyGetter: derive key from value
+        ResearchTag.class);                              // value runtime type (for global registration)
+TAGS.unfreeze();
+TAGS.register("material", MATERIAL);
+TAGS.freeze(); // ← auto: DataSyncCodec.get(ResearchTag.class) is now available
+```
+
+After freezing, any field of the registered value type can be serialized via the global `DataSyncCodec.get(...)` without manual registration.
+
+### Advanced: Generic Hierarchy Resolution
+
+`ReflectUtil` provides utilities to resolve full generic arguments along a field type's **superclass / interface / multi-level** hierarchy — useful when a generic ancestor fixes some parameters.
+
+```java
+// class A<T> extends HashMap<String, T>
+// field: A<Integer> value;
+Type fieldType = A.class.getDeclaredField("value").getGenericType(); // A<Integer>
+Class<?>[] args = ReflectUtil.getResolvedGenericArguments(fieldType, HashMap.class);
+// → [String.class, Integer.class]  (HashMap's 2 args: String fixed + T→Integer substituted)
+```
+
+Supports generic superclasses, generic interfaces (`List<T>`), multi-level inheritance, and bounded wildcards.
+
 ## Annotation Reference
 
 | Annotation | Purpose | Key Attributes |
@@ -163,7 +213,7 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 | `@SyncToServer` | Client→Server sync | `autoUpdate` (default true), `notifyUpdate`, `condition`, `listener` |
 | `@SaveToDisk` | Disk persistence | `key`, `condition`, `saveNull`, `defaultValue`, `defaultValueGetter` |
 | `@Access` | Force access-mode (for containers) | `createInstance` |
-| `@AdditionalHolder` | Recursively scan nested object fields | — |
+| `@AdditionalHolder` | Recursively scan nested object fields, or spawn a dedicated child manager | `childManager` (true = child-manager mode) |
 | `@Codec` | Custom serialization | `saveCodec` / `syncCodec` / `writeToData` / `readFromData` etc. |
 | `@Strategy` | Custom change detection strategy | `value` (static field name) |
 | `@Generic` | Force generic-type factory resolution | — |

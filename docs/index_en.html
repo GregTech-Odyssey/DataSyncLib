@@ -892,7 +892,7 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
         <tr><td>@Codec</td><td>FIELD</td><td>Custom serialization. Two modes: ① <code>saveCodec</code>/<code>syncCodec</code> reference static fields (e.g. FieldDataCodec); ② <code>writeToData</code>/<code>readFromData</code>/<code>writeToBuffer</code>/<code>readFromBuffer</code> reference instance methods</td></tr>
         <tr><td>@Strategy</td><td>FIELD</td><td>Specifies the Hash.Strategy for change detection, referencing a static field by name</td></tr>
         <tr><td>@Generic</td><td>FIELD</td><td>Forces generic type handling for the field. Use when the field is generic but auto-detection fails</td></tr>
-        <tr><td>@AdditionalHolder</td><td>FIELD</td><td>Marks a nested IFieldDataHolder field; its internally annotated fields are merged into the current class's FieldDataManager</td></tr>
+        <tr><td>@AdditionalHolder</td><td>FIELD</td><td>Marks a nested field: by default its internally annotated fields are flattened into the current class's FieldDataManager; with <code>childManager=true</code> the sub-object gets its own dedicated FieldDataManager child manager and is not flattened</td></tr>
     </tbody>
 </table>
 
@@ -1026,6 +1026,10 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 
     <span class="an">@Override</span> <span class="kw">public</span> <span class="typ">FieldDataManager</span> <span class="typ">getFieldDataManager</span>() { <span class="kw">return</span> fieldDataManager; }
 }</code></pre>
+
+<div class="note">
+<code>@AdditionalHolder</code> is "flat" by default: the sub-object's annotated fields are merged into the parent manager and resolved via composed getters. When set to <code>@AdditionalHolder(childManager = true)</code> (together with <code>@SaveToDisk</code>/<code>@SyncToClient</code>), the sub-object is <em>not</em> flattened; it gets its own dedicated <code>FieldDataManager</code> child manager (wrapped in <code>ChildFieldDataHolder</code>) and is treated as a single field. The sub-object need not implement <code>IFieldDataHolder</code>, and nested child managers are supported.
+</div>
 
 <h2 id="usage-auto-sync">Auto Sync Explained</h2>
 <p>Network sync requires two steps working together:</p>

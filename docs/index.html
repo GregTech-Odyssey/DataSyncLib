@@ -897,7 +897,7 @@ CustomData 直接包装原始 NBT 对象（零拷贝），而 <code>convertToDat
         <tr><td>@Codec</td><td>FIELD</td><td>指定自定义序列化方式。两种模式：① <code>saveCodec</code>/<code>syncCodec</code> 引用静态字段（如 FieldDataCodec）；② <code>writeToData</code>/<code>readFromData</code>/<code>writeToBuffer</code>/<code>readFromBuffer</code> 引用实例方法</td></tr>
         <tr><td>@Strategy</td><td>FIELD</td><td>指定变化检测的 Hash.Strategy，值为静态字段名。用于自定义类型的变化比较逻辑</td></tr>
         <tr><td>@Generic</td><td>FIELD</td><td>标记字段使用泛型类型处理。当字段为泛型类型但自动检测失败时使用</td></tr>
-        <tr><td>@AdditionalHolder</td><td>FIELD</td><td>标记嵌套的 IFieldDataHolder 字段，其内部被注解的字段会被合并到当前类的 FieldDataManager 中管理</td></tr>
+        <tr><td>@AdditionalHolder</td><td>FIELD</td><td>标记嵌套字段：默认将其内部被注解的字段合并（拍平）到当前类的 FieldDataManager 管理；<code>childManager=true</code> 时为该子对象生成独立的 FieldDataManager 子管理器，不再拍平</td></tr>
     </tbody>
 </table>
 
@@ -1031,6 +1031,10 @@ CustomData 直接包装原始 NBT 对象（零拷贝），而 <code>convertToDat
 
     <span class="an">@Override</span> <span class="kw">public</span> <span class="typ">FieldDataManager</span> <span class="typ">getFieldDataManager</span>() { <span class="kw">return</span> fieldDataManager; }
 }</code></pre>
+
+<div class="note">
+<code>@AdditionalHolder</code> 默认是「扁平化」：把子对象内被注解的字段合并到父管理器，用链式 getter 解析。若设置 <code>@AdditionalHolder(childManager = true)</code>（并配合 <code>@SaveToDisk</code>/<code>@SyncToClient</code>），则该子对象不再拍平，而是生成独立的 FieldDataManager 子管理器（内部用 <code>ChildFieldDataHolder</code> 包装），整个对象作为一个字段统一编解码——子对象本身无需实现 IFieldDataHolder，且支持多层嵌套。
+</div>
 
 <h2 id="usage-auto-sync">自动同步详解</h2>
 <p>网络同步需要两步配合：</p>

@@ -37,7 +37,9 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 - **⚡ 高性能** — MethodHandle 替代反射、FastUtil 集合、多级缓存、VarInt 紧凑编码
 - **🗜️ 自定义数据类型** — 19 种二进制 Data 类型系统，支持 CustomData 扩展
 - **🧩 开箱即用** — 继承 `FieldDataHolderBlockEntity` 即可获得全部能力
-- **🪆 嵌套 Holder** — `@AdditionalHolder` 递归发现嵌套对象中的注解字段
+- **🪆 嵌套 Holder** — `@AdditionalHolder` 递归发现嵌套对象中的注解字段；`childManager` 模式为子对象生成独立子管理器
+- **🧬 泛型层级解析** — `ReflectUtil` 沿父类/接口解析完整泛型实参（如 `A<T> extends HashMap<String,T>` 可取得 `[String, T]`）
+- **♻️ Registry 全局 codec** — `Registry` 冻结时自动把流式+持久化 codec 注册进全局 `DataSyncCodec`
 - **🎯 自定义策略** — `@Strategy` 为复杂类型自定义哈希/相等性变更检测
 
 ## 快速开始
@@ -85,6 +87,12 @@ public class MachineBlockEntity extends FieldDataHolderBlockEntity {
 
     @AdditionalHolder
     private EnergyData energy = new EnergyData();
+
+    // 子管理器模式：子对象拥有独立的 FieldDataManager，不再扁平化到父管理器
+    @SaveToDisk
+    @SyncToClient
+    @AdditionalHolder(childManager = true)
+    private ModuleData module = new ModuleData();
 }
 
 class InventoryData {
@@ -101,7 +109,18 @@ class EnergyData {
         return value > 0;
     }
 }
+
+class ModuleData { // 子管理器模式下的子对象（自身不需要实现 IFieldDataHolder）
+    @SaveToDisk @SyncToClient
+    private int ticks;
+    @SaveToDisk
+    private boolean enabled = true;
+}
 ```
+
+> **`@AdditionalHolder` 两种模式：**
+> - **默认（扁平化）**：递归扫描子对象的注解字段，把它们当作直接声明在父管理器上处理，通过链式 getter 解析。
+> - **`childManager = true`（子管理器）**：不再拍平。为子对象生成**独立 `FieldDataManager`**（内部用 `ChildFieldDataHolder` 包装），整个子对象作为一个字段，通过网络/磁盘统一编解码。子对象无需实现 `IFieldDataHolder`。可嵌套（子对象内再声明 `childManager` 会递归生成更下层管理器）。
 
 ### 高级用法：自定义 Codec
 
@@ -157,6 +176,36 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 > - `syncBlockEntityToClient(be, false, true)` 中：`false`=增量同步（仅变更字段），`true`=仅检查 `autoUpdate=true` 的字段
 > - 完整示例参考 `TestBlockEntity`
 
+### 高级用法：Registry 全局 codec 自动注册
+
+`Registry` 是泛型注册表，支持按 key 排序分配稳定整数 id（网络流）与按 key 串化（磁盘）。当构造时传入**值的运行时类型**，`freeze()` 会自动把该注册表的 `streamCodec()` + `dataCodec()` 注册进全局 `DataSyncCodec`，无需手动调用。
+
+```java
+Registry<String, ResearchTag> TAGS = new Registry<>(
+        "gtocore:research_tag", DataCodec.STRING_CODEC,  // key codec（按 key 编解码）
+        t -> t.name,                                     // keyGetter：从值取回 key
+        ResearchTag.class);                              // 值的运行时类型（用于全局注册）
+TAGS.unfreeze();
+TAGS.register("material", MATERIAL);
+TAGS.freeze(); // ← 自动：DataSyncCodec.get(ResearchTag.class) 现在可用
+```
+
+注册后，任何 `ResearchTag` 类型的字段都能用 `DataSyncCodec.get(ResearchTag.class)` 自动编解码，而无需手动注册。
+
+### 高级用法：泛型层级解析
+
+`ReflectUtil` 提供了沿泛型**父类/接口/多层继承**解析完整泛型实参的工具，适合需要从"实现了泛型接口/继承了泛型父类"的字段类型反推完整类型参数的场景。
+
+```java
+// class A<T> extends HashMap<String, T>
+// 字段：A<Integer> value;
+Type fieldType = A.class.getDeclaredField("value").getGenericType(); // A<Integer>
+Class<?>[] args = ReflectUtil.getResolvedGenericArguments(fieldType, HashMap.class);
+// → [String.class, Integer.class]  （HashMap 的 2 个参数：String 固定 + Integer 由 T 替换）
+```
+
+支持父类、泛型接口（`List<T>`）、多层继承、泛型接口等任意祖先形态。
+
 ## 注解速查表
 
 | 注解 | 作用 | 常用属性 |
@@ -165,7 +214,7 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 | `@SyncToServer` | 客户端→服务端同步 | `autoUpdate`（默认 true）、`notifyUpdate`、`condition`、`listener` |
 | `@SaveToDisk` | 磁盘持久化 | `key`（自定义键名）、`condition`、`saveNull`、`defaultValue` |
 | `@Access` | 强制使用访问模式（容器类） | `createInstance` |
-| `@AdditionalHolder` | 递归扫描嵌套对象字段 | — |
+| `@AdditionalHolder` | 递归扫描嵌套对象字段，或为子对象生成独立子管理器 | `childManager`（true=子管理器模式） |
 | `@Codec` | 自定义序列化方式 | `saveCodec` / `syncCodec` / `writeToData` 等 |
 | `@Strategy` | 自定义变更检测策略 | `value`（static 字段名） |
 | `@Generic` | 强制使用泛型工厂链 | — |
