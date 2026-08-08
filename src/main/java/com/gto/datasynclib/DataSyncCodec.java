@@ -29,6 +29,8 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec2;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.fluids.FluidStack;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -692,6 +694,8 @@ public final class DataSyncCodec<T> implements ByteStreamCodec<T>, DataCodec<T> 
 
     public static final DataSyncCodec<ResourceLocation> RESOURCE_LOCATION_CODEC = register(ResourceLocation.class, StreamCodecs.RESOURCE_LOCATION_CODEC, DataCodecs.RESOURCE_LOCATION_CODEC);
 
+    public static final DataSyncCodec<Vec2> VEC2_CODEC = register(Vec2.class, StreamCodecs.VEC2_CODEC, DataCodecs.VEC2_CODEC);
+    public static final DataSyncCodec<Vec3> VEC3_CODEC = register(Vec3.class, StreamCodecs.VEC3_CODEC, DataCodecs.VEC3_CODEC);
     public static final DataSyncCodec<BlockPos> BLOCK_POS_CODEC = register(BlockPos.class, StreamCodecs.BLOCK_POS_CODEC, DataCodecs.BLOCK_POS_CODEC);
     public static final DataSyncCodec<ChunkPos> CHUNK_POS_CODEC = register(ChunkPos.class, StreamCodecs.CHUNK_POS_CODEC, DataCodecs.CHUNK_POS_CODEC);
 

@@ -15,6 +15,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.phys.Vec2;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.fluids.FluidStack;
 import org.jetbrains.annotations.NotNull;
 
@@ -48,6 +50,43 @@ public class DataCodecs {
             DataCodec.registerCodec(BlockPos.class, BLOCK_POS_CODEC);
         }
     };
+
+    public static final DataCodec<Vec2> VEC2_CODEC = new DataCodec<>() {
+
+        @Override
+        public @NotNull Data encode(Vec2 obj) {
+            return Data.valueOf(new float[]{obj.x, obj.y});
+        }
+
+        @Override
+        public Vec2 decode(@NotNull Data data, int dataVersion) {
+            var array = data.getFloatArray();
+            return new Vec2(array[0], array[1]);
+        }
+
+        static {
+            DataCodec.registerCodec(Vec2.class, VEC2_CODEC);
+        }
+    };
+
+    public static final DataCodec<Vec3> VEC3_CODEC = new DataCodec<>() {
+
+        @Override
+        public @NotNull Data encode(Vec3 obj) {
+            return Data.valueOf(new double[]{obj.x, obj.y, obj.z});
+        }
+
+        @Override
+        public Vec3 decode(@NotNull Data data, int dataVersion) {
+            var array = data.getDoubleArray();
+            return new Vec3(array[0], array[1], array[2]);
+        }
+
+        static {
+            DataCodec.registerCodec(Vec3.class, VEC3_CODEC);
+        }
+    };
+
 
     public static final DataCodec<ChunkPos> CHUNK_POS_CODEC = new DataCodec<>() {
 

@@ -12,6 +12,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.phys.Vec2;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.fluids.FluidStack;
 
 /**
@@ -39,6 +41,45 @@ public class StreamCodecs {
         ByteStreamCodec.registerCodec(BlockPos.class, BLOCK_POS_CODEC);
         ByteStreamCodec.registerCodec(ChunkPos.class, CHUNK_POS_CODEC);
     }
+
+
+    public static final ByteStreamCodec<Vec2> VEC2_CODEC = new ByteStreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf stream, Vec2 obj) {
+            stream.writeFloat(obj.x);
+            stream.writeFloat(obj.y);
+        }
+
+        @Override
+        public Vec2 decode(FriendlyByteBuf stream) {
+            return new Vec2(stream.readFloat(), stream.readFloat());
+        }
+
+        static {
+            ByteStreamCodec.registerCodec(Vec2.class, VEC2_CODEC);
+        }
+    };
+
+    public static final ByteStreamCodec<Vec3> VEC3_CODEC = new ByteStreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf stream, Vec3 obj) {
+            stream.writeDouble(obj.x);
+            stream.writeDouble(obj.y);
+            stream.writeDouble(obj.z);
+        }
+
+        @Override
+        public Vec3 decode(FriendlyByteBuf stream) {
+            return new Vec3(stream.readDouble(), stream.readDouble(), stream.readDouble());
+        }
+
+        static {
+            ByteStreamCodec.registerCodec(Vec3.class, VEC3_CODEC);
+        }
+    };
+
 
     public static final ByteStreamCodec<Tag> TAG_CODEC = new ByteStreamCodec<>() {
 
