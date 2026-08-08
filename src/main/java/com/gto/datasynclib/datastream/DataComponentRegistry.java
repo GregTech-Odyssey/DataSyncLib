@@ -2,6 +2,7 @@ package com.gto.datasynclib.datastream;
 
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
+import com.gto.datasynclib.datastream.codec.CombinedCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.StringMapData;
@@ -30,7 +31,7 @@ import java.util.function.Consumer;
  * @see DataComponentKey
  * @see DataComponentMap
  */
-public final class DataComponentRegistry extends Registry<String, DataComponentKey<?>> implements ByteStreamCodec<DataComponentMap>, DataCodec<DataComponentMap> {
+public final class DataComponentRegistry extends Registry<String, DataComponentKey<?>> implements CombinedCodec<DataComponentMap> {
 
     public DataComponentRegistry(String name) {
         // Values (DataComponentKey) carry their String key as a public final 'name' field,

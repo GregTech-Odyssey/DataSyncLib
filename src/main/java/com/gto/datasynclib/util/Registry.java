@@ -71,6 +71,8 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
      */
     protected final DataCodec<V> dataCodec;
 
+    protected final DataSyncCodec<V> combinedCodec;
+
     /**
      * The concrete runtime class of this registry's values ({@code V}), when known.
      * When non-{@code null} and {@link #freeze()} completes, this registry's
@@ -94,24 +96,15 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
         this(name, keyCodec, keyGetter, null);
     }
 
-    public Registry(String name, DataCodec<K> keyCodec, Function<? super V, ? extends K> keyGetter, @Nullable Class<V> valueType) {
+    public Registry(String name, DataCodec<K> keyCodec, @Nullable Function<? super V, ? extends K> keyGetter, @Nullable Class<V> valueType) {
         this.name = Objects.requireNonNull(name, "name");
-        this.keyGetter = Objects.requireNonNull(keyGetter, "keyGetter");
+        this.keyGetter = keyGetter == null ? this::getKeyByMap : keyGetter;
         Objects.requireNonNull(keyCodec, "keyCodec");
         this.valueType = valueType;
         this.dataCodec = DataCodec.of(
-                obj -> keyCodec.encode(keyGetter.apply(obj)),
+                obj -> keyCodec.encode(this.keyGetter.apply(obj)),
                 (data, dataVersion) -> keyValues.get(keyCodec.decode(data, dataVersion)));
-    }
-
-    public Registry(String name, DataCodec<K> keyCodec, @Nullable Class<V> valueType) {
-        this.name = Objects.requireNonNull(name, "name");
-        this.keyGetter = this::getKeyByMap;
-        Objects.requireNonNull(keyCodec, "keyCodec");
-        this.valueType = valueType;
-        this.dataCodec = DataCodec.of(
-                obj -> keyCodec.encode(this.getKeyByMap(obj)),
-                (data, dataVersion) -> keyValues.get(keyCodec.decode(data, dataVersion)));
+        this.combinedCodec = DataSyncCodec.of(streamCodec, dataCodec);
     }
 
     @SuppressWarnings("BooleanMethodIsAlwaysInverted")
@@ -256,12 +249,16 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
      *
      * @return the cached value-level {@link DataCodec}
      */
-    public DataCodec<V> dataCodec() {
+    public final DataCodec<V> dataCodec() {
         return dataCodec;
     }
 
     public final ByteStreamCodec<V> streamCodec() {
         return streamCodec;
+    }
+
+    public final DataSyncCodec<V> combinedCodec() {
+        return combinedCodec;
     }
 
     public Codec<V> codec(Codec<K> keyCodec) {

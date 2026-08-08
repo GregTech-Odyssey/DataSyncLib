@@ -8,7 +8,6 @@ import com.gto.datasynclib.util.HashUtil;
 import com.gto.datasynclib.util.StreamCodecs;
 import com.gto.datasynclib.util.cache.ConcurrentHashMapCache;
 import com.gto.datasynclib.util.cache.MapCache;
-import com.mojang.datafixers.util.*;
 import com.mojang.serialization.Codec;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import net.minecraft.core.BlockPos;
@@ -39,8 +38,6 @@ import java.lang.reflect.Array;
 import java.math.BigInteger;
 import java.util.HashMap;
 import java.util.UUID;
-import java.util.function.BiFunction;
-import java.util.function.Function;
 
 /**
  * Unified codec registry that pairs network stream codecs with persistent data codecs.
@@ -62,7 +59,7 @@ import java.util.function.Function;
  * @param <T> the type this codec can encode and decode
  */
 @SuppressWarnings("unchecked")
-public final class DataSyncCodec<T> implements ByteStreamCodec<T>, DataCodec<T> {
+public final class DataSyncCodec<T> implements CombinedCodec<T> {
 
     private static final Reference2ReferenceOpenHashMap<Class<?>, DataSyncCodec<?>> CODECS = new Reference2ReferenceOpenHashMap<>();
     private static final Reference2ReferenceOpenHashMap<Class<?>, HashMap<Object, DataSyncCodec<?>>> GENERIC_CODECS = new Reference2ReferenceOpenHashMap<>();
@@ -245,256 +242,6 @@ public final class DataSyncCodec<T> implements ByteStreamCodec<T>, DataCodec<T> 
      */
     public static <T> DataSyncCodec<T> of(DataCodec<T> dataCodec) {
         return of(ByteStreamCodec.of(dataCodec), dataCodec);
-    }
-
-    // ===== Composite builders (unified stream + data) =====
-
-    public static <T, F1> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            Function<? super F1, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, constructor),
-                DataCodec.composite(c1, g1, constructor));
-    }
-
-    public static <T, F1, F2> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            BiFunction<? super F1, ? super F2, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, constructor),
-                DataCodec.composite(c1, g1, c2, g2, constructor));
-    }
-
-    public static <T, F1, F2, F3> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            DataSyncCodec<F3> c3, Function<? super T, ? extends F3> g3,
-            Function3<? super F1, ? super F2, ? super F3, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, constructor),
-                DataCodec.composite(c1, g1, c2, g2, c3, g3, constructor));
-    }
-
-    public static <T, F1, F2, F3, F4> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            DataSyncCodec<F3> c3, Function<? super T, ? extends F3> g3,
-            DataSyncCodec<F4> c4, Function<? super T, ? extends F4> g4,
-            Function4<? super F1, ? super F2, ? super F3, ? super F4, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, constructor),
-                DataCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, constructor));
-    }
-
-    public static <T, F1, F2, F3, F4, F5> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            DataSyncCodec<F3> c3, Function<? super T, ? extends F3> g3,
-            DataSyncCodec<F4> c4, Function<? super T, ? extends F4> g4,
-            DataSyncCodec<F5> c5, Function<? super T, ? extends F5> g5,
-            Function5<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, constructor),
-                DataCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, constructor));
-    }
-
-    public static <T, F1, F2, F3, F4, F5, F6> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            DataSyncCodec<F3> c3, Function<? super T, ? extends F3> g3,
-            DataSyncCodec<F4> c4, Function<? super T, ? extends F4> g4,
-            DataSyncCodec<F5> c5, Function<? super T, ? extends F5> g5,
-            DataSyncCodec<F6> c6, Function<? super T, ? extends F6> g6,
-            Function6<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, constructor),
-                DataCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, constructor));
-    }
-
-    public static <T, F1, F2, F3, F4, F5, F6, F7> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            DataSyncCodec<F3> c3, Function<? super T, ? extends F3> g3,
-            DataSyncCodec<F4> c4, Function<? super T, ? extends F4> g4,
-            DataSyncCodec<F5> c5, Function<? super T, ? extends F5> g5,
-            DataSyncCodec<F6> c6, Function<? super T, ? extends F6> g6,
-            DataSyncCodec<F7> c7, Function<? super T, ? extends F7> g7,
-            Function7<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, constructor),
-                DataCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, constructor));
-    }
-
-    public static <T, F1, F2, F3, F4, F5, F6, F7, F8> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            DataSyncCodec<F3> c3, Function<? super T, ? extends F3> g3,
-            DataSyncCodec<F4> c4, Function<? super T, ? extends F4> g4,
-            DataSyncCodec<F5> c5, Function<? super T, ? extends F5> g5,
-            DataSyncCodec<F6> c6, Function<? super T, ? extends F6> g6,
-            DataSyncCodec<F7> c7, Function<? super T, ? extends F7> g7,
-            DataSyncCodec<F8> c8, Function<? super T, ? extends F8> g8,
-            Function8<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, constructor),
-                DataCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, constructor));
-    }
-
-    public static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            DataSyncCodec<F3> c3, Function<? super T, ? extends F3> g3,
-            DataSyncCodec<F4> c4, Function<? super T, ? extends F4> g4,
-            DataSyncCodec<F5> c5, Function<? super T, ? extends F5> g5,
-            DataSyncCodec<F6> c6, Function<? super T, ? extends F6> g6,
-            DataSyncCodec<F7> c7, Function<? super T, ? extends F7> g7,
-            DataSyncCodec<F8> c8, Function<? super T, ? extends F8> g8,
-            DataSyncCodec<F9> c9, Function<? super T, ? extends F9> g9,
-            Function9<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, constructor),
-                DataCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, constructor));
-    }
-
-    public static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            DataSyncCodec<F3> c3, Function<? super T, ? extends F3> g3,
-            DataSyncCodec<F4> c4, Function<? super T, ? extends F4> g4,
-            DataSyncCodec<F5> c5, Function<? super T, ? extends F5> g5,
-            DataSyncCodec<F6> c6, Function<? super T, ? extends F6> g6,
-            DataSyncCodec<F7> c7, Function<? super T, ? extends F7> g7,
-            DataSyncCodec<F8> c8, Function<? super T, ? extends F8> g8,
-            DataSyncCodec<F9> c9, Function<? super T, ? extends F9> g9,
-            DataSyncCodec<F10> c10, Function<? super T, ? extends F10> g10,
-            Function10<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? super F10, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, constructor),
-                DataCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, constructor));
-    }
-
-    public static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            DataSyncCodec<F3> c3, Function<? super T, ? extends F3> g3,
-            DataSyncCodec<F4> c4, Function<? super T, ? extends F4> g4,
-            DataSyncCodec<F5> c5, Function<? super T, ? extends F5> g5,
-            DataSyncCodec<F6> c6, Function<? super T, ? extends F6> g6,
-            DataSyncCodec<F7> c7, Function<? super T, ? extends F7> g7,
-            DataSyncCodec<F8> c8, Function<? super T, ? extends F8> g8,
-            DataSyncCodec<F9> c9, Function<? super T, ? extends F9> g9,
-            DataSyncCodec<F10> c10, Function<? super T, ? extends F10> g10,
-            DataSyncCodec<F11> c11, Function<? super T, ? extends F11> g11,
-            Function11<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? super F10, ? super F11, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, c11, g11, constructor),
-                DataCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, c11, g11, constructor));
-    }
-
-    public static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            DataSyncCodec<F3> c3, Function<? super T, ? extends F3> g3,
-            DataSyncCodec<F4> c4, Function<? super T, ? extends F4> g4,
-            DataSyncCodec<F5> c5, Function<? super T, ? extends F5> g5,
-            DataSyncCodec<F6> c6, Function<? super T, ? extends F6> g6,
-            DataSyncCodec<F7> c7, Function<? super T, ? extends F7> g7,
-            DataSyncCodec<F8> c8, Function<? super T, ? extends F8> g8,
-            DataSyncCodec<F9> c9, Function<? super T, ? extends F9> g9,
-            DataSyncCodec<F10> c10, Function<? super T, ? extends F10> g10,
-            DataSyncCodec<F11> c11, Function<? super T, ? extends F11> g11,
-            DataSyncCodec<F12> c12, Function<? super T, ? extends F12> g12,
-            Function12<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? super F10, ? super F11, ? super F12, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, c11, g11, c12, g12, constructor),
-                DataCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, c11, g11, c12, g12, constructor));
-    }
-
-    public static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            DataSyncCodec<F3> c3, Function<? super T, ? extends F3> g3,
-            DataSyncCodec<F4> c4, Function<? super T, ? extends F4> g4,
-            DataSyncCodec<F5> c5, Function<? super T, ? extends F5> g5,
-            DataSyncCodec<F6> c6, Function<? super T, ? extends F6> g6,
-            DataSyncCodec<F7> c7, Function<? super T, ? extends F7> g7,
-            DataSyncCodec<F8> c8, Function<? super T, ? extends F8> g8,
-            DataSyncCodec<F9> c9, Function<? super T, ? extends F9> g9,
-            DataSyncCodec<F10> c10, Function<? super T, ? extends F10> g10,
-            DataSyncCodec<F11> c11, Function<? super T, ? extends F11> g11,
-            DataSyncCodec<F12> c12, Function<? super T, ? extends F12> g12,
-            DataSyncCodec<F13> c13, Function<? super T, ? extends F13> g13,
-            Function13<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? super F10, ? super F11, ? super F12, ? super F13, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, c11, g11, c12, g12, c13, g13, constructor),
-                DataCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, c11, g11, c12, g12, c13, g13, constructor));
-    }
-
-    public static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13, F14> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            DataSyncCodec<F3> c3, Function<? super T, ? extends F3> g3,
-            DataSyncCodec<F4> c4, Function<? super T, ? extends F4> g4,
-            DataSyncCodec<F5> c5, Function<? super T, ? extends F5> g5,
-            DataSyncCodec<F6> c6, Function<? super T, ? extends F6> g6,
-            DataSyncCodec<F7> c7, Function<? super T, ? extends F7> g7,
-            DataSyncCodec<F8> c8, Function<? super T, ? extends F8> g8,
-            DataSyncCodec<F9> c9, Function<? super T, ? extends F9> g9,
-            DataSyncCodec<F10> c10, Function<? super T, ? extends F10> g10,
-            DataSyncCodec<F11> c11, Function<? super T, ? extends F11> g11,
-            DataSyncCodec<F12> c12, Function<? super T, ? extends F12> g12,
-            DataSyncCodec<F13> c13, Function<? super T, ? extends F13> g13,
-            DataSyncCodec<F14> c14, Function<? super T, ? extends F14> g14,
-            Function14<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? super F10, ? super F11, ? super F12, ? super F13, ? super F14, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, c11, g11, c12, g12, c13, g13, c14, g14, constructor),
-                DataCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, c11, g11, c12, g12, c13, g13, c14, g14, constructor));
-    }
-
-    public static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13, F14, F15> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            DataSyncCodec<F3> c3, Function<? super T, ? extends F3> g3,
-            DataSyncCodec<F4> c4, Function<? super T, ? extends F4> g4,
-            DataSyncCodec<F5> c5, Function<? super T, ? extends F5> g5,
-            DataSyncCodec<F6> c6, Function<? super T, ? extends F6> g6,
-            DataSyncCodec<F7> c7, Function<? super T, ? extends F7> g7,
-            DataSyncCodec<F8> c8, Function<? super T, ? extends F8> g8,
-            DataSyncCodec<F9> c9, Function<? super T, ? extends F9> g9,
-            DataSyncCodec<F10> c10, Function<? super T, ? extends F10> g10,
-            DataSyncCodec<F11> c11, Function<? super T, ? extends F11> g11,
-            DataSyncCodec<F12> c12, Function<? super T, ? extends F12> g12,
-            DataSyncCodec<F13> c13, Function<? super T, ? extends F13> g13,
-            DataSyncCodec<F14> c14, Function<? super T, ? extends F14> g14,
-            DataSyncCodec<F15> c15, Function<? super T, ? extends F15> g15,
-            Function15<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? super F10, ? super F11, ? super F12, ? super F13, ? super F14, ? super F15, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, c11, g11, c12, g12, c13, g13, c14, g14, c15, g15, constructor),
-                DataCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, c11, g11, c12, g12, c13, g13, c14, g14, c15, g15, constructor));
-    }
-
-    public static <T, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13, F14, F15, F16> DataSyncCodec<T> composite(
-            DataSyncCodec<F1> c1, Function<? super T, ? extends F1> g1,
-            DataSyncCodec<F2> c2, Function<? super T, ? extends F2> g2,
-            DataSyncCodec<F3> c3, Function<? super T, ? extends F3> g3,
-            DataSyncCodec<F4> c4, Function<? super T, ? extends F4> g4,
-            DataSyncCodec<F5> c5, Function<? super T, ? extends F5> g5,
-            DataSyncCodec<F6> c6, Function<? super T, ? extends F6> g6,
-            DataSyncCodec<F7> c7, Function<? super T, ? extends F7> g7,
-            DataSyncCodec<F8> c8, Function<? super T, ? extends F8> g8,
-            DataSyncCodec<F9> c9, Function<? super T, ? extends F9> g9,
-            DataSyncCodec<F10> c10, Function<? super T, ? extends F10> g10,
-            DataSyncCodec<F11> c11, Function<? super T, ? extends F11> g11,
-            DataSyncCodec<F12> c12, Function<? super T, ? extends F12> g12,
-            DataSyncCodec<F13> c13, Function<? super T, ? extends F13> g13,
-            DataSyncCodec<F14> c14, Function<? super T, ? extends F14> g14,
-            DataSyncCodec<F15> c15, Function<? super T, ? extends F15> g15,
-            DataSyncCodec<F16> c16, Function<? super T, ? extends F16> g16,
-            Function16<? super F1, ? super F2, ? super F3, ? super F4, ? super F5, ? super F6, ? super F7, ? super F8, ? super F9, ? super F10, ? super F11, ? super F12, ? super F13, ? super F14, ? super F15, ? super F16, ? extends T> constructor) {
-        return of(
-                ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, c11, g11, c12, g12, c13, g13, c14, g14, c15, g15, c16, g16, constructor),
-                DataCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, c11, g11, c12, g12, c13, g13, c14, g14, c15, g15, c16, g16, constructor));
     }
 
     /**
@@ -710,7 +457,7 @@ public final class DataSyncCodec<T> implements ByteStreamCodec<T>, DataCodec<T> 
 
     public static final DataSyncCodec<BlockState> BLOCK_STATE_CODEC = register(BlockState.class, ByteStreamCodec.of(BlockState.CODEC), BlockState.CODEC);
 
-    public static final DataSyncCodec<AABB> AABB_CODEC = DataSyncCodec.composite(DOUBLE_CODEC, a -> a.minX,
+    public static final DataSyncCodec<AABB> AABB_CODEC = CombinedCodec.composite(DOUBLE_CODEC, a -> a.minX,
             DOUBLE_CODEC, a -> a.minY,
             DOUBLE_CODEC, a -> a.minZ,
             DOUBLE_CODEC, a -> a.maxX,
