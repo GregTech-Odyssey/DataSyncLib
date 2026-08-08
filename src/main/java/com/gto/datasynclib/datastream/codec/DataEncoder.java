@@ -25,34 +25,34 @@ public interface DataEncoder<T> {
     @NotNull
     Data encode(T obj);
 
-    static <K, V> DataEncoder<V> convert(DataEncoder<? super K> serializer, Function<? super V, ? extends K> converter) {
-        return obj -> serializer.encode(converter.apply(obj));
+    static <K, V> DataEncoder<V> convert(DataEncoder<? super K> encoder, Function<? super V, ? extends K> converter) {
+        return obj -> encoder.encode(converter.apply(obj));
     }
 
-    static <K, V> DataEncoder<Map<? extends K, ? extends V>> map(DataEncoder<? super K> keySerializer, DataEncoder<? super V> valueSerializer) {
+    static <K, V> DataEncoder<Map<? extends K, ? extends V>> map(DataEncoder<? super K> keyEncoder, DataEncoder<? super V> valueEncoder) {
         return map -> {
             var data = new ListData();
             map.forEach((k, v) -> {
-                data.add(keySerializer.encode(k));
-                data.add(valueSerializer.encode(v));
+                data.add(keyEncoder.encode(k));
+                data.add(valueEncoder.encode(v));
             });
             return data;
         };
     }
 
-    static <E> DataEncoder<Collection<? extends E>> collection(DataEncoder<? super E> serializer) {
+    static <E> DataEncoder<Collection<? extends E>> collection(DataEncoder<? super E> encoder) {
         return list -> {
             var data = new ListData();
-            list.forEach(o -> data.add(serializer.encode(o)));
+            list.forEach(o -> data.add(encoder.encode(o)));
             return data;
         };
     }
 
-    static <E> DataEncoder<E[]> array(DataEncoder<? super E> serializer) {
+    static <E> DataEncoder<E[]> array(DataEncoder<? super E> encoder) {
         return list -> {
             var data = new ListData();
             for (var o : list) {
-                data.add(serializer.encode(o));
+                data.add(encoder.encode(o));
             }
             return data;
         };

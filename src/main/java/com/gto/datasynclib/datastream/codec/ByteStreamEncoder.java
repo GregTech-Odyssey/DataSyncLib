@@ -20,33 +20,33 @@ public interface ByteStreamEncoder<T> {
 
     void encode(FriendlyByteBuf buf, T obj);
 
-    static <K, V> ByteStreamEncoder<V> convert(ByteStreamEncoder<? super K> serializer, Function<? super V, ? extends K> converter) {
-        return (buf, obj) -> serializer.encode(buf, converter.apply(obj));
+    static <K, V> ByteStreamEncoder<V> convert(ByteStreamEncoder<? super K> encoder, Function<? super V, ? extends K> converter) {
+        return (buf, obj) -> encoder.encode(buf, converter.apply(obj));
     }
 
-    static <K, V> ByteStreamEncoder<Map<K, V>> map(ByteStreamEncoder<? super K> keySerializer, ByteStreamEncoder<? super V> valueSerializer) {
+    static <K, V> ByteStreamEncoder<Map<K, V>> map(ByteStreamEncoder<? super K> keyEncoder, ByteStreamEncoder<? super V> valueEncoder) {
         return (dos, map) -> {
             dos.writeVarInt(map.size());
             map.forEach((k, v) -> {
-                keySerializer.encode(dos, k);
-                valueSerializer.encode(dos, v);
+                keyEncoder.encode(dos, k);
+                valueEncoder.encode(dos, v);
 
             });
         };
     }
 
-    static <E> ByteStreamEncoder<Collection<E>> collection(ByteStreamEncoder<? super E> serializer) {
+    static <E> ByteStreamEncoder<Collection<E>> collection(ByteStreamEncoder<? super E> encoder) {
         return (dos, list) -> {
             dos.writeVarInt(list.size());
-            list.forEach(o -> serializer.encode(dos, o));
+            list.forEach(o -> encoder.encode(dos, o));
         };
     }
 
-    static <E> ByteStreamEncoder<E[]> array(ByteStreamEncoder<? super E> serializer) {
+    static <E> ByteStreamEncoder<E[]> array(ByteStreamEncoder<? super E> encoder) {
         return (dos, list) -> {
             dos.writeVarInt(list.length);
             for (E o : list) {
-                serializer.encode(dos, o);
+                encoder.encode(dos, o);
             }
         };
     }

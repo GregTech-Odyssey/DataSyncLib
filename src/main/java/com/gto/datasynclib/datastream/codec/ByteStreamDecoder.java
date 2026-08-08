@@ -1,14 +1,14 @@
 package com.gto.datasynclib.datastream.codec;
 
-import it.unimi.dsi.fastutil.ints.Int2ObjectFunction;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 import net.minecraft.network.FriendlyByteBuf;
 
+import java.lang.reflect.Array;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.Function;
 import java.util.function.IntFunction;
 
@@ -27,65 +27,66 @@ public interface ByteStreamDecoder<T> {
 
     T decode(FriendlyByteBuf buf);
 
-    static <K, V> ByteStreamDecoder<V> convert(ByteStreamDecoder<? extends K> serializer, Function<? super K, ? extends V> converter) {
-        return dis -> converter.apply(serializer.decode(dis));
+    static <K, V> ByteStreamDecoder<V> convert(ByteStreamDecoder<? extends K> decoder, Function<? super K, ? extends V> converter) {
+        return dis -> converter.apply(decoder.decode(dis));
     }
 
-    static <K, V> ByteStreamDecoder<Reference2ReferenceOpenHashMap<K, V>> map(ByteStreamDecoder<? extends K> keySerializer, ByteStreamDecoder<? extends V> valueSerializer) {
+    static <K, V> ByteStreamDecoder<Reference2ReferenceOpenHashMap<K, V>> map(ByteStreamDecoder<? extends K> keyDecoder, ByteStreamDecoder<? extends V> valueDecoder) {
         return dis -> {
             int size = dis.readVarInt();
             Reference2ReferenceOpenHashMap<K, V> map = new Reference2ReferenceOpenHashMap<>(size);
             for (int i = 0; i < size; i++) {
-                map.put(keySerializer.decode(dis), valueSerializer.decode(dis));
+                map.put(keyDecoder.decode(dis), valueDecoder.decode(dis));
             }
             return map;
         };
     }
 
-    static <K, V, M extends Map<K, V>> ByteStreamDecoder<M> map(IntFunction<M> function, ByteStreamDecoder<? extends K> keySerializer, ByteStreamDecoder<? extends V> valueSerializer) {
+    static <K, V, M extends Map<K, V>> ByteStreamDecoder<M> map(IntFunction<M> function, ByteStreamDecoder<? extends K> keyDecoder, ByteStreamDecoder<? extends V> valueDecoder) {
         return dis -> {
             int size = dis.readVarInt();
             var map = function.apply(size);
             for (int i = 0; i < size; i++) {
-                map.put(keySerializer.decode(dis), valueSerializer.decode(dis));
+                map.put(keyDecoder.decode(dis), valueDecoder.decode(dis));
             }
             return map;
         };
     }
 
-    static <E> ByteStreamDecoder<List<E>> list(ByteStreamDecoder<? extends E> serializer) {
+
+    static <E, C extends Collection<E>> ByteStreamDecoder<C> collection(IntFunction<C> function, ByteStreamDecoder<? extends E> decoder) {
+        return dis -> {
+            int size = dis.readVarInt();
+            var set = function.apply(size);
+            for (int i = 0; i < size; i++) set.add(decoder.decode(dis));
+            return set;
+        };
+    }
+
+    static <E> ByteStreamDecoder<List<E>> list(ByteStreamDecoder<? extends E> decoder) {
         return dis -> {
             int size = dis.readVarInt();
             var array = new Object[size];
-            for (int i = 0; i < size; i++) array[i] = serializer.decode(dis);
+            for (int i = 0; i < size; i++) array[i] = decoder.decode(dis);
             return (List) Arrays.asList(array);
         };
     }
 
-    static <E, L extends List<E>> ByteStreamDecoder<L> list(IntFunction<L> function, ByteStreamDecoder<? extends E> serializer) {
-        return dis -> {
-            int size = dis.readVarInt();
-            var list = function.apply(size);
-            for (int i = 0; i < size; i++) list.add(serializer.decode(dis));
-            return list;
-        };
-    }
-
-    static <E> ByteStreamDecoder<ReferenceOpenHashSet<E>> set(ByteStreamDecoder<? extends E> serializer) {
+    static <E> ByteStreamDecoder<ReferenceOpenHashSet<E>> set(ByteStreamDecoder<? extends E> decoder) {
         return dis -> {
             int size = dis.readVarInt();
             var set = new ReferenceOpenHashSet<E>(size);
-            for (int i = 0; i < size; i++) set.add(serializer.decode(dis));
+            for (int i = 0; i < size; i++) set.add(decoder.decode(dis));
             return set;
         };
     }
 
-    static <E, S extends Set<E>> ByteStreamDecoder<S> set(Int2ObjectFunction<S> function, ByteStreamDecoder<? extends E> serializer) {
+    static <E> ByteStreamDecoder<E[]> array(Class<E> type, ByteStreamDecoder<? extends E> decoder) {
         return dis -> {
             int size = dis.readVarInt();
-            var set = function.apply(size);
-            for (int i = 0; i < size; i++) set.add(serializer.decode(dis));
-            return set;
+            var array = (E[]) Array.newInstance(type, size);
+            for (int i = 0; i < size; i++) array[i] = decoder.decode(dis);
+            return array;
         };
     }
 }

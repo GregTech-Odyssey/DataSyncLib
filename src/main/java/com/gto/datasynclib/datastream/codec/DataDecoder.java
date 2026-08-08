@@ -6,6 +6,7 @@ import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 import org.jetbrains.annotations.NotNull;
 
+import java.lang.reflect.Array;
 import java.util.*;
 import java.util.function.Function;
 import java.util.function.IntFunction;
@@ -34,16 +35,17 @@ public interface DataDecoder<T> {
         return decode(data, 0);
     }
 
-    static <K, V> DataDecoder<V> convert(DataDecoder<? extends K> serializer, Function<? super K, ? extends V> converter) {
-        return (dis, dataVersion) -> converter.apply(serializer.decode(dis, dataVersion));
+    static <K, V> DataDecoder<V> convert(DataDecoder<? extends K> decoder, Function<? super K, ? extends V> converter) {
+        return (dis, dataVersion) -> converter.apply(decoder.decode(dis, dataVersion));
     }
 
-    static <K, V> DataDecoder<Reference2ReferenceOpenHashMap<K, V>> map(DataDecoder<? extends K> keySerializer, DataDecoder<? extends V> valueSerializer) {
+    static <K, V> DataDecoder<Reference2ReferenceOpenHashMap<K, V>> map(DataDecoder<? extends K> keyDecoder, DataDecoder<? extends V> valueDecoder) {
         return (dis, dataVersion) -> {
             if (dis instanceof ListData(List<Data> list) && list.size() > 1) {
-                Reference2ReferenceOpenHashMap<K, V> map = new Reference2ReferenceOpenHashMap<>(list.size() / 2);
-                for (int i = 0; i < list.size(); i++) {
-                    map.put(keySerializer.decode(list.get(i++), dataVersion), valueSerializer.decode(list.get(i), dataVersion));
+                var size = list.size();
+                Reference2ReferenceOpenHashMap<K, V> map = new Reference2ReferenceOpenHashMap<>(size / 2);
+                for (int i = 0; i < size; i++) {
+                    map.put(keyDecoder.decode(list.get(i++), dataVersion), valueDecoder.decode(list.get(i), dataVersion));
                 }
                 return map;
             }
@@ -51,12 +53,13 @@ public interface DataDecoder<T> {
         };
     }
 
-    static <K, V, M extends Map<K, V>> DataDecoder<M> map(IntFunction<M> function, DataDecoder<? extends K> keySerializer, DataDecoder<? extends V> valueSerializer) {
+    static <K, V, M extends Map<K, V>> DataDecoder<M> map(IntFunction<M> function, DataDecoder<? extends K> keyDecoder, DataDecoder<? extends V> valueDecoder) {
         return (dis, dataVersion) -> {
             if (dis instanceof ListData(List<Data> list) && list.size() > 1) {
-                var map = function.apply(list.size() / 2);
-                for (int i = 0; i < list.size(); i++) {
-                    map.put(keySerializer.decode(list.get(i++), dataVersion), valueSerializer.decode(list.get(i), dataVersion));
+                var size = list.size();
+                var map = function.apply(size / 2);
+                for (int i = 0; i < size; i++) {
+                    map.put(keyDecoder.decode(list.get(i++), dataVersion), valueDecoder.decode(list.get(i), dataVersion));
                 }
                 return map;
             }
@@ -64,12 +67,12 @@ public interface DataDecoder<T> {
         };
     }
 
-    static <E, C extends Collection<E>> DataDecoder<C> notNullCollection(IntFunction<C> function, DataDecoder<? extends E> serializer) {
+    static <E, C extends Collection<E>> DataDecoder<C> notNullCollection(IntFunction<C> function, DataDecoder<? extends E> decoder) {
         return (dis, dataVersion) -> {
             if (dis instanceof ListData(List<Data> list) && !list.isEmpty()) {
                 var array = function.apply(list.size());
                 list.forEach(data -> {
-                    var e = serializer.decode(data, dataVersion);
+                    var e = decoder.decode(data, dataVersion);
                     if (e == null) return;
                     array.add(e);
                 });
@@ -79,23 +82,24 @@ public interface DataDecoder<T> {
         };
     }
 
-    static <E, C extends Collection<E>> DataDecoder<C> collection(IntFunction<C> function, DataDecoder<? extends E> serializer) {
+    static <E, C extends Collection<E>> DataDecoder<C> collection(IntFunction<C> function, DataDecoder<? extends E> decoder) {
         return (dis, dataVersion) -> {
             if (dis instanceof ListData(List<Data> list) && !list.isEmpty()) {
                 var array = function.apply(list.size());
-                list.forEach(data -> array.add(serializer.decode(data, dataVersion)));
+                list.forEach(data -> array.add(decoder.decode(data, dataVersion)));
                 return array;
             }
             return function.apply(1);
         };
     }
 
-    static <E> DataDecoder<List<E>> list(DataDecoder<? extends E> serializer) {
+    static <E> DataDecoder<List<E>> list(DataDecoder<? extends E> decoder) {
         return (dis, dataVersion) -> {
             if (dis instanceof ListData(List<Data> list) && !list.isEmpty()) {
-                var array = new Object[list.size()];
-                for (int i = 0; i < list.size(); i++) {
-                    array[i] = serializer.decode(list.get(i), dataVersion);
+                var size = list.size();
+                var array = new Object[size];
+                for (int i = 0; i < size; i++) {
+                    array[i] = decoder.decode(list.get(i), dataVersion);
                 }
                 return (List) Arrays.asList(array);
             }
@@ -103,14 +107,28 @@ public interface DataDecoder<T> {
         };
     }
 
-    static <E> DataDecoder<ReferenceOpenHashSet<E>> set(DataDecoder<? extends E> serializer) {
+    static <E> DataDecoder<ReferenceOpenHashSet<E>> set(DataDecoder<? extends E> decoder) {
         return (dis, dataVersion) -> {
             if (dis instanceof ListData(List<Data> list) && !list.isEmpty()) {
                 var array = new ReferenceOpenHashSet<E>();
-                list.forEach(data -> array.add(serializer.decode(data, dataVersion)));
+                list.forEach(data -> array.add(decoder.decode(data, dataVersion)));
                 return array;
             }
             return new ReferenceOpenHashSet<>(1);
+        };
+    }
+
+    static <E> DataDecoder<E[]> array(Class<E> type, DataDecoder<? extends E> decoder) {
+        return (dis, dataVersion) -> {
+            if (dis instanceof ListData(List<Data> list) && !list.isEmpty()) {
+                var size = list.size();
+                var array = (E[]) Array.newInstance(type, size);
+                for (int i = 0; i < size; i++) {
+                    array[i] = decoder.decode(list.get(i), dataVersion);
+                }
+
+            }
+            return (E[]) Array.newInstance(type, 0);
         };
     }
 }

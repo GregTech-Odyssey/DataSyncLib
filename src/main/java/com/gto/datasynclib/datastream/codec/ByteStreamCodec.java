@@ -7,11 +7,14 @@ import com.mojang.serialization.Codec;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import net.minecraft.network.FriendlyByteBuf;
 
+import java.lang.reflect.Array;
 import java.math.BigInteger;
+import java.util.Collection;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.IntFunction;
 
 /**
  * Combined encoder/decoder interface for {@link FriendlyByteBuf}-based network transmission.
@@ -71,7 +74,7 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         };
     }
 
-    static <K, V> ByteStreamCodec<V> map(ByteStreamCodec<K> codec, Function<? super V, ? extends K> encodeConverter, Function<? super K, ? extends V> decodeConverter) {
+    static <K, V> ByteStreamCodec<V> convert(ByteStreamCodec<K> codec, Function<? super V, ? extends K> encodeConverter, Function<? super K, ? extends V> decodeConverter) {
         return new ByteStreamCodec<>() {
 
             @Override
@@ -85,6 +88,73 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
             }
         };
     }
+
+    static <K, V, M extends Map<K, V>> ByteStreamCodec<M> map(IntFunction<M> function, ByteStreamCodec<K> keyCodec, ByteStreamCodec<V> valueCodec) {
+        return new ByteStreamCodec<>() {
+
+            @Override
+            public void encode(FriendlyByteBuf buf, M obj) {
+                buf.writeVarInt(obj.size());
+                obj.forEach((k, v) -> {
+                    keyCodec.encode(buf, k);
+                    valueCodec.encode(buf, v);
+                });
+            }
+
+            @Override
+            public M decode(FriendlyByteBuf buf) {
+                int size = buf.readVarInt();
+                var map = function.apply(size);
+                for (int i = 0; i < size; i++) {
+                    map.put(keyCodec.decode(buf), valueCodec.decode(buf));
+                }
+                return map;
+            }
+        };
+    }
+
+    static <T, C extends Collection<T>> ByteStreamCodec<C> collection(IntFunction<C> function, ByteStreamCodec<T> codec) {
+        return new ByteStreamCodec<>() {
+
+
+            @Override
+            public void encode(FriendlyByteBuf buf, C obj) {
+                buf.writeVarInt(obj.size());
+                obj.forEach(o -> codec.encode(buf, o));
+            }
+
+            @Override
+            public C decode(FriendlyByteBuf buf) {
+                int size = buf.readVarInt();
+                var set = function.apply(size);
+                for (int i = 0; i < size; i++) set.add(codec.decode(buf));
+                return set;
+            }
+        };
+    }
+
+    static <T> ByteStreamCodec<T[]> array(Class<T> type, ByteStreamCodec<T> codec) {
+        return new ByteStreamCodec<>() {
+
+
+            @Override
+            public void encode(FriendlyByteBuf buf, T[] obj) {
+                buf.writeVarInt(obj.length);
+                for (T o : obj) {
+                    codec.encode(buf, o);
+                }
+            }
+
+            @Override
+            public T[] decode(FriendlyByteBuf buf) {
+                int size = buf.readVarInt();
+                var array = (T[]) Array.newInstance(type, size);
+                for (int i = 0; i < size; i++) array[i] = codec.decode(buf);
+                return array;
+            }
+        };
+    }
+
 
     /**
      * Creates a codec that writes nothing on encode (no-op) and always returns
@@ -1262,6 +1332,106 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         }
     };
 
+    ByteStreamCodec<short[]> SHORTS_CODEC = new ByteStreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf buf, short[] obj) {
+            buf.writeVarInt(obj.length);
+            for (var i : obj) {
+                buf.writeShort(i);
+            }
+        }
+
+        @Override
+        public short[] decode(FriendlyByteBuf buf) {
+            var length = buf.readVarInt();
+            var shorts = new short[length];
+            for (int i = 0; i < length; i++) {
+                shorts[i] = buf.readShort();
+            }
+            return shorts;
+        }
+
+        static {
+            registerCodec(short[].class, SHORTS_CODEC);
+        }
+    };
+
+    ByteStreamCodec<char[]> CHARS_CODEC = new ByteStreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf buf, char[] obj) {
+            buf.writeVarInt(obj.length);
+            for (var i : obj) {
+                buf.writeChar(i);
+            }
+        }
+
+        @Override
+        public char[] decode(FriendlyByteBuf buf) {
+            var length = buf.readVarInt();
+            var chars = new char[length];
+            for (int i = 0; i < length; i++) {
+                chars[i] = buf.readChar();
+            }
+            return chars;
+        }
+
+        static {
+            registerCodec(char[].class, CHARS_CODEC);
+        }
+    };
+
+    ByteStreamCodec<float[]> FLOATS_CODEC = new ByteStreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf buf, float[] obj) {
+            buf.writeVarInt(obj.length);
+            for (var i : obj) {
+                buf.writeFloat(i);
+            }
+        }
+
+        @Override
+        public float[] decode(FriendlyByteBuf buf) {
+            var length = buf.readVarInt();
+            var floats = new float[length];
+            for (int i = 0; i < length; i++) {
+                floats[i] = buf.readFloat();
+            }
+            return floats;
+        }
+
+        static {
+            registerCodec(float[].class, FLOATS_CODEC);
+        }
+    };
+
+    ByteStreamCodec<double[]> DOUBLES_CODEC = new ByteStreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf buf, double[] obj) {
+            buf.writeVarInt(obj.length);
+            for (var i : obj) {
+                buf.writeDouble(i);
+            }
+        }
+
+        @Override
+        public double[] decode(FriendlyByteBuf buf) {
+            var length = buf.readVarInt();
+            var doubles = new double[length];
+            for (int i = 0; i < length; i++) {
+                doubles[i] = buf.readDouble();
+            }
+            return doubles;
+        }
+
+        static {
+            registerCodec(double[].class, DOUBLES_CODEC);
+        }
+    };
+
     ByteStreamCodec<UUID> UUID_CODEC = new ByteStreamCodec<>() {
 
         @Override
@@ -1281,6 +1451,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
 
     final class Codecs {
 
-        private static final Map<Class<?>, ByteStreamCodec<?>> CODECS = new Reference2ReferenceOpenHashMap<>();
+        private static final Reference2ReferenceOpenHashMap<Class<?>, ByteStreamCodec<?>> CODECS = new Reference2ReferenceOpenHashMap<>();
     }
 }

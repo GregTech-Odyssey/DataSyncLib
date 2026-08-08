@@ -10,12 +10,16 @@ import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+import java.lang.reflect.Array;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.IntFunction;
 
 /**
  * Combined encoder/decoder interface for {@link com.gto.datasynclib.datastream.data.Data}-based
@@ -109,7 +113,7 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         };
     }
 
-    static <K, V> DataCodec<V> map(DataCodec<K> codec, Function<? super V, ? extends K> encodeConverter, Function<? super K, ? extends V> decodeConverter) {
+    static <K, V> DataCodec<V> convert(DataCodec<K> codec, Function<? super V, ? extends K> encodeConverter, Function<? super K, ? extends V> decodeConverter) {
         return new DataCodec<>() {
 
             @Override
@@ -120,6 +124,82 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
             @Override
             public @NotNull Data encode(V obj) {
                 return codec.encode(encodeConverter.apply(obj));
+            }
+        };
+    }
+
+    static <K, V, M extends Map<K, V>> DataCodec<M> map(IntFunction<M> function, DataCodec<K> keyCodec, DataCodec<V> valueCodec) {
+        return new DataCodec<>() {
+
+            @Override
+            public @NotNull Data encode(M obj) {
+                var data = new ListData();
+                obj.forEach((k, v) -> {
+                    data.add(keyCodec.encode(k));
+                    data.add(valueCodec.encode(v));
+                });
+                return data;
+            }
+
+            @Override
+            public M decode(@NotNull Data data, int dataVersion) {
+                if (data instanceof ListData(List<Data> list) && list.size() > 1) {
+                    var map = function.apply(list.size() / 2);
+                    for (int i = 0; i < list.size(); i++) {
+                        map.put(keyCodec.decode(list.get(i++), dataVersion), valueCodec.decode(list.get(i), dataVersion));
+                    }
+                    return map;
+                }
+                return function.apply(1);
+            }
+        };
+    }
+
+    static <T, C extends Collection<T>> DataCodec<C> collection(IntFunction<C> function, DataCodec<T> codec) {
+        return new DataCodec<>() {
+
+            @Override
+            public @NotNull Data encode(C obj) {
+                var data = new ListData();
+                obj.forEach(o -> data.add(codec.encode(o)));
+                return data;
+            }
+
+            @Override
+            public C decode(@NotNull Data data, int dataVersion) {
+                if (data instanceof ListData(List<Data> list) && !list.isEmpty()) {
+                    var array = function.apply(list.size());
+                    list.forEach(d -> array.add(codec.decode(d, dataVersion)));
+                    return array;
+                }
+                return function.apply(1);
+            }
+        };
+    }
+
+    static <T> DataCodec<T[]> array(Class<T> type, DataCodec<T> codec) {
+        return new DataCodec<>() {
+
+            @Override
+            public @NotNull Data encode(T[] obj) {
+                var data = new ListData();
+                for (var o : obj) {
+                    data.add(codec.encode(o));
+                }
+                return data;
+            }
+
+            @Override
+            public T[] decode(@NotNull Data data, int dataVersion) {
+                if (data instanceof ListData(List<Data> list) && !list.isEmpty()) {
+                    var size = list.size();
+                    var array = (T[]) Array.newInstance(type, size);
+                    for (int i = 0; i < size; i++) {
+                        array[i] = codec.decode(list.get(i), dataVersion);
+                    }
+
+                }
+                return (T[]) Array.newInstance(type, 0);
             }
         };
     }
@@ -1253,6 +1333,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
 
     final class Codecs {
 
-        private static final Map<Class<?>, DataCodec<?>> CODECS = new Reference2ReferenceOpenHashMap<>();
+        private static final Reference2ReferenceOpenHashMap<Class<?>, DataCodec<?>> CODECS = new Reference2ReferenceOpenHashMap<>();
     }
 }

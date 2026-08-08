@@ -109,6 +109,10 @@ public final class DataSyncLib {
         registerAccessFactory(byte[].class, ByteArrayAccess::new);
         registerAccessFactory(int[].class, IntArrayAccess::new);
         registerAccessFactory(long[].class, LongArrayAccess::new);
+        registerAccessFactory(double[].class, DoubleArrayAccess::new);
+        registerAccessFactory(float[].class, FloatArrayAccess::new);
+        registerAccessFactory(short[].class, ShortArrayAccess::new);
+        registerAccessFactory(char[].class, CharArrayAccess::new);
 
         // Access-mode factories: IFieldDataHolder/IDataSerializable (highest priority for containers)
         registerAccessInterfaceFactory(IFieldDataHolder.class, k -> FieldDataHolderAccess::new, 1000);
