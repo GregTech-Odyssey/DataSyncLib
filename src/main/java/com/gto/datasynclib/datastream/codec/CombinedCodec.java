@@ -4,6 +4,8 @@ import com.gto.datasynclib.DataSyncCodec;
 import com.mojang.datafixers.util.*;
 import com.mojang.serialization.Codec;
 
+import java.util.*;
+import java.util.function.IntFunction;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
@@ -277,5 +279,36 @@ public interface CombinedCodec<T> extends DataCodec<T>, ByteStreamCodec<T> {
         return DataSyncCodec.of(
                 ByteStreamCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, c11, g11, c12, g12, c13, g13, c14, g14, c15, g15, c16, g16, constructor),
                 DataCodec.composite(c1, g1, c2, g2, c3, g3, c4, g4, c5, g5, c6, g6, c7, g7, c8, g8, c9, g9, c10, g10, c11, g11, c12, g12, c13, g13, c14, g14, c15, g15, c16, g16, constructor));
+    }
+
+    /**
+     * 组合编解码器：元素集合（Stream 用 VarInt 数量，Data 用列表），网络与持久化格式可各自定义。
+     *
+     * @param function 按容量建集合的工厂（如 {@code ArrayList::new}）
+     * @param codec    元素组合编解码器
+     */
+    static <T, C extends Collection<T>> DataSyncCodec<C> collection(IntFunction<C> function, CombinedCodec<T> codec) {
+        return DataSyncCodec.of(ByteStreamCodec.collection(function, codec), DataCodec.collection(function, codec));
+    }
+
+    /** 组合编解码器：{@code List<T>}（{@link ArrayList ArrayList}）。 */
+    static <T> DataSyncCodec<List<T>> list(CombinedCodec<T> codec) {
+        return collection(ArrayList::new, codec);
+    }
+
+    /** 组合编解码器：{@code Set<T>}（{@link LinkedHashSet LinkedHashSet}）。 */
+    static <T> DataSyncCodec<Set<T>> set(CombinedCodec<T> codec) {
+        return collection(LinkedHashSet::new, codec);
+    }
+
+    /**
+     * 组合编解码器：{@code Map<K, V>}（网络与持久化各自走 key+value 条目编码）。
+     *
+     * @param function 按容量建 Map 的工厂（如 {@code HashMap::new}）
+     * @param keyCodec  key 组合编解码器
+     * @param valueCodec value 组合编解码器
+     */
+    static <K, V, M extends Map<K, V>> DataSyncCodec<M> map(IntFunction<M> function, CombinedCodec<K> keyCodec, CombinedCodec<V> valueCodec) {
+        return DataSyncCodec.of(ByteStreamCodec.map(function, keyCodec, valueCodec), DataCodec.map(function, keyCodec, valueCodec));
     }
 }
