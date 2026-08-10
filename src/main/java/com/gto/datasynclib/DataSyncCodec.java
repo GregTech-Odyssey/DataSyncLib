@@ -163,6 +163,20 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
         this.dataReader = dataReader;
     }
 
+    @Override
+    @SuppressWarnings("unchecked")
+    public DataCodec<T> toDataCodec() {
+        // dataWriter == dataReader means the same DataCodec was supplied (with matching type); return it directly.
+        return dataWriter == dataReader ? (DataCodec<T>) dataWriter : this;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public ByteStreamCodec<T> toStreamCodec() {
+        // streamWriter == streamReader means the same ByteStreamCodec was supplied; return it directly.
+        return streamWriter == streamReader ? (ByteStreamCodec<T>) streamWriter : this;
+    }
+
     // ===== ByteStreamCodec implementation =====
 
     @Override
