@@ -1,5 +1,18 @@
 # Changelog
 
+## 26.9.2 (2026-09-18)
+
+### Fixes
+- **Sync packet direction dispatch (fix)**: `DataSyncNetwork` no longer registers a separate handler per packet type *per direction*. Each packet type now has a single handler (`handleBlockEntity` / `handleEntity`) that selects the client→server or server→client path from `NetworkEvent.Context.getDirection().getOriginationSide()` and applies the payload with the matching `LogicalSide` (`SERVER` for C2S, `CLIENT` for S2C). This removes the direction-by-index coupling that let a packet be routed through the wrong side's handler.
+- The channel now registers two messages instead of four: index 0 = `BlockEntitySyncPacket`, index 1 = `EntitySyncPacket` (previously 0/1 = block entity C2S/S2C, 2/3 = entity C2S/S2C).
+
+### Changes
+- Build: publishing plugin `com.gto.gtopublishgradleplugin` bumped from 1.0.24 to 1.0.25.
+
+> **Note:** the message indices were renumbered while `PROTOCOL_VERSION` stayed `"1"` — do not mix 26.9.1 with older builds on the same connection.
+
+---
+
 ## 26.8.1 (2026-08-07)
 
 ### New Features

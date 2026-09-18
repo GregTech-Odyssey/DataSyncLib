@@ -197,7 +197,7 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
                     for (int i = 0; i < size; i++) {
                         array[i] = codec.decode(list.get(i), dataVersion);
                     }
-
+                    return array;
                 }
                 return (T[]) Array.newInstance(type, 0);
             }

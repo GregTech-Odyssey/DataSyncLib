@@ -8,7 +8,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -22,21 +21,11 @@ import java.util.function.Supplier;
 
 /**
  * Central network channel for DataSyncLib synchronization.
- * <p>
- * Provides a {@link SimpleChannel} with four registered message types:
- * <ul>
- *   <li>Index 0 — Block Entity C2S: client pushes field changes to the server</li>
- *   <li>Index 1 — Block Entity S2C: server pushes field changes to tracking clients</li>
- *   <li>Index 2 — Entity C2S: client pushes field changes to the server</li>
- *   <li>Index 3 — Entity S2C: server pushes field changes to tracking clients</li>
- * </ul>
- * <p>
- * The channel is initialized via {@link #init()} during mod construction.
  */
 @UtilityClass
 public class DataSyncNetwork {
 
-    private final String PROTOCOL_VERSION = "1";
+    private final String PROTOCOL_VERSION = "2";
     public final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             ResourceLocation.fromNamespaceAndPath(DataSyncLib.MOD_ID, "sync"),
             () -> PROTOCOL_VERSION,
@@ -59,49 +48,33 @@ public class DataSyncNetwork {
                 BlockEntitySyncPacket.class,
                 BlockEntitySyncPacket::encode,
                 BlockEntitySyncPacket::decode,
-                DataSyncNetwork::handleBlockEntityC2S);
+                DataSyncNetwork::handleBlockEntity);
 
-        // Index 1: Block Entity — Server → Client
+        // Index 1: Entity — Client → Server
         CHANNEL.registerMessage(1,
-                BlockEntitySyncPacket.class,
-                BlockEntitySyncPacket::encode,
-                BlockEntitySyncPacket::decode,
-                DataSyncNetwork::handleBlockEntityS2C);
-
-        // Index 2: Entity — Client → Server
-        CHANNEL.registerMessage(2,
                 EntitySyncPacket.class,
                 EntitySyncPacket::encode,
                 EntitySyncPacket::decode,
-                DataSyncNetwork::handleEntityC2S);
-
-        // Index 3: Entity — Server → Client
-        CHANNEL.registerMessage(3,
-                EntitySyncPacket.class,
-                EntitySyncPacket::encode,
-                EntitySyncPacket::decode,
-                DataSyncNetwork::handleEntityS2C);
+                DataSyncNetwork::handleEntity);
     }
 
     // ==================== Block Entity Handlers ====================
 
-    private void handleBlockEntityC2S(BlockEntitySyncPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        NetworkEvent.Context context = ctx.get();
-        context.enqueueWork(() -> {
-            ServerPlayer sender = context.getSender();
-            if (sender == null) return;
-            applyBlockEntitySyncData(sender.level(), packet.pos(), packet.data(), LogicalSide.SERVER);
-        });
-        context.setPacketHandled(true);
-    }
-
-    private void handleBlockEntityS2C(BlockEntitySyncPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        NetworkEvent.Context context = ctx.get();
-        context.enqueueWork(() -> {
-            var player = Minecraft.getInstance().player;
-            if (player == null) return;
-            applyBlockEntitySyncData(player.level(), packet.pos(), packet.data(), LogicalSide.CLIENT);
-        });
+    private void handleBlockEntity(BlockEntitySyncPacket packet, Supplier<NetworkEvent.Context> ctx) {
+        var context = ctx.get();
+        if (context.getDirection().getOriginationSide().isClient()) {
+            context.enqueueWork(() -> {
+                var sender = context.getSender();
+                if (sender == null) return;
+                applyBlockEntitySyncData(sender.level(), packet.pos(), packet.data(), LogicalSide.SERVER);
+            });
+        } else {
+            context.enqueueWork(() -> {
+                var player = Minecraft.getInstance().player;
+                if (player == null) return;
+                applyBlockEntitySyncData(player.level(), packet.pos(), packet.data(), LogicalSide.CLIENT);
+            });
+        }
         context.setPacketHandled(true);
     }
 
@@ -117,23 +90,21 @@ public class DataSyncNetwork {
 
     // ==================== Entity Handlers ====================
 
-    private void handleEntityC2S(EntitySyncPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        NetworkEvent.Context context = ctx.get();
-        context.enqueueWork(() -> {
-            ServerPlayer sender = context.getSender();
-            if (sender == null) return;
-            applyEntitySyncData(sender.level(), packet.entityId(), packet.data(), LogicalSide.SERVER);
-        });
-        context.setPacketHandled(true);
-    }
-
-    private void handleEntityS2C(EntitySyncPacket packet, Supplier<NetworkEvent.Context> ctx) {
-        NetworkEvent.Context context = ctx.get();
-        context.enqueueWork(() -> {
-            var player = Minecraft.getInstance().player;
-            if (player == null) return;
-            applyEntitySyncData(player.level(), packet.entityId(), packet.data(), LogicalSide.CLIENT);
-        });
+    private void handleEntity(EntitySyncPacket packet, Supplier<NetworkEvent.Context> ctx) {
+        var context = ctx.get();
+        if (context.getDirection().getOriginationSide().isClient()) {
+            context.enqueueWork(() -> {
+                var sender = context.getSender();
+                if (sender == null) return;
+                applyEntitySyncData(sender.level(), packet.entityId(), packet.data(), LogicalSide.SERVER);
+            });
+        } else {
+            context.enqueueWork(() -> {
+                var player = Minecraft.getInstance().player;
+                if (player == null) return;
+                applyEntitySyncData(player.level(), packet.entityId(), packet.data(), LogicalSide.CLIENT);
+            });
+        }
         context.setPacketHandled(true);
     }
 
