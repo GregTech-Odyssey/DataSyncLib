@@ -211,10 +211,11 @@ Supports generic superclasses, generic interfaces (`List<T>`), multi-level inher
 |------------|---------|---------------|
 | `@SyncToClient` | Server→Client sync | `autoUpdate` (default true), `notifyUpdate`, `condition`, `listener` |
 | `@SyncToServer` | Client→Server sync | `autoUpdate` (default true), `notifyUpdate`, `condition`, `listener` |
-| `@SaveToDisk` | Disk persistence | `key`, `condition`, `saveNull`, `defaultValue`, `defaultValueGetter` |
+| `@SaveToDisk` | Disk persistence | `key`, `condition`, `saveNull`, `defaultValue`, `defaultValueGetter`, `listener` (disk-load callback) |
 | `@Access` | Force access-mode (for containers) | `createInstance` |
 | `@AdditionalHolder` | Recursively scan nested object fields, or spawn a dedicated child manager | `childManager` (true = child-manager mode) |
 | `@Codec` | Custom serialization | `saveCodec` / `syncCodec` / `writeToData` / `readFromData` etc. |
+| `@Conversion` | Store/sync a field as another type via static `Function`s | `getFunction` (required), `setFunction` (optional) |
 | `@Strategy` | Custom change detection strategy | `value` (static field name) |
 | `@Generic` | Force generic-type factory resolution | — |
 | `@AddToManager` | Add to manager without auto sync/persist | — |
@@ -236,8 +237,8 @@ Server tick()
   │     └── CHANNEL.send(TRACKING_CHUNK, packet)
   │
 Client receive
-  ├── handleBlockEntityS2C()
-        ├── applyBlockEntitySyncData()
+  ├── handleBlockEntity()          (single handler; direction resolved from getOriginationSide())
+        ├── applyBlockEntitySyncData(level, pos, data, CLIENT)
         │     └── FieldDataManager.readFromNetworkBuffer(CLIENT, data)
         │           ├── readCustomSyncData()
         │           ├── while buf: readVarInt(index) → field.readFromBuffer()

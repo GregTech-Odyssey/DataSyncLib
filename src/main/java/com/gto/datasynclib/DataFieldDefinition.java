@@ -151,6 +151,14 @@ public final class DataFieldDefinition<T> {
     private final MethodHandle writeToBuffer;
     private final MethodHandle readFromBuffer;
     private final VarHandle handle;
+    /**
+     * Adapted handle for {@code @SaveToDisk(listener = "...")}, or {@code null} when the
+     * annotation declares no listener. Signature is {@code (Object source, T value) void}:
+     * reference parameters are widened to {@code Object}, primitive ones are kept exact, so
+     * {@link #getSaveListener()} callers must pass the field value with its declared
+     * (primitive) type to satisfy {@code invokeExact}.
+     */
+    private final MethodHandle saveListenerHandle;
     private final MethodHandle clientListenerHandle;
     private final MethodHandle serverListenerHandle;
 
@@ -190,6 +198,7 @@ public final class DataFieldDefinition<T> {
         this.writeToBuffer = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.writeToBuffer());
         this.readFromBuffer = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.readFromBuffer());
 
+        this.saveListenerHandle = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.readSaveListener());
         this.clientListenerHandle = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.clientUpdateListener());
         this.serverListenerHandle = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.serverUpdateListener());
         this.saveCondition = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.saveCondition(), boolean.class);
@@ -505,7 +514,8 @@ public final class DataFieldDefinition<T> {
      * the actual field. For example, a {@code Map<String, Tag>} value would be converted
      * back to {@code CompoundTag} before storage.</p>
      *
-     * <p>This is a no-op if the field is {@code final} ({@code setter == null}).</p>
+     * <p>This is a no-op if the field is {@code final} — final fields are read through
+     * {@code @Conversion} or access-mode collections instead, and never written back.</p>
      *
      * @param source the object instance to write the field to
      * @param value  the value to set (in the managed type, before reverse conversion)
@@ -585,6 +595,36 @@ public final class DataFieldDefinition<T> {
 
     public MethodHandle getListener(LogicalSide side) {
         return side.isClient() ? clientListenerHandle : serverListenerHandle;
+    }
+
+    /**
+     * Returns the disk-load listener declared via {@code @SaveToDisk(listener = "...")}.
+     *
+     * <p>The handle is {@code (Object source, T value) void}; {@code value} is the value that
+     * has just been restored from disk, and is {@code null} for container/{@code createInstance}
+     * fields stored as a null marker. Invoke it with
+     * {@link MethodHandle#invokeExact(Object, Object)} (exact static argument types!) after the
+     * value has been applied to the field:</p>
+     *
+     * <pre>{@code
+     * var listener = definition.getSaveListener();
+     * if (listener != null) {
+     *     try {
+     *         listener.invokeExact(source, value);
+     *     } catch (Throwable e) {
+     *         throw new RuntimeException(e);
+     *     }
+     * }
+     * }</pre>
+     *
+     * <p>Called by the {@code readFromData} implementations only — the network sync path
+     * ({@code readFromBuffer}) deliberately leaves it untouched.</p>
+     *
+     * @return the load-listener handle, or {@code null} if the field declares none
+     * @see com.gto.datasynclib.annotations.SaveToDisk#listener()
+     */
+    public MethodHandle getSaveListener() {
+        return saveListenerHandle;
     }
 
     boolean notifyUpdate(LogicalSide side) {

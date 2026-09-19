@@ -21,14 +21,30 @@ import java.util.function.IntFunction;
  *
  * <p>Extends both {@link ByteStreamDecoder} and {@link ByteStreamEncoder} for bidirectional
  * serialization. Contains built-in codec constants for all Java primitives, arrays, String,
- * UUID, and BigInteger — each auto-registering in the global {@link Codecs} registry.
+ * UUID, and BigInteger. Each constant registers itself in this interface's own {@code Codecs}
+ * table on class initialization; that table is currently write-only
+ * ({@code ByteStreamCodec.getCodec} has no callers), so runtime type lookup goes through
+ * {@link com.gto.datasynclib.DataSyncCodec#get(Class)}.
  *
  * <p>Factory methods {@link #of} adapt from {@link DataCodec} or Mojang {@link com.mojang.serialization.Codec}.
+ * {@link #convert} adapts an existing codec with converter functions, while
+ * {@link #map} / {@link #collection} / {@link #array} build container codecs.</p>
+ *
+ * <h3>Performance: the helper paths box</h3>
+ * <p>{@link #convert}, {@link #map}, {@link #collection} and {@link #array} are generic over the
+ * element type, so primitive elements are boxed on the way in and out. Use them for object
+ * payloads; for a type that is a few primitives and is synchronized often, prefer a hand-written
+ * pair ({@link com.gto.datasynclib.util.StreamCodecs#VEC3I_CODEC} shows the shape) — primitive
+ * <em>arrays</em> already have primitive-backed codecs, so {@link #array} is only needed for
+ * object arrays.</p>
  *
  * @param <T> the type this codec can encode and decode
  */
 public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEncoder<T> {
 
+    /**
+     * Pairs an independent encoder and decoder into a codec.
+     */
     static <T> ByteStreamCodec<T> of(ByteStreamEncoder<? super T> encoder, ByteStreamDecoder<? extends T> decoder) {
         return new ByteStreamCodec<>() {
 
@@ -44,6 +60,12 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         };
     }
 
+    /**
+     * Adapts a disk codec by writing its {@link Data} payload inline
+     * ({@link Data#writeData(FriendlyByteBuf, Data)}) — same layout as the persistence form,
+     * without the extra length-prefixed byte array used by
+     * {@link com.gto.datasynclib.DataSyncCodec#of(DataCodec)}.
+     */
     static <T> ByteStreamCodec<T> of(DataCodec<T> codec) {
         return new ByteStreamCodec<>() {
 
@@ -59,6 +81,12 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         };
     }
 
+    /**
+     * Adapts a Mojang DFU {@link Codec} through {@link DataOps#INSTANCE}.
+     *
+     * <p>Failures surface as thrown exceptions from the {@code orElseThrow()} calls rather than
+     * as a {@code DataResult} error, so this adapter is only safe for trusted data.</p>
+     */
     static <T> ByteStreamCodec<T> of(Codec<T> codec) {
         return new ByteStreamCodec<>() {
 
@@ -74,6 +102,16 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         };
     }
 
+    /**
+     * Adapts a codec of another type through a pair of converter functions.
+     *
+     * <p>Both directions pass through the generic value, so a primitive-based {@code V}/{@code K}
+     * is boxed on every encode and decode; see the class documentation for when to hand-write.</p>
+     *
+     * @param codec           codec of the transported type {@code K}
+     * @param encodeConverter {@code V -> K}, applied before encoding
+     * @param decodeConverter {@code K -> V}, applied after decoding
+     */
     static <K, V> ByteStreamCodec<V> convert(ByteStreamCodec<K> codec, Function<? super V, ? extends K> encodeConverter, Function<? super K, ? extends V> decodeConverter) {
         return new ByteStreamCodec<>() {
 
@@ -89,6 +127,13 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         };
     }
 
+    /**
+     * Map codec: writes a VarInt size followed by the key/value pairs.
+     * Decoding reads exactly {@code size} pairs, so no empty-container special case is needed.
+     * Keys and values travel as boxed generic types.
+     *
+     * @param function factory that creates the map by expected size (e.g. {@code HashMap::new})
+     */
     static <K, V, M extends Map<K, V>> ByteStreamCodec<M> map(IntFunction<M> function, ByteStreamCodec<K> keyCodec, ByteStreamCodec<V> valueCodec) {
         return new ByteStreamCodec<>() {
 
@@ -113,9 +158,15 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         };
     }
 
+    /**
+     * Collection codec: writes a VarInt size followed by the elements, and reads exactly that
+     * many elements back (no empty-container special case). Elements travel as boxed generic
+     * types.
+     *
+     * @param function factory that creates the collection by expected size (e.g. {@code ArrayList::new})
+     */
     static <T, C extends Collection<T>> ByteStreamCodec<C> collection(IntFunction<C> function, ByteStreamCodec<T> codec) {
         return new ByteStreamCodec<>() {
-
 
             @Override
             public void encode(FriendlyByteBuf buf, C obj) {
@@ -133,9 +184,14 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         };
     }
 
+    /**
+     * Object-array codec: writes a VarInt length followed by the elements. The length comes from
+     * the payload, so a corrupt or hostile size can allocate an arbitrarily large array.
+     * Elements travel as boxed generic types; a <em>primitive</em> array has its own
+     * primitive-backed codec ({@code INTS_CODEC}, {@code LONGS_CODEC}, …) and does not need this.
+     */
     static <T> ByteStreamCodec<T[]> array(Class<T> type, ByteStreamCodec<T> codec) {
         return new ByteStreamCodec<>() {
-
 
             @Override
             public void encode(FriendlyByteBuf buf, T[] obj) {

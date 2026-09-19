@@ -7,21 +7,23 @@ import com.gto.datasynclib.datastream.data.LongArrayData;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import net.minecraft.network.FriendlyByteBuf;
+import org.apache.commons.lang3.ArrayUtils;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Arrays;
 
 /**
- * Synchronizes an {@code double[]} primitive array with <strong>in-place</strong> mutation.
+ * Synchronizes a {@code double[]} primitive array with <strong>in-place</strong> mutation.
  *
  * <h3>Change detection:</h3>
- * <p>Uses {@link Arrays#hashCode(double[])} for fast content-based change detection.
+ * <p>Compares the array against a retained snapshot with {@link Arrays#equals(double[], double[])}, so the common (unchanged) case is an exact, vectorized, allocation-free check (no hash collisions); the snapshot costs one extra {@code double[]} per holder, and a detected change copies the array into it.
  * The array reference is fixed ({@code final} field), so only content changes are tracked.</p>
  *
  * <h3>Network format:</h3>
- * <p>Individual VarInt-encoded elements, one per array slot. The array length is NOT
- * transmitted — both sides must agree on the length (typically fixed-size arrays).
- * Each element is written/read in order, overwriting the existing array contents in-place.</p>
+ * <p>Individual {@code double} elements, one per array slot ({@code writeDouble}/{@code readDouble}).
+ * The array length is NOT transmitted — both sides must agree on the length (typically
+ * fixed-size arrays). Each element is written/read in order, overwriting the existing array
+ * contents in-place.</p>
  *
  * <h3>Persistence format:</h3>
  * <p>Writes as {@link LongArrayData}. Skips writing
@@ -31,7 +33,10 @@ import java.util.Arrays;
  */
 public final class DoubleArrayAccess extends AbstractFieldAccess<double[]> {
 
-    private int hashCode;
+    /**
+     * Last seen contents, compared with {@link Arrays#equals(double[], double[])}.
+     */
+    private double[] snapshot = ArrayUtils.EMPTY_DOUBLE_ARRAY;
 
     public DoubleArrayAccess(DataFieldDefinition<double[]> definition) {
         super(definition);
@@ -39,9 +44,8 @@ public final class DoubleArrayAccess extends AbstractFieldAccess<double[]> {
 
     @Override
     protected boolean hasChange(@NotNull LogicalSide side, double @NotNull [] instance, boolean autoOnly) {
-        var hashCode = Arrays.hashCode(instance);
-        if (hashCode != this.hashCode) {
-            this.hashCode = hashCode;
+        if (!Arrays.equals(snapshot, instance)) {
+            snapshot = instance.clone();
             return true;
         }
         return false;

@@ -29,7 +29,8 @@ import java.lang.reflect.*;
  *   <li><strong>Value parsing</strong> — {@link #parse(Class, String)} converts annotation
  *       string values to their typed equivalents (primitives, strings, enums)</li>
  *   <li><strong>Method resolution</strong> — {@link #getAccessibleMethod(Class, String, Class...)}
- *       finds methods declared on a class or inherited, setting them accessible</li>
+ *       finds methods declared on a class or inherited public ones (callers are responsible
+ *       for calling {@code setAccessible(true)} when needed)</li>
  * </ul>
  *
  * @see com.gto.datasynclib.FieldDefinitionStorage
@@ -128,7 +129,6 @@ public final class ReflectUtil {
                 return resolveType(array.getGenericComponentType(), bindings) instanceof Class<?> component
                         ? Array.newInstance(component, 0).getClass()
                         : type;
-                // Preserve array shape; the component is resolved best-effort to a raw class.
             }
             case ParameterizedType parameterized -> {
                 Type[] args = parameterized.getActualTypeArguments();
@@ -336,12 +336,13 @@ public final class ReflectUtil {
      * Finds a method by name and parameter types, searching the declaring class first
      * (including private methods) then inherited public methods.
      *
-     * <p>The returned method has {@code setAccessible(true)} already called.</p>
+     * <p>Accessibility is <em>not</em> changed here — callers that need private access must
+     * call {@link Method#setAccessible(boolean)} on the returned method themselves.</p>
      *
      * @param clazz          the class to search
      * @param name           the method name
      * @param parameterTypes the parameter types for overload resolution
-     * @return the accessible {@link Method}, never null
+     * @return the resolved {@link Method}, never null
      * @throws RuntimeException wrapping {@link NoSuchMethodException} if not found
      */
     public Method getAccessibleMethod(Class<?> clazz, String name, Class<?>... parameterTypes) {

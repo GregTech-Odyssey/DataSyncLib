@@ -14,8 +14,10 @@ import java.lang.annotation.Target;
  * changes and delegating to the container's own change detection).</p>
  *
  * <p>This is useful for mutable containers (collections, maps, arrays) where the field
- * reference never changes but the <em>contents</em> do. Without this annotation, the
- * system would compare by reference identity alone and miss internal mutations.</p>
+ * reference never changes but the <em>contents</em> do. Without this annotation such a
+ * field is handled in value-mode: the value is compared through the field's
+ * {@code Hash.Strategy} (content-based for collections/maps/arrays, but snapshot-based for
+ * plain objects), so in-place mutations of a nested sub-object can go unnoticed.</p>
  *
  * <h3>When to use:</h3>
  * <ul>

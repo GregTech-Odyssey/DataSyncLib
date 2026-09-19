@@ -53,7 +53,6 @@ public final class DataOps implements DynamicOps<Data> {
     public <U> U convertTo(DynamicOps<U> outOps, Data input) {
         return switch (input.getId()) {
             case Data.NULL -> outOps.empty();
-            case Data.BOOLEAN -> outOps.createBoolean(input.getBoolean());
             case Data.BYTE -> outOps.createByte(input.getByte());
             case Data.SHORT -> outOps.createShort(input.getShort());
             case Data.INT -> outOps.createInt(input.getInt());

@@ -38,9 +38,11 @@ import java.util.function.Function;
  * </ul>
  *
  * <h3>Thread-safety:</h3>
- * <p>The {@link #frozen} flag is {@code volatile}. Registration and freeze/unfreeze
- * operations are {@code synchronized}. Read operations ({@code get()}, {@code getId()},
- * iteration) are lock-free and safe after freezing.</p>
+ * <p>The {@link #frozen} flag is {@code volatile}. {@link #register(Comparable, Object)} and
+ * {@link #replace(Comparable, Object)} synchronize on {@code this}; {@link #freeze()} and
+ * {@link #unfreeze()} do <em>not</em> — call them from the owning thread (normally mod
+ * construction). Read operations ({@code get()}, {@code getId()}, iteration) are lock-free
+ * and safe after freezing.</p>
  *
  * @param <K> the key type (must be {@link Comparable})
  * @param <V> the value type
@@ -152,6 +154,12 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
         }
     }
 
+    /**
+     * Registers a value under the given key.
+     *
+     * @return the registered value
+     * @throws IllegalStateException if the registry is frozen or the key is already present
+     */
     public <T extends V> T register(K key, T value) {
         synchronized (this) {
             if (frozen) throw new IllegalStateException("Registry %s has been frozen".formatted(name));
@@ -161,6 +169,12 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
         return value;
     }
 
+    /**
+     * Replaces the value already registered under the given key.
+     *
+     * @return the replacement value
+     * @throws IllegalStateException if the registry is frozen or the key is not registered
+     */
     public <T extends V> T replace(K key, T value) {
         synchronized (this) {
             if (frozen) throw new IllegalStateException("Registry %s has been frozen".formatted(name));
@@ -171,33 +185,60 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
         return value;
     }
 
+    /**
+     * @return whether a value is registered under {@code key}
+     */
     public final boolean containsKey(K key) {
         return keyValues.containsKey(key);
     }
 
+    /**
+     * @return whether {@code value} is registered (identity-based lookup)
+     */
     public final boolean containsValue(V value) {
         return valueKeys.containsKey(value);
     }
 
+    /**
+     * Looks a value up by its stable integer id. Ids are assigned by {@link #freeze()}, which
+     * numbers the entries in key order — the same id therefore denotes the same entry on both
+     * sides as long as the registered keys match.
+     *
+     * @throws IndexOutOfBoundsException if no value has that id
+     */
     public final V get(int id) {
         return idValues.get(id);
     }
 
+    /**
+     * @return the value registered under {@code key}, or {@code null} if absent
+     */
     @Nullable
     public final V get(K key) {
         return keyValues.get(key);
     }
 
+    /**
+     * @return the value registered under {@code key}, or {@code defaultValue} if absent
+     */
     public final V getOrDefault(K key, V defaultValue) {
         return keyValues.getOrDefault(key, defaultValue);
     }
 
+    /**
+     * @return the stable integer id of {@code value}
+     * @throws NullPointerException if the value is not part of this registry
+     */
     public final int getId(V value) {
         var entry = valueKeys.get(value);
         if (entry == null) throw new NullPointerException("Value not found in registry: " + value);
         return entry.priority;
     }
 
+    /**
+     * Derives the registry key of a value through {@code keyGetter} — by default a reverse
+     * lookup in the value map.
+     */
     public final K getKey(V value) {
         return keyGetter.apply(value);
     }
@@ -211,19 +252,31 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
         return entry.value;
     }
 
+    /**
+     * @return the registered values, in id order (a live view)
+     */
     public Set<V> values() {
         return valueKeys.keySet();
     }
 
+    /**
+     * @return the registered keys, in insertion order (a live view)
+     */
     public Set<K> keys() {
         return keyValues.keySet();
     }
 
+    /**
+     * Iterates the registered values in id order.
+     */
     @Override
     public @NotNull Iterator<V> iterator() {
         return valueKeys.keySet().iterator();
     }
 
+    /**
+     * Iterates the registered values in id order.
+     */
     @Override
     public void forEach(Consumer<? super V> action) {
         valueKeys.keySet().forEach(action);
@@ -234,10 +287,16 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
         return valueKeys.keySet().spliterator();
     }
 
+    /**
+     * Iterates the registered keys in insertion order.
+     */
     public void forEachKey(Consumer<? super K> action) {
         keyValues.keySet().forEach(action);
     }
 
+    /**
+     * Iterates key/value pairs in insertion order.
+     */
     public void forEachKeyValue(BiConsumer<? super K, ? super V> action) {
         keyValues.forEach(action);
     }
@@ -253,14 +312,28 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
         return dataCodec;
     }
 
+    /**
+     * @return the cached network codec: values are written as their stable VarInt id, so this
+     * form is compact but only valid between peers whose registries match
+     */
     public final ByteStreamCodec<V> streamCodec() {
         return streamCodec;
     }
 
+    /**
+     * @return the combined (stream + data) codec, created once at construction time; equals
+     * {@link DataSyncCodec#of(ByteStreamCodec, DataCodec)} of {@link #streamCodec()} and
+     * {@link #dataCodec()}
+     */
     public final DataSyncCodec<V> combinedCodec() {
         return combinedCodec;
     }
 
+    /**
+     * Builds a Mojang DFU codec that maps registry keys to values in both directions.
+     *
+     * @param keyCodec the codec used for the key, e.g. {@code Codec.STRING}
+     */
     public Codec<V> codec(Codec<K> keyCodec) {
         return keyCodec.xmap(keyValues::get, this::getKey);
     }

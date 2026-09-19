@@ -212,10 +212,11 @@ Class<?>[] args = ReflectUtil.getResolvedGenericArguments(fieldType, HashMap.cla
 |------|------|---------|
 | `@SyncToClient` | 服务端→客户端同步 | `autoUpdate`（默认 true）、`notifyUpdate`、`condition`、`listener` |
 | `@SyncToServer` | 客户端→服务端同步 | `autoUpdate`（默认 true）、`notifyUpdate`、`condition`、`listener` |
-| `@SaveToDisk` | 磁盘持久化 | `key`（自定义键名）、`condition`、`saveNull`、`defaultValue` |
+| `@SaveToDisk` | 磁盘持久化 | `key`（自定义键名）、`condition`、`saveNull`、`defaultValue`、`listener`（磁盘加载回调） |
 | `@Access` | 强制使用访问模式（容器类） | `createInstance` |
 | `@AdditionalHolder` | 递归扫描嵌套对象字段，或为子对象生成独立子管理器 | `childManager`（true=子管理器模式） |
 | `@Codec` | 自定义序列化方式 | `saveCodec` / `syncCodec` / `writeToData` 等 |
+| `@Conversion` | 以另一种类型存储/同步字段（静态 `Function`） | `getFunction`（必填）、`setFunction`（可选） |
 | `@Strategy` | 自定义变更检测策略 | `value`（static 字段名） |
 | `@Generic` | 强制使用泛型工厂链 | — |
 | `@AddToManager` | 加入管理但不自动同步/持久化 | — |
@@ -237,8 +238,8 @@ Class<?>[] args = ReflectUtil.getResolvedGenericArguments(fieldType, HashMap.cla
   │     └── CHANNEL.send(TRACKING_CHUNK, packet)
   │
 客户端接收
-  ├── handleBlockEntityS2C()
-        ├── applyBlockEntitySyncData()
+  ├── handleBlockEntity()       （单一处理器，方向由 getOriginationSide() 判定）
+        ├── applyBlockEntitySyncData(level, pos, data, CLIENT)
         │     └── FieldDataManager.readFromNetworkBuffer(CLIENT, data)
         │           ├── readCustomSyncData()
         │           ├── while buf: readVarInt(索引) → field.readFromBuffer()

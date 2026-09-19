@@ -8,11 +8,19 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Objects;
 
 /**
- * Configurable hash/equality strategy for ItemStack comparison.
- * Provides ITEM, ITEM_AND_TAG, and ALL comparison levels.
+ * Pre-built hash/equality strategies for {@link ItemStack} change detection, from coarsest to
+ * finest. {@code DataSyncLib} registers {@link #ALL} for {@code ItemStack} fields by default;
+ * pick another one with {@code @Strategy("ITEM")} on the field, or register your own via
+ * {@link com.gto.datasynclib.FieldDefinitionStorage#registerStrategy(Class, Hash.Strategy)}.
+ *
+ * <p>All three treat {@code null} and an empty stack as equal, so an emptied slot does not
+ * count as a change against a never-filled one.</p>
  */
 public interface ItemStackHashStrategy extends Hash.Strategy<ItemStack> {
 
+    /**
+     * Item, count and NBT must all match. Registered by default for {@code ItemStack} fields.
+     */
     ItemStackHashStrategy ALL = new ItemStackHashStrategy() {
 
         @Override
@@ -34,6 +42,9 @@ public interface ItemStackHashStrategy extends Hash.Strategy<ItemStack> {
         }
     };
 
+    /**
+     * Item and NBT must match; the count is ignored.
+     */
     ItemStackHashStrategy ITEM_AND_TAG = new ItemStackHashStrategy() {
 
         @Override
@@ -54,6 +65,9 @@ public interface ItemStackHashStrategy extends Hash.Strategy<ItemStack> {
         }
     };
 
+    /**
+     * Only the item type must match; count and NBT are ignored.
+     */
     ItemStackHashStrategy ITEM = new ItemStackHashStrategy() {
 
         @Override

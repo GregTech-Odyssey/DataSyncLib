@@ -26,16 +26,39 @@ import java.util.function.IntFunction;
  * persistent storage.
  *
  * <p>Extends both {@link DataDecoder} and {@link DataEncoder} for bidirectional serialization.
- * Contains built-in codec constants for all Java primitives, arrays, String, UUID, and BigInteger —
- * each auto-registering in the global {@link Codecs} registry.
+ * Contains built-in codec constants for all Java primitives, arrays, String, UUID, and BigInteger.
+ * Each constant registers itself in this interface's own {@code Codecs} table on class
+ * initialization; that table is currently write-only ({@code DataCodec.getCodec} has no callers),
+ * so runtime type lookup goes through {@link com.gto.datasynclib.DataSyncCodec#get(Class)}.</p>
  *
  * <p>Factory methods {@link #of} adapt from {@link ByteStreamCodec}, Mojang {@link com.mojang.serialization.Codec},
- * or custom encoder/decoder pairs. The {@link #map} method creates adapted codecs with converter functions.
+ * or custom encoder/decoder pairs. {@link #convert} adapts an existing codec with converter
+ * functions, while {@link #map} / {@link #collection} / {@link #array} build container codecs.</p>
+ *
+ * <h3>Performance: the helper paths box</h3>
+ * <p>Every helper below is generic over the payload type, so its components are <em>boxed</em>:
+ * {@link #convert} adapts through generic converter functions, and {@link #map} /
+ * {@link #collection} iterate the container with boxed keys/values and write the data side as a
+ * {@code ListData} tuple. That is the right choice for object payloads and for {@code java.util}
+ * containers (whose elements are boxed by definition), but it is pure overhead for a type that is
+ * a few primitives and is synchronized often — write that pair by hand and use the scalar
+ * {@code Data} types directly, the way {@link com.gto.datasynclib.util.DataCodecs#VEC3I_CODEC}
+ * does. Primitive <em>arrays</em> are already covered by primitive-backed codecs
+ * ({@code BOOLEANS_CODEC}, {@code INTS_CODEC}, {@code LONGS_CODEC}, …), so {@link #array} is only
+ * needed for object arrays. {@link #of(ByteStreamCodec)} additionally round-trips through an
+ * intermediate buffer, which is convenient but not free either.</p>
  *
  * @param <T> the type this codec can encode and decode
  */
 public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
 
+    /**
+     * Lifts this codec to a Mojang DFU {@link Codec} that transports the Data payload as a byte
+     * list, so it can be used wherever a DFU codec is expected.
+     *
+     * @param dataVersion version handed to {@link DataDecoder#decode(Data, int)} on the way back
+     *                    in; it is not recorded in the encoded form
+     */
     default Codec<T> toCodec(int dataVersion) {
         var codec = this;
         return new Codec<>() {
@@ -52,6 +75,11 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         };
     }
 
+    /**
+     * Adapts a network codec: the stream bytes are carried inside a
+     * {@link com.gto.datasynclib.datastream.data.ByteArrayData}, so the disk form mirrors the
+     * wire form at the cost of an extra buffer round-trip.
+     */
     static <T> DataCodec<T> of(ByteStreamCodec<T> codec) {
         return new DataCodec<>() {
 
@@ -83,6 +111,13 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         };
     }
 
+    /**
+     * Adapts a Mojang DFU {@link Codec} through {@link DataOps#INSTANCE}.
+     *
+     * <p>Failures surface as thrown {@link java.util.NoSuchElementException} /
+     * {@code JsonParseException} from the {@code orElseThrow()} calls rather than as a
+     * {@code DataResult} error, so this adapter is only safe for trusted data.</p>
+     */
     static <T> DataCodec<T> of(Codec<T> codec) {
         return new DataCodec<>() {
 
@@ -98,6 +133,9 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         };
     }
 
+    /**
+     * Pairs an independent encoder and decoder into a codec.
+     */
     static <T> DataCodec<T> of(DataEncoder<? super T> encoder, DataDecoder<? extends T> decoder) {
         return new DataCodec<>() {
 
@@ -113,6 +151,16 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         };
     }
 
+    /**
+     * Adapts a codec of another type through a pair of converter functions.
+     *
+     * <p>Both directions pass through the generic value, so a primitive-based {@code V}/{@code K}
+     * is boxed twice per round-trip; see the class documentation for when to hand-write instead.</p>
+     *
+     * @param codec           codec of the stored type {@code K}
+     * @param encodeConverter {@code V -> K}, applied before encoding
+     * @param decodeConverter {@code K -> V}, applied after decoding
+     */
     static <K, V> DataCodec<V> convert(DataCodec<K> codec, Function<? super V, ? extends K> encodeConverter, Function<? super K, ? extends V> decodeConverter) {
         return new DataCodec<>() {
 
@@ -128,6 +176,16 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         };
     }
 
+    /**
+     * Map codec: encodes as a flat {@link ListData} of alternating keys and values.
+     *
+     * <p>Decoding requires a {@code ListData} with more than one entry; anything else (including
+     * a {@code null} marker or an empty list) yields {@code function.apply(1)} — an empty map —
+     * rather than {@code null}. Note that a truncated payload is read positionally without a
+     * bounds guard, and that keys/values travel as boxed generic types.</p>
+     *
+     * @param function factory that creates the map by expected size (e.g. {@code HashMap::new})
+     */
     static <K, V, M extends Map<K, V>> DataCodec<M> map(IntFunction<M> function, DataCodec<K> keyCodec, DataCodec<V> valueCodec) {
         return new DataCodec<>() {
 
@@ -155,6 +213,14 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         };
     }
 
+    /**
+     * Collection codec: encodes as a {@link ListData} with no length prefix.
+     *
+     * <p>A non-list or empty payload decodes to {@code function.apply(1)} — an empty collection —
+     * rather than {@code null}. Elements travel as boxed generic types.</p>
+     *
+     * @param function factory that creates the collection by expected size (e.g. {@code ArrayList::new})
+     */
     static <T, C extends Collection<T>> DataCodec<C> collection(IntFunction<C> function, DataCodec<T> codec) {
         return new DataCodec<>() {
 
@@ -177,6 +243,14 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         };
     }
 
+    /**
+     * Object-array codec: encodes as a {@link ListData}.
+     *
+     * <p>A non-list or empty payload decodes to a zero-length array of {@code type}
+     * ({@code Array.newInstance(type, 0)}); elements travel as boxed generic types. A
+     * <em>primitive</em> array has its own primitive-backed codec
+     * ({@code BOOLEANS_CODEC}, {@code INTS_CODEC}, {@code LONGS_CODEC}, …) and does not need this.</p>
+     */
     static <T> DataCodec<T[]> array(Class<T> type, DataCodec<T> codec) {
         return new DataCodec<>() {
 

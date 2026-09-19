@@ -13,6 +13,15 @@ import org.jetbrains.annotations.NotNull;
  * compares hashCode() for quick mismatch detection, then falls back to the definition's
  * strategy.equals() for full equality comparison. Handles null-vs-value encoding in both
  * buffer and data serialization.
+ *
+ * <h3>Null handling:</h3>
+ * <ul>
+ *   <li>Network: a null value is written as a {@code false} presence flag, otherwise
+ *       {@code true} followed by the encoded value.</li>
+ *   <li>Disk: a null value becomes {@link NullData#INSTANCE} (and {@link NullData#INSTANCE}
+ *       reads back as null); the {@code skipSave}/default-value filters are applied only to
+ *       non-null values, and a suppressed field is signalled with {@link NullData#NONE}.</li>
+ * </ul>
  */
 public abstract class ObjField<T> extends AbstractField<T> {
 
@@ -82,7 +91,6 @@ public abstract class ObjField<T> extends AbstractField<T> {
         }
     }
 
-    @SuppressWarnings("ConstantValue")
     @Override
     public final void readFromData(@NotNull Object source, @NotNull Data data, int dataVersion) {
         T value;
@@ -90,16 +98,41 @@ public abstract class ObjField<T> extends AbstractField<T> {
             value = null;
         } else {
             value = read(source, data, dataVersion);
-            if (value == null) return;
         }
         definition.set(source, value);
+        // Load listener (@SaveToDisk(listener = "...")): `value` is the decoded value, or null when
+        // the stored entry is a null marker. Never called on the sync path.
+        var listener = definition.getSaveListener();
+        if (listener != null) {
+            try {
+                listener.invokeExact(source, value);
+            } catch (Throwable e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
+    /**
+     * Encodes a non-null value into the network buffer.
+     * The {@code null} case is handled by {@link #writeToBuffer} before this is called.
+     */
     protected abstract void write(@NotNull Object source, @NotNull FriendlyByteBuf data, @NotNull T value);
 
+    /**
+     * Decodes a value from the network buffer; never asked to decode {@code null}.
+     */
     protected abstract @NotNull T read(@NotNull Object source, @NotNull FriendlyByteBuf data);
 
+    /**
+     * Encodes a non-null value into a {@link Data} tree. Returning {@link NullData#NONE}
+     * suppresses the field; {@code null} is handled by {@link #writeToData} instead.
+     */
     protected abstract @NotNull Data write(@NotNull Object source, @NotNull T value);
 
+    /**
+     * Decodes a value from a {@link Data} tree.
+     *
+     * @param dataVersion the format version recorded when the data was written, for migration
+     */
     protected abstract @NotNull T read(@NotNull Object source, @NotNull Data data, int dataVersion);
 }

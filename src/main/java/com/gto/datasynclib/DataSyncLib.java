@@ -5,13 +5,17 @@ import com.gto.datasynclib.field.access.*;
 import com.gto.datasynclib.field.access.array.*;
 import com.gto.datasynclib.field.object.CustomObjCodecField;
 import com.gto.datasynclib.field.object.ObjCodecField;
+import com.gto.datasynclib.forge.TagSerializableAccess;
+import com.gto.datasynclib.forge.TagSerializableArrayAccess;
 import com.gto.datasynclib.network.DataSyncNetwork;
 import com.gto.datasynclib.test.ModBlockEntities;
 import com.gto.datasynclib.test.ModBlocks;
 import com.gto.datasynclib.test.ModEntityTypes;
 import com.gto.datasynclib.test.ModItems;
 import com.gto.datasynclib.util.EnumUtil;
+import com.gto.datasynclib.util.FluidStackArrayHashStrategy;
 import com.gto.datasynclib.util.FluidStackHashStrategy;
+import com.gto.datasynclib.util.ItemStackArrayHashStrategy;
 import com.gto.datasynclib.util.ItemStackHashStrategy;
 import com.gto.datasynclib.util.NbtUtil;
 import it.unimi.dsi.fastutil.ints.IntCollection;
@@ -22,6 +26,7 @@ import it.unimi.dsi.fastutil.objects.Reference2IntMap;
 import it.unimi.dsi.fastutil.objects.Reference2LongMap;
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.common.util.INBTSerializable;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -40,18 +45,24 @@ import static com.gto.datasynclib.FieldDefinitionStorage.*;
  *
  * <p>During construction, this class initializes all subsystems in order:
  * <ol>
- *   <li><strong>Codec registry</strong> — {@link DataSyncCodec#init()} triggers static
- *       initialization of all pre-registered codecs (primitives, arrays, Minecraft types)</li>
+ *   <li><strong>Codec registry</strong> — every pre-registered codec registers itself while
+ *       {@link DataSyncCodec} is class-initialized (primitive-payload types such as
+ *       {@code Vec3i}/{@code SectionPos}/{@code AABB} use hand-written codec pairs, and
+ *       {@code GlobalPos} is composed with {@code CombinedCodec.composite});
+ *       {@link DataSyncCodec#init()} is a no-op kept for compatibility</li>
  *   <li><strong>Network channel</strong> — {@link DataSyncNetwork#init()} registers
  *       the Forge SimpleChannel and message handlers</li>
  *   <li><strong>Field factories</strong> — registers {@link DataField} factories for
  *       primitive types (exact match) and codec-backed object types (predicate match)</li>
  *   <li><strong>Access factories</strong> — registers factories for container types
- *       (collections, maps, arrays) with priority-based predicate matching.
+ *       (collections, maps, arrays) and for the holder interfaces
+ *       ({@link IFieldDataHolder}, {@link IDataSerializable}, Forge's
+ *       {@code INBTSerializable}) with priority-based predicate matching.
  *       More specific types (e.g., {@code IntCollection}) get higher priority than
  *       general ones (e.g., {@code Collection})</li>
  *   <li><strong>Hash strategies</strong> — registers {@link ItemStack} and
- *       {@link FluidStack} hash/equality strategies for change detection</li>
+ *       {@link FluidStack} hash/equality strategies for change detection, plus the
+ *       {@code ItemStack[]}/{@code FluidStack[]} array counterparts</li>
  *   <li><strong>Enum registration</strong> — marks {@link LogicalSide} and
  *       {@link Direction} as "fixed" enums for ordinal-based persistence</li>
  *   <li><strong>Test blocks</strong> — in development mode only, registers the
@@ -68,7 +79,13 @@ import static com.gto.datasynclib.FieldDefinitionStorage.*;
  * <p>Downstream mods can register additional factories, access factories, codecs,
  * and strategies by calling the static registration methods in
  * {@link FieldDefinitionStorage} and {@link DataSyncCodec} during their own mod
- * initialization. All registries are thread-safe and support runtime registration.</p>
+ * initialization.</p>
+ *
+ * <p><strong>Register before first use:</strong> the registration methods synchronize on
+ * their backing table, but lookups are lock-free and the resolved factory/codec is cached
+ * per type, so a later registration can be shadowed by an already-cached entry. Populate
+ * your registrations during mod construction, before any holder of the affected type is
+ * scanned (concurrent registration from another thread is not supported).</p>
  *
  * @see FieldDefinitionStorage
  * @see DataSyncCodec
@@ -85,6 +102,10 @@ public final class DataSyncLib {
     public DataSyncLib(FMLJavaModLoadingContext context) {
         DataSyncCodec.init();
         DataSyncNetwork.init();
+        // Built-in registration below: all of it must happen here, in mod construction, because
+        // FieldDefinitionStorage caches the resolved factory per field type on first scan — a
+        // registration that arrives later is ignored. Downstream mods extend the same tables
+        // from their own constructor (see FieldDefinitionStorage's registration methods).
         // Primitive field factories (exact-type match)
         registerFactory(boolean.class, BooleanField::new);
         registerFactory(byte.class, ByteField::new);
@@ -115,8 +136,14 @@ public final class DataSyncLib {
         registerAccessFactory(char[].class, CharArrayAccess::new);
 
         // Access-mode factories: IFieldDataHolder/IDataSerializable (highest priority for containers)
-        registerAccessInterfaceFactory(IFieldDataHolder.class, k -> FieldDataHolderAccess::new, 1000);
-        registerAccessInterfaceFactory(IDataSerializable.class, k -> SerializableAccess::new, 1000);
+        registerAccessInterfaceFactory(IFieldDataHolder.class, k -> FieldDataHolderAccess::new, 2000);
+        registerAccessInterfaceFactory(IDataSerializable.class, k -> SerializableAccess::new, 5000);
+        // Forge's INBTSerializable (ItemStackHandler, FluidTank, custom INBTSerializable POJOs).
+        // Priority sits below the two library interfaces above (so an explicit IFieldDataHolder/
+        // IDataSerializable still wins) and above plain Collection/Map.
+        // Note: change detection compares serializeNBT() deeply on every check, so on hot fields
+        // prefer @SyncToClient(autoUpdate = false) + markFieldsForSync.
+        registerAccessInterfaceFactory(INBTSerializable.class, k -> TagSerializableAccess::new, 1000);
 
         // Access-mode factories: FastUtil primitive collections → general Collection (descending specificity)
         registerAccessInterfaceFactory(IntCollection.class, k -> IntCollectionAccess::new, 1000);
@@ -132,7 +159,11 @@ public final class DataSyncLib {
 
         // Access-mode factories: non-primitive arrays (custom predicates with codec lookup)
         registerAccessCustomFactory(c -> c.isArray() && !c.componentType().isPrimitive() && IFieldDataHolder.class.isAssignableFrom(c.componentType()), c -> FieldDataHolderArrayAccess::new, 2000);
-        registerAccessCustomFactory(c -> c.isArray() && !c.componentType().isPrimitive() && IDataSerializable.class.isAssignableFrom(c.componentType()), c -> SerializableArrayAccess::new, 2000);
+        registerAccessCustomFactory(c -> c.isArray() && !c.componentType().isPrimitive() && IDataSerializable.class.isAssignableFrom(c.componentType()), c -> SerializableArrayAccess::new, 5000);
+        // Forge INBTSerializable components (ItemStackHandler[], FluidTank[], ...). Priority mirrors
+        // the scalar registration: below the two library interfaces, above the generic codec-backed
+        // array factory below, which would otherwise ask for a codec of the component type.
+        registerAccessCustomFactory(c -> c.isArray() && !c.componentType().isPrimitive() && INBTSerializable.class.isAssignableFrom(c.componentType()), c -> TagSerializableArrayAccess::new, 1000);
 
         registerAccessCustomFactory(c -> c.isArray() && !c.componentType().isPrimitive(), c -> {
             var codec = DataSyncCodec.get(c.componentType());
@@ -141,13 +172,23 @@ public final class DataSyncLib {
         }, 200);
 
         // Hash strategies for mutable Minecraft types in change detection
+        // (ItemStackHashStrategy/FluidStackHashStrategy also offer ITEM/ITEM_AND_TAG and
+        // FLUID/FLUID_AND_TAG levels, selectable per field with @Strategy)
         registerStrategy(ItemStack.class, ItemStackHashStrategy.ALL);
         registerStrategy(FluidStack.class, FluidStackHashStrategy.ALL);
+        // Array counterparts. A strategy is looked up by the field's *exact* type, so an array field
+        // needs its own registration. ItemStack has no content-based hashCode/equals, so without this
+        // an ItemStack[] field would only notice a replaced slot, not a stack edited in place;
+        // FluidStack does have them, so FluidStack[] already works unregistered — the registration
+        // there is for the level selection (ignore amount/NBT) and for symmetry with the scalar field.
+        registerStrategy(ItemStack[].class, ItemStackArrayHashStrategy.ALL);
+        registerStrategy(FluidStack[].class, FluidStackArrayHashStrategy.ALL);
 
         // "Fixed" enums use ordinal-based persistence (compact, but order-sensitive)
         EnumUtil.addFixedEnum(LogicalSide.class);
         EnumUtil.addFixedEnum(Direction.class);
-        NbtUtil.init();
+        EnumUtil.addFixedEnum(Direction.Axis.class);
+        NbtUtil.init(); // no-op hook, kept for initialization ordering
 
         if (FMLLoader.isProduction()) return;
         // Register test blocks and block entities (development mode only)

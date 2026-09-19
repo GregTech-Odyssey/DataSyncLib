@@ -164,7 +164,7 @@ li { margin: 4px 0; }
 
 <!-- ===== HERO ===== -->
 <div class="hero">
-    <h1>DataSyncLib <span class="version">v26.7.1 for Minecraft 1.20.1</span></h1>
+    <h1>DataSyncLib <span class="version">v26.9.3 for Minecraft 1.20.1</span></h1>
     <p>An annotation-driven Minecraft data synchronization framework — automatic client-server field sync, change detection, and disk persistence.</p>
     <div class="badge-row">
         <span class="badge green">Minecraft 1.20.1</span>
@@ -201,7 +201,7 @@ li { margin: 4px 0; }
 <h3>1. Add Dependency</h3>
 <pre><code><span class="cmt">// build.gradle</span>
 <span class="kw">dependencies</span> {
-    <span class="kw">implementation</span> <span class="str">'com.gto:datasynclib:26.7.1'</span>
+    <span class="kw">implementation</span> <span class="str">'com.gto:datasynclib:26.9.3'</span>
 }</code></pre>
 
 <h3>2. Create a BlockEntity</h3>
@@ -880,6 +880,7 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
         <tr><td>saveNull</td><td>boolean</td><td>false</td><td>Whether to write null/empty collection/empty array values</td></tr>
         <tr><td>defaultValue</td><td>String</td><td>""</td><td>Default value (as string); skips writing when field equals this value</td></tr>
         <tr><td>defaultValueGetter</td><td>String</td><td>""</td><td>Getter method name providing the default value</td></tr>
+        <tr><td>listener</td><td>String</td><td>""</td><td>Method invoked after the field has been read back from disk, signature <code>(T value) -> void</code> (the parameter type must match the field's declared type exactly — <code>int</code> for an <code>int</code> field). Fires only when the field's key is present in the loaded <code>"field_save"</code> data; never on the sync path</td></tr>
     </tbody>
 </table>
 
@@ -890,6 +891,7 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
         <tr><td>@AddToManager</td><td>FIELD</td><td>Meta-annotation. Marks a field for FieldDataManager management. @SaveToDisk/@SyncToClient/@SyncToServer all extend this</td></tr>
         <tr><td>@Access</td><td>FIELD</td><td>Marks a non-final field to use final-field Access mode. createInstance=true creates a new instance on serialization</td></tr>
         <tr><td>@Codec</td><td>FIELD</td><td>Custom serialization. Two modes: ① <code>saveCodec</code>/<code>syncCodec</code> reference static fields (e.g. FieldDataCodec); ② <code>writeToData</code>/<code>readFromData</code>/<code>writeToBuffer</code>/<code>readFromBuffer</code> reference instance methods</td></tr>
+        <tr><td>@Conversion</td><td>FIELD</td><td>Stores/syncs a field as another type. <code>getFunction</code> names a static <code>Function&lt;A, B&gt;</code> field in the same class; its return type B becomes the managed type (codecs, strategies and factories are resolved for B). <code>setFunction</code> names the inverse <code>Function&lt;B, A&gt;</code> and may be omitted for final or access-mode fields</td></tr>
         <tr><td>@Strategy</td><td>FIELD</td><td>Specifies the Hash.Strategy for change detection, referencing a static field by name</td></tr>
         <tr><td>@Generic</td><td>FIELD</td><td>Forces generic type handling for the field. Use when the field is generic but auto-detection fails</td></tr>
         <tr><td>@AdditionalHolder</td><td>FIELD</td><td>Marks a nested field: by default its internally annotated fields are flattened into the current class's FieldDataManager; with <code>childManager=true</code> the sub-object gets its own dedicated FieldDataManager child manager and is not flattened</td></tr>
@@ -1225,7 +1227,7 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 </table>
 
 <div class="footer">
-    <p>DataSyncLib v26.7.1 · Minecraft 1.20.1 · Forge 47.4.21 · Java 21 · License: GNU LGPL 3.0</p>
+    <p>DataSyncLib v26.9.3 · Minecraft 1.20.1 · Forge 47.4.21 · Java 21 · License: GNU LGPL 3.0</p>
 </div>
 
 </main>

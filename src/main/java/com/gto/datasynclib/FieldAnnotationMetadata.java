@@ -13,8 +13,6 @@ import net.minecraft.network.FriendlyByteBuf;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
-@Getter
-@Accessors(fluent = true)
 /**
  * Package-private class that parses and holds the extracted metadata from field annotations.
  *
@@ -25,6 +23,8 @@ import java.lang.reflect.Method;
  * <p>Internal implementation detail — external code should never need to construct or interact
  * with this class directly.
  */
+@Getter
+@Accessors(fluent = true)
 final class FieldAnnotationMetadata {
 
     private final SaveToDisk saveToDisk;
@@ -35,6 +35,11 @@ final class FieldAnnotationMetadata {
     private final boolean saveNull;
     private final Object defaultValue;
     private final Method defaultValueGetter;
+    /**
+     * Resolved {@code @SaveToDisk(listener = "...")} target, or {@code null} when the
+     * annotation does not declare one. Invoked after the field has been read back from disk.
+     */
+    private final Method readSaveListener;
     private final Method clientUpdateListener;
     private final Method serverUpdateListener;
     private final Method saveCondition;
@@ -78,6 +83,18 @@ final class FieldAnnotationMetadata {
             this.defaultValueGetter = method;
         } else {
             this.defaultValueGetter = null;
+        }
+
+        // Load listener: resolved with the field's exact declared type (same rule as `condition`),
+        // i.e. a non-static method on the declaring class taking the field type as its only
+        // parameter. Stored as a Method here and turned into a MethodHandle by
+        // DataFieldDefinition; the readFromData implementations invoke it after a disk load.
+        if (saveToDisk != null && !saveToDisk.listener().isEmpty()) {
+            var method = ReflectUtil.getAccessibleMethod(clazz, saveToDisk.listener(), type);
+            method.setAccessible(true);
+            this.readSaveListener = method;
+        } else {
+            this.readSaveListener = null;
         }
 
         if (syncToClient != null && !syncToClient.listener().isEmpty()) {

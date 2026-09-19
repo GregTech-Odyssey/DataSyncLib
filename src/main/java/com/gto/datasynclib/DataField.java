@@ -130,8 +130,11 @@ public interface DataField<T> {
 
     /**
      * Indicates whether this field type requires mandatory change detection.
-     * When {@code true}, {@link #detectChange} is always called during dirty flag
-     * updates, even if the field hasn't been marked as changed.
+     *
+     * <p>When {@code true}, the manager still consults this flag but detection is attempted
+     * even for a field that was not marked dirty; when {@code false}, a field that is neither
+     * dirty nor {@code autoUpdate} for the current side is skipped entirely, so a manual
+     * {@link #markAsChanged} is what gets it sent.</p>
      *
      * <p>This is used by container types (e.g., {@code IFieldDataHolder} accessors)
      * that have their own internal change tracking and need detection to run on

@@ -10,8 +10,9 @@ import org.jetbrains.annotations.NotNull;
 
 /**
  * DataField implementation for char values. Tracks the previous value for change detection
- * comparison, handles sync conditions via skipSync, default value filtering for persistence,
- * and optional listener notification on value changes.
+ * comparison, handles sync conditions via {@code skipSync}, default value filtering for
+ * persistence, and invokes the configured {@code @SyncToClient/@SyncToServer} listener on every
+ * value applied by {@code readFromBuffer} — not only when the value actually changed.
  */
 public final class CharField extends AbstractField<Character> {
 
@@ -64,5 +65,14 @@ public final class CharField extends AbstractField<Character> {
     public void readFromData(@NotNull Object source, @NotNull Data data, int dataVersion) {
         char value = data.getChar();
         definition.setChar(source, value);
+        // @SaveToDisk(listener = "...") — disk-load hook, fired after the value is applied (never on the sync path).
+        var listener = definition.getSaveListener();
+        if (listener != null) {
+            try {
+                listener.invokeExact(source, value);
+            } catch (Throwable e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 }

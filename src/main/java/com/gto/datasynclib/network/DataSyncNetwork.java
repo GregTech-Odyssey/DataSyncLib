@@ -21,6 +21,33 @@ import java.util.function.Supplier;
 
 /**
  * Central network channel for DataSyncLib synchronization.
+ *
+ * <p>The channel is {@code datasynclib:sync} and is guarded by {@link #PROTOCOL_VERSION}:
+ * client and server must agree on it or Forge refuses the connection. Two messages are
+ * registered, and each one is used for <strong>both</strong> directions because the wire
+ * format is identical:</p>
+ * <ul>
+ *   <li>index 0 — {@link BlockEntitySyncPacket}: block position + serialized field payload</li>
+ *   <li>index 1 — {@link EntitySyncPacket}: entity network id + serialized field payload</li>
+ * </ul>
+ *
+ * <p>Direction is resolved at receive time from
+ * {@code NetworkEvent.Context.getDirection().getOriginationSide()}, so a single handler per
+ * packet type covers both paths:</p>
+ * <ul>
+ *   <li>originating client (C2S) — applied on the server with {@link LogicalSide#SERVER}</li>
+ *   <li>originating server (S2C) — applied on the client with {@link LogicalSide#CLIENT}</li>
+ * </ul>
+ *
+ * <p>Synchronization is push-based: nothing is sent automatically, callers drive it from
+ * their own tick/logic through the {@code syncXxxToServer/Client} helpers below (they are
+ * safe to call from off-thread code; the actual send is scheduled onto the owning side's
+ * executor).</p>
+ *
+ * <p>Initialized once via {@link #init()} during mod construction.</p>
+ *
+ * @see #syncBlockEntityToClient(BlockEntity, boolean, boolean)
+ * @see #syncEntityToClient(Entity, boolean, boolean)
  */
 @UtilityClass
 public class DataSyncNetwork {
@@ -43,14 +70,14 @@ public class DataSyncNetwork {
         if (initialized) return;
         initialized = true;
 
-        // Index 0: Block Entity — Client → Server
+        // Index 0 — block entity payload, both directions (see handleBlockEntity)
         CHANNEL.registerMessage(0,
                 BlockEntitySyncPacket.class,
                 BlockEntitySyncPacket::encode,
                 BlockEntitySyncPacket::decode,
                 DataSyncNetwork::handleBlockEntity);
 
-        // Index 1: Entity — Client → Server
+        // Index 1 — entity payload, both directions (see handleEntity)
         CHANNEL.registerMessage(1,
                 EntitySyncPacket.class,
                 EntitySyncPacket::encode,

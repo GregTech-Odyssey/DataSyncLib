@@ -18,7 +18,12 @@ import java.util.function.IntFunction;
  * <p>Provides static helper methods to compose higher-order decoders:
  * {@link #convert} for type adaptation, {@link #map} for Map decoding (defaults to
  * {@link it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap}),
- * {@link #list} for List decoding, and {@link #set} for Set decoding.
+ * {@link #collection} for Collection decoding, {@link #list} for List decoding,
+ * {@link #set} for Set decoding and {@link #array} for object-array decoding.
+ * Container sizes are read from the stream, so malformed input can request a large allocation.</p>
+ *
+ * <p><strong>Boxing:</strong> these helpers are generic over the element type, so primitives are
+ * boxed; see {@link ByteStreamCodec} for the full trade-off and when to hand-write instead.</p>
  *
  * @param <T> the type of objects to decode
  */

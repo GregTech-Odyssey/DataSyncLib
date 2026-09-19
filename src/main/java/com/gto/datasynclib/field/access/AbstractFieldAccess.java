@@ -22,8 +22,10 @@ import org.jetbrains.annotations.Nullable;
  *   <li><strong>Public interface methods</strong> (from {@link com.gto.datasynclib.DataField}):
  *     {@link #detectChange}, {@link #writeToBuffer}, {@link #readFromBuffer},
  *     {@link #writeToData}, {@link #readFromData} — handle the common logic:
- *     null checks, instance identity tracking, {@code createInstance} wrapping,
- *     skip conditions, and listener invocation.</li>
+ *     null checks, instance identity tracking, {@code createInstance} wrapping, and listener
+ *     invocation. Skip conditions are evaluated in exactly two places: the {@code skipSync}
+ *     check in {@link #detectChange} and the {@code skipSave} check in {@link #writeToData};
+ *     {@code writeToBuffer}/{@code readFromBuffer}/{@code readFromData} perform no skip checks.</li>
  *   <li><strong>Protected template methods</strong> (implemented by subclasses):
  *     {@link #hasChange}, {@link #doWriteBuffer}, {@link #doReadBuffer},
  *     {@link #doWriteData}, {@link #doReadData} — provide type-specific
@@ -41,9 +43,13 @@ import org.jetbrains.annotations.Nullable;
  *       the container itself (not just its contents) is serialized. This handles fields
  *       that may be {@code null} and need full instance replacement on deserialization.
  *       Also supports a legacy data version ({@code dataVersion == -1}) migration path.</li>
+ *   <li><strong>Dirty flag:</strong> {@link #detectChange} never clears the flag itself;
+ *       {@link com.gto.datasynclib.FieldDataManager#writeToNetworkBuffer} clears it via
+ *       {@code clearChanged(source)} only for fields it actually serialized.</li>
  *   <li><strong>Listener invocation:</strong> After reading from buffer, if a listener
  *       {@link java.lang.invoke.MethodHandle} is registered on the definition, it's
- *       invoked with {@code (source, newValue, oldInstance)}.</li>
+ *       invoked with {@code (source, newValue, oldInstance)} — on <em>every</em>
+ *       {@code readFromBuffer} call, whether or not the contents changed.</li>
  * </ul>
  *
  * @param <T> the type of the access-managed container (e.g., {@code Collection}, {@code Map}, array)
@@ -116,8 +122,7 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
                 definition.encode(source, value, data);
             }
         }
-        if (value == null) return;
-        doWriteBuffer(side, value, data, writeAll);
+        if (value != null) doWriteBuffer(side, value, data, writeAll);
     }
 
     @Override
@@ -165,41 +170,61 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
 
     @Override
     public final void readFromData(@NotNull Object source, @NotNull Data data, int dataVersion) {
+        T value = null;
         if (definition.createInstance) {
             if (dataVersion == -1) {
                 if (data instanceof StringMapData mapData && !mapData.isEmpty()) {
                     var uid = mapData.get("uid");
-                    var value = definition.decode(source, uid, dataVersion);
+                    value = definition.decode(source, uid, dataVersion);
                     doReadData(value, mapData.get("payload").getStringMap().get("d"), dataVersion);
                     definition.set(source, value);
                 }
             } else {
-                T value;
-                if (data == NullData.INSTANCE) {
-                    value = null;
-                } else {
+                if (data != NullData.INSTANCE) {
                     var list = data.getList();
                     value = definition.decode(source, list.getFirst(), dataVersion);
-                    doReadData(value, list.get(1), dataVersion);
+                    if (value != null) doReadData(value, list.get(1), dataVersion);
                 }
                 definition.set(source, value);
             }
         } else {
-            var value = getInstance(source);
-            if (value == null) return;
-            doReadData(value, data, dataVersion);
+            value = getInstance(source);
+            if (value != null) doReadData(value, data, dataVersion);
+        }
+        // Load listener (@SaveToDisk(listener = "...")): `value` is the container that has just
+        // been read (in place, or freshly decoded for `createInstance` fields), or null when the
+        // stored entry is a null marker / the field is absent. Never called on the sync path.
+        var listener = definition.getSaveListener();
+        if (listener != null) {
+            try {
+                listener.invokeExact(source, value);
+            } catch (Throwable e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 
     /**
      * Template method: check if the container's <em>contents</em> have changed.
-     * Called by {@link #detectChange} after confirming the instance reference hasn't changed.
+     *
+     * <p>Called from {@link #detectChange} in two situations:</p>
+     * <ol>
+     *   <li>the instance reference changed and {@link #mustDetect()} is {@code true} — the
+     *       field is already dirty, so the return value only feeds the internal snapshot;</li>
+     *   <li>the reference is unchanged — the return value decides whether the field counts
+     *       as changed.</li>
+     * </ol>
      */
     protected abstract boolean hasChange(@NotNull LogicalSide side, @NotNull T instance, boolean autoOnly);
 
     /**
      * Template method: write the container's <em>contents</em> to the network buffer.
      * Called by {@link #writeToBuffer} after null/instance/createInstance handling.
+     *
+     * @param writeAll only meaningful for implementations that delegate to a nested
+     *                 {@link com.gto.datasynclib.FieldDataManager} (holder/child-manager
+     *                 accessors); other implementations can ignore it because the caller has
+     *                 already decided whether this field is written at all
      */
     protected abstract void doWriteBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull FriendlyByteBuf data, boolean writeAll);
 

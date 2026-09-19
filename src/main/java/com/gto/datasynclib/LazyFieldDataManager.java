@@ -12,10 +12,10 @@ package com.gto.datasynclib;
  * is scanned, independent of the holder's actual runtime class.</p>
  *
  * <h3>Thread-safety:</h3>
- * <p>The {@code get()} method uses double-checked locking with a {@code synchronized}
- * block. For full Java Memory Model correctness, the {@code fieldDataManager} field
- * should be declared {@code volatile} to prevent instruction reordering that could
- * expose a partially-constructed {@code FieldDataManager} to another thread.</p>
+ * <p>{@link #get()} uses double-checked locking over the {@code volatile}
+ * {@code fieldDataManager} field, which is required for Java Memory Model correctness:
+ * without {@code volatile}, another thread could observe a partially-constructed
+ * {@link FieldDataManager} through the unsynchronized first read.</p>
  *
  * @see FieldDataManager
  */

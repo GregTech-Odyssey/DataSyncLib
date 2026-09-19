@@ -19,7 +19,8 @@ import java.lang.annotation.Target;
  * <h3>How it works</h3>
  * <ol>
  *   <li>The annotation's {@link #getFunction()} points to a <strong>static</strong>
- *       {@code Function<A, B>} field declared in the same class (or a parent class)</li>
+ *       {@code Function<A, B>} field declared in the <em>same class</em> as the annotated
+ *       field</li>
  *   <li>The function's <strong>input type</strong> ({@code A}) must match the field's
  *       declared type</li>
  *   <li>The function's <strong>return type</strong> ({@code B}) becomes the type that
@@ -33,8 +34,8 @@ import java.lang.annotation.Target;
  * <ul>
  *   <li>The function field must be {@code static} (the annotation processor calls
  *       {@code field.get(null)} to resolve it)</li>
- *   <li>The function must be declared in the same class as the annotated field
- *       (or a superclass reachable via {@link Class#getDeclaredField})</li>
+ *   <li>The function must be declared in the same class as the annotated field: the lookup is
+ *       {@link Class#getDeclaredField(String)}, which does <em>not</em> search superclasses</li>
  *   <li>{@code setFunction} is <strong>optional</strong> — it can be omitted for
  *       {@code final} fields or access-mode fields (those with {@link Access @Access})
  *       because the write path is not used for those modes</li>
@@ -75,7 +76,7 @@ public @interface Conversion {
 
     /**
      * The name of a <strong>static</strong> {@code Function<A, B>} field declared in
-     * the same class (or a parent class).
+     * the same class as the annotated field (superclass fields are not searched).
      *
      * <p>The function converts from the field's declared type ({@code A}) to the
      * type that should be managed by the sync/persistence system ({@code B}).
@@ -89,7 +90,7 @@ public @interface Conversion {
 
     /**
      * The name of a <strong>static</strong> {@code Function<B, A>} field declared in
-     * the same class (or a parent class).
+     * the same class as the annotated field (superclass fields are not searched).
      *
      * <p>Provides the inverse conversion: from the managed type ({@code B}) back to
      * the field's declared type ({@code A}). This is called during

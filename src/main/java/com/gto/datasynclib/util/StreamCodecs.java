@@ -4,6 +4,8 @@ import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import lombok.experimental.UtilityClass;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Registry;
+import net.minecraft.core.SectionPos;
+import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -12,13 +14,20 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.fluids.FluidStack;
 
 /**
- * Pre-registered ByteStreamCodec instances for Minecraft types including
- * ResourceLocation, BlockPos, CompoundTag, ItemStack, FluidStack, and Component.
+ * Pre-registered {@link ByteStreamCodec} instances for Minecraft types: ResourceLocation,
+ * BlockPos, ChunkPos, Vec3i, SectionPos, Vec2, Vec3, AABB, Tag, CompoundTag, ListTag, ItemStack,
+ * FluidStack and Component, plus {@link #of(net.minecraft.core.Registry)} for registry entries
+ * (encoded as a VarInt id). Each constant registers itself in the interface-level codec table.
+ *
+ * <p>These are hand-written on purpose: they read and write primitives straight on the buffer
+ * instead of going through the boxed components of {@link com.gto.datasynclib.datastream.codec.CombinedCodec#composite}.
+ * See that method's documentation for the trade-off.</p>
  */
 @UtilityClass
 public class StreamCodecs {
@@ -41,6 +50,75 @@ public class StreamCodecs {
         ByteStreamCodec.registerCodec(BlockPos.class, BLOCK_POS_CODEC);
         ByteStreamCodec.registerCodec(ChunkPos.class, CHUNK_POS_CODEC);
     }
+
+    /**
+     * Integer triple, three VarInts. {@link BlockPos} keeps its own packed-long codec, and an
+     * exact registration always wins over this one.
+     */
+    public static final ByteStreamCodec<Vec3i> VEC3I_CODEC = new ByteStreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf stream, Vec3i obj) {
+            stream.writeVarInt(obj.getX());
+            stream.writeVarInt(obj.getY());
+            stream.writeVarInt(obj.getZ());
+        }
+
+        @Override
+        public Vec3i decode(FriendlyByteBuf stream) {
+            return new Vec3i(stream.readVarInt(), stream.readVarInt(), stream.readVarInt());
+        }
+
+        static {
+            ByteStreamCodec.registerCodec(Vec3i.class, VEC3I_CODEC);
+        }
+    };
+
+    /**
+     * Section (16³) position, as its packed long.
+     */
+    public static final ByteStreamCodec<SectionPos> SECTION_POS_CODEC = new ByteStreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf stream, SectionPos obj) {
+            stream.writeLong(obj.asLong());
+        }
+
+        @Override
+        public SectionPos decode(FriendlyByteBuf stream) {
+            return SectionPos.of(stream.readLong());
+        }
+
+        static {
+            ByteStreamCodec.registerCodec(SectionPos.class, SECTION_POS_CODEC);
+        }
+    };
+
+    /**
+     * Six raw doubles: minX, minY, minZ, maxX, maxY, maxZ.
+     */
+    public static final ByteStreamCodec<AABB> AABB_CODEC = new ByteStreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf stream, AABB obj) {
+            stream.writeDouble(obj.minX);
+            stream.writeDouble(obj.minY);
+            stream.writeDouble(obj.minZ);
+            stream.writeDouble(obj.maxX);
+            stream.writeDouble(obj.maxY);
+            stream.writeDouble(obj.maxZ);
+        }
+
+        @Override
+        public AABB decode(FriendlyByteBuf stream) {
+            return new AABB(stream.readDouble(), stream.readDouble(), stream.readDouble(),
+                    stream.readDouble(), stream.readDouble(), stream.readDouble());
+        }
+
+        static {
+            ByteStreamCodec.registerCodec(AABB.class, AABB_CODEC);
+        }
+    };
 
 
     public static final ByteStreamCodec<Vec2> VEC2_CODEC = new ByteStreamCodec<>() {
@@ -184,6 +262,12 @@ public class StreamCodecs {
         }
     };
 
+    /**
+     * Builds a codec for entries of a Minecraft {@link Registry}: values are written as a VarInt
+     * registry id, which is compact but only valid between peers whose registries match.
+     *
+     * @param registry the registry the values belong to
+     */
     public static <T> ByteStreamCodec<T> of(Registry<T> registry) {
         return ByteStreamCodec.of((stream, obj) -> stream.writeVarInt(registry.getId(obj)), stream -> registry.byId(stream.readVarInt()));
     }

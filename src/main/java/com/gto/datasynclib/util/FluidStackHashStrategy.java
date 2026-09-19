@@ -8,11 +8,21 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Objects;
 
 /**
- * Configurable hash/equality strategy for FluidStack comparison.
- * Provides FLUID (identity only), FLUID_AND_TAG, and ALL comparison levels.
+ * Pre-built hash/equality strategies for {@link FluidStack} change detection, from coarsest to
+ * finest. {@code DataSyncLib} registers {@link #ALL} for {@code FluidStack} fields by default;
+ * pick another one with {@code @Strategy("FLUID")} on the field, or register your own via
+ * {@link com.gto.datasynclib.FieldDefinitionStorage#registerStrategy(Class, Hash.Strategy)}.
+ *
+ * <p>All three treat {@code null} and an empty stack as equal, so an emptied tank does not
+ * count as a change against a never-filled one.</p>
+ *
+ * @see FluidStackArrayHashStrategy
  */
 public interface FluidStackHashStrategy extends Hash.Strategy<FluidStack> {
 
+    /**
+     * Fluid, amount and NBT must all match. Registered by default for {@code FluidStack} fields.
+     */
     FluidStackHashStrategy ALL = new FluidStackHashStrategy() {
 
         @Override
@@ -34,6 +44,9 @@ public interface FluidStackHashStrategy extends Hash.Strategy<FluidStack> {
         }
     };
 
+    /**
+     * Fluid and NBT must match; the amount is ignored.
+     */
     FluidStackHashStrategy FLUID_AND_TAG = new FluidStackHashStrategy() {
 
         @Override
@@ -54,6 +67,9 @@ public interface FluidStackHashStrategy extends Hash.Strategy<FluidStack> {
         }
     };
 
+    /**
+     * Only the fluid type must match; amount and NBT are ignored.
+     */
     FluidStackHashStrategy FLUID = new FluidStackHashStrategy() {
 
         @Override

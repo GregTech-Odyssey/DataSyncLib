@@ -39,8 +39,8 @@ public @interface SyncToClient {
      * When set to true, the client will be notified of the change, which can be useful for
      * triggering UI refreshes or other client-side updates.
      *
-     * @return true if an update notification should be sent when the field changes, false otherwise
-     * &#064;default false
+     * @return true if an update notification should be sent when the field changes,
+     * false (the default) otherwise
      * @see com.gto.datasynclib.IFieldDataHolder#scheduleUpdate(com.gto.datasynclib.LogicalSide)
      */
     boolean notifyUpdate() default false;
@@ -51,8 +51,8 @@ public @interface SyncToClient {
      * (detected via the dirty flag mechanism). When set to false, the field will only be
      * synchronized when explicitly marked as dirty.
      *
-     * @return true if the field should be automatically updated, false if manual update is required
-     * &#064;default true
+     * @return true if the field should be automatically updated (the default), false if it
+     * must be marked manually
      */
     boolean autoUpdate() default true;
 

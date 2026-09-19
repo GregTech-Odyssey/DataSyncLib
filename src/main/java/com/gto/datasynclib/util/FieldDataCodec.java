@@ -15,8 +15,10 @@ import java.util.function.Supplier;
  * {@link com.gto.datasynclib.datastream.codec.DataCodec} interfaces.
  *
  * <p>This class wraps an annotated POJO class, using its own internal
- * {@link com.gto.datasynclib.FieldDataManager} to serialize/deserialize all
- * {@code @AddToManager}-annotated fields as a single unit. It implements
+ * {@link com.gto.datasynclib.FieldDataManager} to serialize/deserialize <em>all</em> managed
+ * fields as a single unit — fields carrying {@code @SaveToDisk}/{@code @SyncToClient}/
+ * {@code @SyncToServer}, plus plain {@code @AddToManager} fields (the codec uses
+ * {@code writeAllToData}/{@code readAllFromData}, not the incremental paths). It implements
  * {@link com.gto.datasynclib.IFieldDataHolder} so that the codec methods can
  * set the current instance via a {@link ThreadLocal} during encode/decode,
  * making each thread's encode/decode operations independent.</p>

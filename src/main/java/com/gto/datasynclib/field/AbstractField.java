@@ -11,13 +11,16 @@ import org.jetbrains.annotations.NotNull;
  * and objects).
  *
  * <p>Uses the <strong>template method</strong> pattern: the public {@link #detectChange}
- * method handles the common logic (checking skip conditions, evaluating the result),
- * while subclasses implement {@link #hasChange(LogicalSide, Object)} for type-specific
- * value comparison.</p>
+ * assigns whatever {@link #hasChange(LogicalSide, Object)} reports to the dirty flag
+ * (so it can also <em>clear</em> a manual {@link #markAsChanged}), while subclasses implement
+ * {@code hasChange} for type-specific value comparison — including evaluating the
+ * {@code skipSync} condition, which therefore happens inside the subclass.</p>
  *
  * <p>Provides common change tracking ({@code markAsChanged/clearChanged/isChanged})
  * backed by a simple boolean flag. Subclasses track a snapshot of the previous value
- * ({@code lastValue}) for comparison against the current value.</p>
+ * ({@code lastValue}) for comparison against the current value. The flag is cleared
+ * externally by {@link com.gto.datasynclib.FieldDataManager#writeToNetworkBuffer} via
+ * {@code clearChanged(source)} after a successful write.</p>
  *
  * <h3>Subclass families:</h3>
  * <ul>
@@ -61,5 +64,11 @@ public abstract class AbstractField<T> implements DataField<T> {
         return changed = hasChange(side, source);
     }
 
+    /**
+     * Template method: report whether the current value differs from the snapshot, and evaluate
+     * the field's {@code skipSync} condition. Implementations are responsible for both.
+     *
+     * @return {@code true} if the field should be included in the next sync
+     */
     protected abstract boolean hasChange(@NotNull LogicalSide side, Object source);
 }

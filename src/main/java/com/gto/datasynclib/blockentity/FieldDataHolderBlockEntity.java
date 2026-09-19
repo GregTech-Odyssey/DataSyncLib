@@ -48,10 +48,19 @@ import org.jetbrains.annotations.NotNull;
  *       setChanged()} to mark the chunk for saving when fields change</li>
  * </ul>
  *
- * <h3>Static VERSION field:</h3>
- * <p>The {@link #VERSION} field controls the data version written to NBT. Increment
- * this when making breaking changes to your field layout, and use the {@code dataVersion}
- * parameter in {@link com.gto.datasynclib.IDataSerializable#readData} for migration.</p>
+ * <h3>Data version ({@link #VERSION}):</h3>
+ * <p>Whatever {@link #VERSION} holds when the chunk is saved is written to the NBT key
+ * {@code "field_data_dataVersion"} and handed back to
+ * {@link FieldDataManager#readFromData(com.gto.datasynclib.datastream.data.Data, int)} on
+ * load, where it can drive migration. Raise it when the meaning or layout of persisted
+ * fields changes.</p>
+ *
+ * <p><strong>Note:</strong> it is a single {@code static} on this base class — shared by
+ * every holder and {@code 0} by default. Declaring another {@code VERSION} field in a
+ * subclass does <em>not</em> affect what is written, because {@link #saveAdditional} binds
+ * the reference at compile time to this class's field. Assign
+ * {@code FieldDataHolderBlockEntity.VERSION = N} once during mod init, or override
+ * {@link #saveAdditional} / {@link #load} to version per holder type.</p>
  *
  * @see com.gto.datasynclib.IFieldDataHolder
  * @see com.gto.datasynclib.FieldDataManager
@@ -59,6 +68,10 @@ import org.jetbrains.annotations.NotNull;
 
 public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDataHolder {
 
+    /**
+     * Data-format version written to {@code "field_data_dataVersion"}. Shared by all holders
+     * and {@code 0} by default — see the class documentation before bumping it.
+     */
     public static int VERSION;
 
     protected final LazyFieldDataManager fieldDataManager = new LazyFieldDataManager(this);
@@ -98,10 +111,12 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
     /**
      * Loads BlockEntity data from NBT.
      *
-     * <p>Priority order:
+     * <p>Priority order:</p>
      * <ol>
      *   <li>If {@code "field_sync"} byte array is present, the data is treated as a
-     *       chunk-load sync (via {@link FieldDataManager#readFromNetworkBuffer})</li>
+     *       chunk-load sync (via {@link FieldDataManager#readFromNetworkBuffer} with
+     *       {@link LogicalSide#CLIENT}) and {@code "field_save"} is ignored entirely —
+     *       including {@code "field_data_dataVersion"}</li>
      *   <li>Otherwise, if {@code "field_save"} byte array is present, the data is
      *       treated as a full disk load (via {@link FieldDataManager#readFromData}
      *       with the version from {@code "field_data_dataVersion"})</li>

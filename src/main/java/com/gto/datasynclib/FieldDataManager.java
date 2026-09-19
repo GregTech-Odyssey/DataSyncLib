@@ -360,9 +360,10 @@ public class FieldDataManager {
     }
 
     /**
-     * Writes field data to MapData
+     * Serializes every {@code @SaveToDisk} field (plus custom save data) into a Data tree.
      *
-     * @return MapData containing all saveable field data
+     * @return a {@link StringMapData} keyed by each field's storage key, or
+     * {@link NullData#INSTANCE} when there is nothing to write
      */
     @NotNull
     public Data writeToData() {

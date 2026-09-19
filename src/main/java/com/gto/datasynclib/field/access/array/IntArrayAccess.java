@@ -7,6 +7,7 @@ import com.gto.datasynclib.datastream.data.IntArrayData;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import net.minecraft.network.FriendlyByteBuf;
+import org.apache.commons.lang3.ArrayUtils;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Arrays;
@@ -15,7 +16,7 @@ import java.util.Arrays;
  * Synchronizes an {@code int[]} primitive array with <strong>in-place</strong> mutation.
  *
  * <h3>Change detection:</h3>
- * <p>Uses {@link Arrays#hashCode(int[])} for fast content-based change detection.
+ * <p>Compares the array against a retained snapshot with {@link Arrays#equals(int[], int[])}, so the common (unchanged) case is an exact, vectorized, allocation-free check (no hash collisions); the snapshot costs one extra {@code int[]} per holder, and a detected change copies the array into it.
  * The array reference is fixed ({@code final} field), so only content changes are tracked.</p>
  *
  * <h3>Network format:</h3>
@@ -31,7 +32,10 @@ import java.util.Arrays;
  */
 public final class IntArrayAccess extends AbstractFieldAccess<int[]> {
 
-    private int hashCode;
+    /**
+     * Last seen contents, compared with {@link Arrays#equals(int[], int[])}.
+     */
+    private int[] snapshot = ArrayUtils.EMPTY_INT_ARRAY;
 
     public IntArrayAccess(DataFieldDefinition<int[]> definition) {
         super(definition);
@@ -39,9 +43,8 @@ public final class IntArrayAccess extends AbstractFieldAccess<int[]> {
 
     @Override
     protected boolean hasChange(@NotNull LogicalSide side, int @NotNull [] instance, boolean autoOnly) {
-        var hashCode = Arrays.hashCode(instance);
-        if (hashCode != this.hashCode) {
-            this.hashCode = hashCode;
+        if (!Arrays.equals(snapshot, instance)) {
+            snapshot = instance.clone();
             return true;
         }
         return false;

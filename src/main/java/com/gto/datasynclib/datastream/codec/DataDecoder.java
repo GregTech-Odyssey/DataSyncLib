@@ -22,7 +22,13 @@ import java.util.function.IntFunction;
  * <p>Provides static helper methods to compose higher-order decoders:
  * {@link #convert} for type adaptation, {@link #map} for Map decoding,
  * {@link #collection} for Collection decoding, {@link #list} for List decoding,
- * and {@link #set} for Set decoding.
+ * {@link #notNullCollection} for collections that drop {@code null} elements,
+ * {@link #set} for Set decoding and {@link #array} for object-array decoding.
+ * The container helpers fall back to an empty container when the payload is not a usable
+ * {@code ListData}.</p>
+ *
+ * <p><strong>Boxing:</strong> these helpers are generic over the element type, so primitives are
+ * boxed; see {@link DataCodec} for the full trade-off and when to hand-write a decoder instead.</p>
  *
  * @param <T> the type of objects to decode
  */
@@ -126,7 +132,7 @@ public interface DataDecoder<T> {
                 for (int i = 0; i < size; i++) {
                     array[i] = decoder.decode(list.get(i), dataVersion);
                 }
-
+                return array;
             }
             return (E[]) Array.newInstance(type, 0);
         };

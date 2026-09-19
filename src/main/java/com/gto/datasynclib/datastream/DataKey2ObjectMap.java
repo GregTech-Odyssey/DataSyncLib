@@ -25,18 +25,35 @@ import static it.unimi.dsi.fastutil.HashCommon.arraySize;
  */
 public class DataKey2ObjectMap<K extends DataComponentKey<?>, V> extends Reference2ObjectOpenHashMap<K, V> {
 
+    /**
+     * Creates an empty map.
+     *
+     * @param expected expected number of entries (used to size the backing arrays)
+     * @param f        load factor
+     */
     protected DataKey2ObjectMap(final int expected, final float f) {
         super(expected, f);
     }
 
+    /**
+     * Creates an empty map with the default load factor.
+     *
+     * @param expected expected number of entries (used to size the backing arrays)
+     */
     protected DataKey2ObjectMap(final int expected) {
         super(expected, 0.75F);
     }
 
+    /**
+     * Creates an empty map sized for the default number of entries.
+     */
     protected DataKey2ObjectMap() {
         super(16, 0.75F);
     }
 
+    /**
+     * Identity-based lookup; returns {@code null} when absent or when {@code k} is null.
+     */
     @Override
     public final V get(Object k) {
         if (k == null) return null;
@@ -58,6 +75,9 @@ public class DataKey2ObjectMap<K extends DataComponentKey<?>, V> extends Referen
         }
     }
 
+    /**
+     * Identity-based lookup; returns {@code defaultValue} when absent or when {@code k} is null.
+     */
     @Override
     public final V getOrDefault(final Object k, final V defaultValue) {
         if (k == null) return defaultValue;
@@ -79,6 +99,12 @@ public class DataKey2ObjectMap<K extends DataComponentKey<?>, V> extends Referen
         }
     }
 
+    /**
+     * Identity-based store.
+     *
+     * @return the previously stored value, or {@code null} if there was none; a null key is
+     * ignored and returns {@code null} without storing anything
+     */
     @Override
     public final V put(K k, V v) {
         if (k == null) return null;
@@ -100,6 +126,9 @@ public class DataKey2ObjectMap<K extends DataComponentKey<?>, V> extends Referen
         return null;
     }
 
+    /**
+     * Identity-based containment check; a null key returns {@code false}.
+     */
     @Override
     public final boolean containsKey(final Object k) {
         if (k == null) return false;

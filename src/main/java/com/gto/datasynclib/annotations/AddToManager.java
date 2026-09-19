@@ -13,8 +13,8 @@ import java.lang.annotation.Target;
  * without enabling synchronization or persistence on its own.
  *
  * <p>A field annotated solely with {@code @AddToManager} (without {@link SaveToDisk},
- * {@link SyncToClient}, or {@link SyncToServer}) is registered in
- * {@link FieldDefinitionStorage#allDefinitions} and participates in
+ * {@link SyncToClient}, or {@link SyncToServer}) is registered in the holder's definition
+ * list ({@code FieldDefinitionStorage#allDefinitions}) and participates in
  * {@link FieldDataManager#writeAllToData()} / {@link FieldDataManager#readAllFromData(com.gto.datasynclib.datastream.data.Data, int)},
  * but is NOT included in automatic sync or incremental save operations.</p>
  *

@@ -11,7 +11,10 @@ import java.util.function.Function;
  *
  * <p>Provides static helper methods to compose higher-order encoders:
  * {@link #convert} for type adaptation, {@link #map} for Map encoding,
- * {@link #collection} for Collection encoding, and {@link #array} for array encoding.
+ * {@link #collection} for Collection encoding, and {@link #array} for array encoding.</p>
+ *
+ * <p><strong>Boxing:</strong> these helpers are generic over the element type, so primitives are
+ * boxed; see {@link ByteStreamCodec} for the full trade-off and when to hand-write instead.</p>
  *
  * @param <T> the type of objects to encode
  */

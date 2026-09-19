@@ -3,7 +3,7 @@ package com.gto.datasynclib.util.holder;
 import java.util.Comparator;
 
 /**
- * Mutable pair of an int priority/ID and an valueect value.
+ * Mutable pair of an {@code int} priority/ID and an object value.
  */
 public class IntObjectHolder<T> {
 

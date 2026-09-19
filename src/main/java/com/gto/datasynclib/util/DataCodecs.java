@@ -8,6 +8,8 @@ import com.gto.datasynclib.datastream.data.StringData;
 import lombok.experimental.UtilityClass;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Registry;
+import net.minecraft.core.SectionPos;
+import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -15,14 +17,22 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.fluids.FluidStack;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Pre-registered DataCodec instances for Minecraft types including
- * ResourceLocation, BlockPos, CompoundTag, ItemStack, FluidStack, and Component.
+ * Pre-registered {@link DataCodec} instances for Minecraft types: ResourceLocation, BlockPos,
+ * ChunkPos, Vec3i, SectionPos, Vec2, Vec3, AABB, Tag, CompoundTag, ListTag, ItemStack, FluidStack
+ * and Component, plus {@link #of(net.minecraft.core.Registry)} for registry entries (encoded by
+ * key). Each constant registers itself in the interface-level codec table.
+ *
+ * <p>These are hand-written on purpose: they encode the scalar {@code Data} types directly instead
+ * of going through the boxed components and {@code ListData} tuples produced by
+ * {@link com.gto.datasynclib.datastream.codec.CombinedCodec#composite}. See that method's
+ * documentation for the trade-off.</p>
  */
 @UtilityClass
 public class DataCodecs {
@@ -102,6 +112,68 @@ public class DataCodecs {
 
         static {
             DataCodec.registerCodec(ChunkPos.class, CHUNK_POS_CODEC);
+        }
+    };
+
+    /**
+     * Integer triple in an {@link IntArrayData}; {@link BlockPos} uses the same shape.
+     */
+    public static final DataCodec<Vec3i> VEC3I_CODEC = new DataCodec<>() {
+
+        @Override
+        public Vec3i decode(@NotNull Data data, int dataVersion) {
+            var array = data.getIntArray();
+            return new Vec3i(array[0], array[1], array[2]);
+        }
+
+        @Override
+        public @NotNull Data encode(Vec3i obj) {
+            return new IntArrayData(obj.getX(), obj.getY(), obj.getZ());
+        }
+
+        static {
+            DataCodec.registerCodec(Vec3i.class, VEC3I_CODEC);
+        }
+    };
+
+    /**
+     * Section (16³) position as its packed long.
+     */
+    public static final DataCodec<SectionPos> SECTION_POS_CODEC = new DataCodec<>() {
+
+        @Override
+        public SectionPos decode(@NotNull Data data, int dataVersion) {
+            return SectionPos.of(data.getLong());
+        }
+
+        @Override
+        public @NotNull Data encode(SectionPos obj) {
+            return LongData.valueOf(obj.asLong());
+        }
+
+        static {
+            DataCodec.registerCodec(SectionPos.class, SECTION_POS_CODEC);
+        }
+    };
+
+    /**
+     * Six doubles (min then max) in a single primitive-backed array value.
+     */
+    public static final DataCodec<AABB> AABB_CODEC = new DataCodec<>() {
+
+        @Override
+        public AABB decode(@NotNull Data data, int dataVersion) {
+            var array = data.getDoubleArray();
+            return new AABB(array[0], array[1], array[2], array[3], array[4], array[5]);
+        }
+
+        @Override
+        public @NotNull Data encode(AABB obj) {
+            return Data.valueOf(new double[]{obj.minX, obj.minY, obj.minZ, obj.maxX, obj.maxY, obj.maxZ});
+        }
+
+        static {
+            DataCodec.registerCodec(AABB.class, AABB_CODEC);
         }
     };
 
@@ -219,6 +291,13 @@ public class DataCodecs {
         }
     };
 
+    /**
+     * Builds a codec for entries of a Minecraft {@link Registry}: values are written as their
+     * registry key (self-describing, stable across game versions), and decoded by looking the
+     * key back up.
+     *
+     * @param registry the registry the values belong to
+     */
     public <T> DataCodec<T> of(Registry<T> registry) {
         return DataCodec.of(obj -> RESOURCE_LOCATION_CODEC.encode(registry.getKey(obj)), (data, dataVersion) -> registry.get(RESOURCE_LOCATION_CODEC.decode(data, dataVersion)));
     }

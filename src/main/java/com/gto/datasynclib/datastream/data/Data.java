@@ -129,7 +129,6 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
     // ===== Type ID constants for wire format =====
 
     byte NULL = 0;
-    byte BOOLEAN = 1;
     byte BYTE = 2;
     byte SHORT = 3;
     byte CHAR = 4;
@@ -153,7 +152,6 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
     static Data readData(byte id, ByteBuf stream) {
         return switch (id) {
             case NULL -> NullData.INSTANCE;
-            case BOOLEAN -> ByteData.valueOf(stream.readBoolean());
             case BYTE -> ByteData.valueOf(stream.readByte());
             case SHORT -> ShortData.valueOf(stream.readShort());
             case CHAR -> CharData.valueOf(stream.readChar());
@@ -537,12 +535,28 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
         return result;
     }
 
+    /**
+     * Reads this value as a UUID.
+     *
+     * @return the UUID, or {@code null} when this Data holds no long array. Note that the
+     * "empty" check compares against the canonical {@code ArrayUtils.EMPTY_LONG_ARRAY}
+     * instance, so a non-canonical empty array (or a single-element one) fails with
+     * {@link ArrayIndexOutOfBoundsException} instead of returning {@code null}.
+     */
     default UUID getUUID() {
         var array = getLongArray();
         if (array == ArrayUtils.EMPTY_LONG_ARRAY) return null;
         return new UUID(array[0], array[1]);
     }
 
+    /**
+     * Reads this value as a BigInteger.
+     *
+     * @return the BigInteger, or {@link BigInteger#ZERO} when this Data holds no byte array —
+     * unlike {@link #getUUID()} this method never returns {@code null}, and it does not
+     * validate the stored bytes (a non-numeric payload throws
+     * {@link NumberFormatException}).
+     */
     default BigInteger getBigInteger() {
         var array = getByteArray();
         if (array == ArrayUtils.EMPTY_BYTE_ARRAY) return BigInteger.ZERO;

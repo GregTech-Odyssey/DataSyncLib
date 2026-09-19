@@ -35,8 +35,10 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;
             for (var element : instance) {
-                element.getFieldDataManager().updateFieldDirtyFlags(side, autoOnly);
-                element.getFieldDataManager().markAsChanged();
+                if (element != null) {
+                    element.getFieldDataManager().updateFieldDirtyFlags(side, autoOnly);
+                    element.getFieldDataManager().markAsChanged();
+                }
             }
             return true;
         }

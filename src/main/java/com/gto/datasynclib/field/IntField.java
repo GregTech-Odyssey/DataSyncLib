@@ -12,17 +12,22 @@ import org.jetbrains.annotations.NotNull;
  * {@link DataField} implementation for {@code int} values.
  *
  * <h3>Change detection:</h3>
- * <p>Compares the current field value against {@link #lastValue}. The value is read
- * via {@link DataFieldDefinition#getInt(Object)} (VarHandle), so this is extremely fast.
- * Sync conditions ({@code @SyncToClient(condition = "...")}) are checked before comparison.</p>
+ * <p>Compares the current field value against {@link #lastValue}, which is refreshed by
+ * {@link #writeToBuffer} and — only when a listener is configured — by
+ * {@link #readFromBuffer}; a receive-only holder therefore keeps its earlier snapshot.
+ * The value is read via {@link DataFieldDefinition#getInt(Object)} (VarHandle), so this is
+ * extremely fast. Sync conditions ({@code @SyncToClient(condition = "...")}) are checked
+ * before comparison.</p>
  *
  * <h3>Persistence:</h3>
  * <p>Skips writing if the value matches the configured default (avoids storing redundant
  * data) or if the save condition returns {@code true}. Otherwise writes as {@link com.gto.datasynclib.datastream.data.IntData}.</p>
  *
  * <h3>Listener notification:</h3>
- * <p>On the receiving side, if a listener MethodHandle is configured, it is invoked
- * with {@code (source, newValue, lastValue)} after the value is set.</p>
+ * <p>On the receiving side, if a listener MethodHandle is configured, it is invoked with
+ * {@code (source, newValue, lastValue)} after the value has been applied — once per
+ * {@link #readFromBuffer} call, whether or not the value actually changed. {@code lastValue}
+ * is the previous snapshot and is replaced by the new value only inside that same branch.</p>
  *
  * @see com.gto.datasynclib.field.AbstractField
  */
@@ -77,5 +82,14 @@ public final class IntField extends AbstractField<Integer> {
     public void readFromData(@NotNull Object source, @NotNull Data data, int dataVersion) {
         var value = data.getInt();
         definition.setInt(source, value);
+        // @SaveToDisk(listener = "...") — disk-load hook, fired after the value is applied (never on the sync path).
+        var listener = definition.getSaveListener();
+        if (listener != null) {
+            try {
+                listener.invokeExact(source, value);
+            } catch (Throwable e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 }

@@ -141,6 +141,12 @@ public class NbtUtil {
      * {@link MatchException}: {@code DataMapData} (ID 16), {@code IntMapData} (ID 17),
      * {@code LongMapData} (ID 18), {@code CustomData} (ID 15).</p>
      *
+     * <p><strong>Caveats:</strong> {@code NullData.INSTANCE} becomes {@link EndTag#INSTANCE}
+     * (not Java {@code null}); a list whose <em>first</em> element is null produces a
+     * {@code ListTag} with element type {@code TAG_End}, and heterogeneous lists are typed
+     * after their first element, so they do not survive a round-trip. A null value inside a
+     * {@code STRING_MAP} causes a {@link NullPointerException}.</p>
+     *
      * <p><strong>Performance:</strong> This method recursively converts every element, allocating
      * new Tag objects for the entire tree. For NBT fields, prefer using
      * {@link #COMPOUND_TAG_TYPE}{@code .create()} or {@link #LIST_TAG_TYPE}{@code .create()}
@@ -193,6 +199,12 @@ public class NbtUtil {
      * for NBT fields — they wrap the original object with zero conversion overhead,
      * avoiding the O(n) recursive allocation cost of this method.</p>
      *
+     * <p><strong>Caveats:</strong> NBT lists are converted to heterogeneous
+     * {@link com.gto.datasynclib.datastream.data.ListData} (the element type of the
+     * {@code ListTag} is lost), and {@link #read(byte, io.netty.buffer.ByteBuf)} /
+     * {@link #read(byte, java.io.DataInput)} decode with {@code NbtAccounter.UNLIMITED}, i.e.
+     * with no depth or size limit — do not feed them untrusted input.</p>
+     *
      * <p>This method is mainly useful for compatibility/migration scenarios where
      * existing NBT data needs to be imported into the Data type system.</p>
      *
@@ -231,6 +243,11 @@ public class NbtUtil {
         };
     }
 
+    /**
+     * No-op retained for initialization-call compatibility: this utility holds no state that
+     * needs eager setup, and {@code DataSyncLib} calls it during mod construction. Safe to call
+     * any number of times.
+     */
     public void init() {
     }
 }

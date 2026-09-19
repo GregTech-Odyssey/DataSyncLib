@@ -11,17 +11,29 @@ import com.gto.datasynclib.util.cache.MapCache;
 import com.mojang.serialization.Codec;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.GlobalPos;
 import net.minecraft.core.Registry;
+import net.minecraft.core.SectionPos;
+import net.minecraft.core.Vec3i;
+import net.minecraft.core.particles.ParticleType;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.ai.attributes.Attribute;
+import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -53,8 +65,25 @@ import java.util.UUID;
  * Enum codecs and object-array codecs are auto-generated on first access via
  * {@link #ENUM_CACHE} and {@link #ARRAY_CACHE}.
  *
- * <p>Pre-registered codecs cover all Java primitives, String, UUID, BigInteger, arrays,
- * and Minecraft types (Item, Block, Fluid, ItemStack, FluidStack, BlockPos, CompoundTag, Component, BlockState).
+ * <p>Pre-registered codecs cover Java primitives and their arrays, String, UUID, BigInteger,
+ * the {@code Data}/{@code StringMapData} types themselves, and Minecraft types: Item, Block,
+ * Fluid, EntityType, BlockEntityType, MobEffect, Enchantment, SoundEvent, Attribute,
+ * ParticleType, MenuType, RecipeType, ItemStack, FluidStack, ResourceLocation, Vec2, Vec3,
+ * Vec3i, BlockPos, ChunkPos, SectionPos, GlobalPos, Tag, CompoundTag, ListTag, Component,
+ * BlockState and AABB. They all register themselves while this class is initialized, so
+ * {@link #init()} is a no-op kept for compatibility.</p>
+ *
+ * <p>Types whose payload is a handful of primitives (Vec3i, SectionPos, AABB) use hand-written
+ * codec pairs instead of {@link CombinedCodec#composite} to avoid boxing; see that method for
+ * the trade-off.</p>
+ *
+ * <p>Downstream mods add their own types with the static {@code register(...)} family —
+ * {@link #register(Class, ByteStreamCodec, DataCodec)} for a plain runtime type,
+ * {@link #register(Class, ByteStreamCodec, DataCodec, Class[])} for a parameterized one, and
+ * {@link #register(Class, Registry)} for registry entries. Register during mod construction:
+ * the field-definition layer caches the resolved factory per field type, so a registration that
+ * arrives after that type was first scanned can be shadowed, and the tables are only
+ * synchronized on the write side.</p>
  *
  * @param <T> the type this codec can encode and decode
  */
@@ -259,10 +288,14 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     }
 
     /**
-     * Checks if a codec is registered for the given type
+     * Checks whether a codec can be resolved for the given type.
+     *
+     * <p>This mirrors {@link #get(Class)}: primitives always return {@code false}, while enum
+     * and object-array types return {@code true} even without an explicit registration because
+     * their codec is generated on demand.</p>
      *
      * @param type the class to check
-     * @return true if codec exists, false otherwise
+     * @return {@code true} if {@link #get(Class)} would return a codec
      */
     public static boolean contains(Class<?> type) {
         return get(type) != null;
@@ -292,15 +325,21 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
      *       encoding on disk (depending on whether the enum type is "fixed")</li>
      *   <li>Non-primitive object arrays — auto-generated on first access via
      *       {@link #ARRAY_CACHE}. Encodes length-prefixed with null markers</li>
-     *   <li>Registered types — looked up in {@link #CODECS} by exact class match</li>
+     *   <li>Registered types — looked up in {@link #CODECS} by exact class match. There is no
+     *       assignable-from fallback on purpose: a subtype must be registered explicitly (which
+     *       also keeps the choice of codec for a subtype visible in one place).</li>
      * </ol>
      *
      * @param type the class type
-     * @return the registered or auto-generated codec, or {@code null} if not found
-     * (primitives always return null)
+     * @return the registered or auto-generated codec, or {@code null} if this exact type is not
+     * registered (primitives always return null)
+     * @throws IllegalArgumentException if {@code type} is {@code null} — normally an unresolved
+     *                                  wildcard or type variable in a field declaration
      */
     @Nullable
     public static <T> DataSyncCodec<T> get(Class<T> type) {
+        if (type == null)
+            throw new IllegalArgumentException("Cannot resolve a codec for a null type (unresolved wildcard or type variable?)");
         if (type.isPrimitive()) return null;
         DataSyncCodec<?> codec;
         if (type.isEnum()) {
@@ -327,6 +366,15 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
         return (DataSyncCodec<T>) map.get(HashUtil.arrayIdentityWrapper(genericTypes));
     }
 
+    /**
+     * Registers <em>this</em> codec instance for the given runtime type.
+     *
+     * <p>Same effect as the static {@code register(...)} family, but reuses an already-built
+     * codec — used for codecs that are composed at class-initialization time from other constants
+     * (see {@link #registerComposed}).</p>
+     *
+     * @param type the exact runtime type this codec handles
+     */
     public void register(Class<T> type) {
         synchronized (CODECS) {
             CODECS.put(type, this);
@@ -386,12 +434,16 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     /**
      * Registers a codec for a parameterized (generic) type.
      *
+     * <p>Lookup goes through {@link #get(Class, Class[])} and the generic field factory, which
+     * pass the field's resolved argument classes. Arguments are matched by identity, so pass the
+     * very {@link Class} instances that appear in the field declaration.</p>
+     *
      * @param type         the raw class type
      * @param streamWriter encoder for network buffers
      * @param streamReader decoder for network buffers
      * @param dataWriter   encoder for persistent Data objects
      * @param dataReader   decoder for persistent Data objects
-     * @param genericTypes the generic type parameters
+     * @param genericTypes the generic type parameters, in declaration order
      * @param <T>          the type
      * @return the registered codec
      */
@@ -403,6 +455,9 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
         return codec;
     }
 
+    /**
+     * Convenience overload of {@link #register(Class, ByteStreamEncoder, ByteStreamDecoder, DataEncoder, DataDecoder, Class[])} using one codec per path.
+     */
     public static <T> DataSyncCodec<T> register(Class<T> type, ByteStreamCodec<T> streamCodec, DataCodec<T> dataCodec, Class<?>... genericTypes) {
         return register(type, streamCodec, streamCodec, dataCodec, dataCodec, genericTypes);
     }
@@ -416,6 +471,7 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
 
     public static final DataSyncCodec<StringMapData> MAP_DATA_CODEC = register(StringMapData.class, StringMapData.BYTE_STREAM_CODEC, StringMapData.DATA_CODEC);
 
+    // ---- primitive arrays ----
     public static final DataSyncCodec<boolean[]> BOOLEANS_CODEC = register(boolean[].class, ByteStreamCodec.BOOLEANS_CODEC, DataCodec.BOOLEANS_CODEC);
     public static final DataSyncCodec<byte[]> BYTES_CODEC = register(byte[].class, ByteStreamCodec.BYTES_CODEC, DataCodec.BYTES_CODEC);
     public static final DataSyncCodec<int[]> INTS_CODEC = register(int[].class, ByteStreamCodec.INTS_CODEC, DataCodec.INTS_CODEC);
@@ -425,6 +481,7 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     public static final DataSyncCodec<short[]> SHORTS_CODEC = register(short[].class, ByteStreamCodec.SHORTS_CODEC, DataCodec.SHORTS_CODEC);
     public static final DataSyncCodec<char[]> CHARS_CODEC = register(char[].class, ByteStreamCodec.CHARS_CODEC, DataCodec.CHARS_CODEC);
 
+    // ---- boxed primitives, String, UUID, BigInteger ----
     public static final DataSyncCodec<Boolean> BOOLEAN_CODEC = register(Boolean.class, ByteStreamCodec.BOOLEAN_CODEC, DataCodec.BOOLEAN_CODEC);
 
     public static final DataSyncCodec<Byte> BYTE_CODEC = register(Byte.class, ByteStreamCodec.BYTE_CODEC, DataCodec.BYTE_CODEC);
@@ -447,12 +504,21 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
 
     public static final DataSyncCodec<BigInteger> BIG_INTEGER_CODEC = register(BigInteger.class, ByteStreamCodec.BIG_INTEGER_CODEC, DataCodec.BIG_INTEGER_CODEC);
 
+    // ---- Minecraft registry entries (registry id on the wire, key on disk) ----
     public static final DataSyncCodec<Item> ITEM_CODEC = register(Item.class, BuiltInRegistries.ITEM);
     public static final DataSyncCodec<Block> BLOCK_CODEC = register(Block.class, BuiltInRegistries.BLOCK);
     public static final DataSyncCodec<Fluid> FLUID_CODEC = register(Fluid.class, BuiltInRegistries.FLUID);
     public static final DataSyncCodec<EntityType<?>> ENTITY_TYPE_CODEC = register((Class<EntityType<?>>) (Class<?>) EntityType.class, BuiltInRegistries.ENTITY_TYPE);
     public static final DataSyncCodec<BlockEntityType<?>> BLOCK_ENTITY_TYPE_CODEC = register((Class<BlockEntityType<?>>) (Class<?>) BlockEntityType.class, BuiltInRegistries.BLOCK_ENTITY_TYPE);
+    public static final DataSyncCodec<MobEffect> MOB_EFFECT_CODEC = register(MobEffect.class, BuiltInRegistries.MOB_EFFECT);
+    public static final DataSyncCodec<Enchantment> ENCHANTMENT_CODEC = register(Enchantment.class, BuiltInRegistries.ENCHANTMENT);
+    public static final DataSyncCodec<SoundEvent> SOUND_EVENT_CODEC = register(SoundEvent.class, BuiltInRegistries.SOUND_EVENT);
+    public static final DataSyncCodec<Attribute> ATTRIBUTE_CODEC = register(Attribute.class, BuiltInRegistries.ATTRIBUTE);
+    public static final DataSyncCodec<ParticleType<?>> PARTICLE_TYPE_CODEC = register((Class<ParticleType<?>>) (Class<?>) ParticleType.class, BuiltInRegistries.PARTICLE_TYPE);
+    public static final DataSyncCodec<MenuType<?>> MENU_TYPE_CODEC = register((Class<MenuType<?>>) (Class<?>) MenuType.class, BuiltInRegistries.MENU);
+    public static final DataSyncCodec<RecipeType<?>> RECIPE_TYPE_CODEC = register((Class<RecipeType<?>>) (Class<?>) RecipeType.class, BuiltInRegistries.RECIPE_TYPE);
 
+    // ---- Minecraft value types ----
     public static final DataSyncCodec<ResourceLocation> RESOURCE_LOCATION_CODEC = register(ResourceLocation.class, StreamCodecs.RESOURCE_LOCATION_CODEC, DataCodecs.RESOURCE_LOCATION_CODEC);
 
     public static final DataSyncCodec<Vec2> VEC2_CODEC = register(Vec2.class, StreamCodecs.VEC2_CODEC, DataCodecs.VEC2_CODEC);
@@ -460,10 +526,39 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     public static final DataSyncCodec<BlockPos> BLOCK_POS_CODEC = register(BlockPos.class, StreamCodecs.BLOCK_POS_CODEC, DataCodecs.BLOCK_POS_CODEC);
     public static final DataSyncCodec<ChunkPos> CHUNK_POS_CODEC = register(ChunkPos.class, StreamCodecs.CHUNK_POS_CODEC, DataCodecs.CHUNK_POS_CODEC);
 
+    /**
+     * Integer triple — hand-written pair (three VarInts on the wire, one {@code IntArrayData} on
+     * disk), so no boxing happens on either path. {@link BlockPos} has its own (more compact)
+     * codec and still wins by exact match.
+     */
+    public static final DataSyncCodec<Vec3i> VEC3I_CODEC = register(Vec3i.class, StreamCodecs.VEC3I_CODEC, DataCodecs.VEC3I_CODEC);
+
+    /**
+     * Section (16³ chunk section) position — hand-written pair carrying the packed long.
+     */
+    public static final DataSyncCodec<SectionPos> SECTION_POS_CODEC = register(SectionPos.class, StreamCodecs.SECTION_POS_CODEC, DataCodecs.SECTION_POS_CODEC);
+
+    /**
+     * Axis-aligned box — hand-written pair of six raw doubles rather than a
+     * {@link CombinedCodec#composite} of {@code double} components, which would box every
+     * coordinate on each encode/decode.
+     */
+    public static final DataSyncCodec<AABB> AABB_CODEC = register(AABB.class, StreamCodecs.AABB_CODEC, DataCodecs.AABB_CODEC);
+
+    /**
+     * Dimension + block position; the dimension is carried as its {@link ResourceLocation}.
+     */
+    public static final DataSyncCodec<GlobalPos> GLOBAL_POS_CODEC = registerComposed(GlobalPos.class, CombinedCodec.composite(
+            RESOURCE_LOCATION_CODEC, p -> p.dimension().location(),
+            BLOCK_POS_CODEC, GlobalPos::pos,
+            (location, pos) -> GlobalPos.of(ResourceKey.create(Registries.DIMENSION, location), pos)));
+
+    // ---- NBT ----
     public static final DataSyncCodec<Tag> TAG_CODEC = register(Tag.class, StreamCodecs.TAG_CODEC, DataCodecs.TAG_CODEC);
     public static final DataSyncCodec<CompoundTag> COMPOUND_TAG_CODEC = register(CompoundTag.class, StreamCodecs.COMPOUND_TAG_CODEC, DataCodecs.COMPOUND_TAG_CODEC);
     public static final DataSyncCodec<ListTag> LIST_TAG_CODEC = register(ListTag.class, StreamCodecs.LIST_TAG_CODEC, DataCodecs.LIST_TAG_CODEC);
 
+    // ---- stacks and components ----
     public static final DataSyncCodec<ItemStack> ITEM_STACK_CODEC = register(ItemStack.class, StreamCodecs.ITEM_STACK_CODEC, DataCodecs.ITEM_STACK_CODEC);
     public static final DataSyncCodec<FluidStack> FLUID_STACK_CODEC = register(FluidStack.class, StreamCodecs.FLUID_STACK_CODEC, DataCodecs.FLUID_STACK_CODEC);
 
@@ -471,14 +566,25 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
 
     public static final DataSyncCodec<BlockState> BLOCK_STATE_CODEC = register(BlockState.class, ByteStreamCodec.of(BlockState.CODEC), BlockState.CODEC);
 
-    public static final DataSyncCodec<AABB> AABB_CODEC = CombinedCodec.composite(DOUBLE_CODEC, a -> a.minX,
-            DOUBLE_CODEC, a -> a.minY,
-            DOUBLE_CODEC, a -> a.minZ,
-            DOUBLE_CODEC, a -> a.maxX,
-            DOUBLE_CODEC, a -> a.maxY,
-            DOUBLE_CODEC, a -> a.maxZ, AABB::new);
+    /**
+     * Registers a codec that was composed from other codec constants (see
+     * {@link CombinedCodec#composite}), returning it for the constant declaration.
+     *
+     * <p>Such a codec is produced by a factory rather than by {@code register(...)}, so it has to
+     * register itself here — which is why the composed constants live at the end of the constant
+     * block, after every component they reference has been initialized.</p>
+     */
+    private static <T> DataSyncCodec<T> registerComposed(Class<T> type, DataSyncCodec<T> codec) {
+        codec.register(type);
+        return codec;
+    }
 
+    /**
+     * Retained for compatibility and symmetry with {@code NbtUtil#init()}: every pre-registered
+     * codec now registers itself while this class is initialized (composed ones included, via
+     * {@link #registerComposed}), so this method has nothing left to do and is a no-op.
+     * {@code DataSyncLib} still calls it during mod construction.
+     */
     public static void init() {
-        AABB_CODEC.register(AABB.class);
     }
 }

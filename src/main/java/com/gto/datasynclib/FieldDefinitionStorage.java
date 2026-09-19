@@ -35,6 +35,25 @@ import java.util.function.*;
  *
  * <p>Strategy registration ({@link #registerStrategy}) allows custom hash/equality functions
  * for change detection on complex types.</p>
+ *
+ * <h3>How a field type is resolved</h3>
+ * <p>Every managed field is resolved once, in this order, and the result is cached per type:</p>
+ * <ol>
+ *   <li>{@code @Access} or a {@code final} field → the <strong>access</strong> chain
+ *       ({@link #registerAccessFactory}, {@link #registerAccessInterfaceFactory},
+ *       {@link #registerAccessCustomFactory})</li>
+ *   <li>{@code @Codec} → codec-backed object field, no factory lookup</li>
+ *   <li>{@code @Generic} → the <strong>generic</strong> chain
+ *       ({@link #registerGenericFactory}, {@link #registerCustomGenericFactory})</li>
+ *   <li>otherwise the <strong>value</strong> chain ({@link #registerFactory},
+ *       {@link #registerInterfaceFactory}, {@link #registerCustomFactory}) is tried first,
+ *       then generic, then access</li>
+ * </ol>
+ *
+ * <p>Because the outcome is cached, register custom types <em>before</em> the first holder of
+ * that type is scanned (i.e. during mod construction, like the {@code DataSyncLib} constructor
+ * does for the built-in types). Registration methods synchronize on their backing table, but
+ * lookups on the hot path do not, so concurrent registration is not supported.</p>
  */
 public final class FieldDefinitionStorage {
 
@@ -81,16 +100,46 @@ public final class FieldDefinitionStorage {
 
     private static final FieldDefinitionStorage EMPTY = new FieldDefinitionStorage();
 
+    /**
+     * Registers a factory for an exact field type, bypassing the predicate chain.
+     *
+     * <p>Exact-type registrations are stored directly in the type→factory cache, so they win
+     * over any {@code registerCustomFactory}/{@code registerInterfaceFactory} predicate. Like
+     * every registration here it must happen before the first holder of that type is scanned —
+     * the resolved factory is cached per type and a later registration is ignored.</p>
+     *
+     * @param type    the exact field type to handle
+     * @param factory creates the {@link DataField} for a field definition
+     */
     public static <T> void registerAccessFactory(Class<T> type, DataField.Factory<T> factory) {
         synchronized (ACCESS_CACHE) {
             ACCESS_CACHE.put(type, factory);
         }
     }
 
+    /**
+     * Registers an access-mode factory for every type assignable to {@code interfaceType}.
+     *
+     * @param interfaceType the interface (or superclass) whose implementors are matched
+     * @param factory       receives the concrete field type and returns the factory to use
+     * @param priority      higher wins; the access chain is consulted after the value chain
+     * @see #registerAccessCustomFactory(Predicate, Function, int)
+     */
     public static <T> void registerAccessInterfaceFactory(Class<T> interfaceType, Function<Class<?>, DataField.Factory<T>> factory, int priority) {
         registerAccessCustomFactory(interfaceType::isAssignableFrom, factory, priority);
     }
 
+    /**
+     * Registers an access-mode factory behind an arbitrary type predicate.
+     *
+     * <p>The access chain is the last tier of field resolution (containers, holders, arrays),
+     * so these predicates are only reached when no value-mode factory matched. Entries are kept
+     * sorted by descending priority and the first match wins.</p>
+     *
+     * @param type     predicate deciding whether this factory handles a field type
+     * @param factory  receives the concrete field type and returns the factory to use
+     * @param priority higher values are evaluated first
+     */
     public static <T> void registerAccessCustomFactory(Predicate<Class<?>> type, Function<Class<?>, DataField.Factory<T>> factory, int priority) {
         synchronized (ACCESS) {
             ACCESS.add(new DataField.CustomFactory<>(type, factory, priority));
@@ -98,12 +147,35 @@ public final class FieldDefinitionStorage {
         }
     }
 
+    /**
+     * Registers a factory for an exact parameterized type, e.g. {@code MyType.class} with
+     * {@code String.class, Integer.class} for {@code MyType<String, Integer>}.
+     *
+     * <p>The generic arguments are matched by identity against the field's resolved type
+     * arguments (see {@link ReflectUtil#getFieldGenericTypeClasses}), so register the same
+     * {@link Class} instances that appear in the field declaration.</p>
+     *
+     * @param type        the raw field type
+     * @param factory     creates the {@link DataField} for a field definition
+     * @param genericType the resolved generic arguments, in declaration order
+     */
     public static <T> void registerGenericFactory(Class<?> type, DataField.Factory<T> factory, Class<?>... genericType) {
         synchronized (GENERIC_FIELDS_CACHE) {
             GENERIC_FIELDS_CACHE.computeIfAbsent(type, k -> new HashMapCache<>(genericFunction(type))).put(HashUtil.arrayIdentityWrapper(genericType), factory);
         }
     }
 
+    /**
+     * Registers a generic factory behind a predicate over {@code (rawType, genericArguments)}.
+     *
+     * <p>Used for parameterized types that cannot be matched by an exact class, such as
+     * {@code Map<K, V>} or {@code List<T>}; the predicate receives the resolved argument classes.
+     * Entries are evaluated in descending priority order and the first match wins.</p>
+     *
+     * @param type     predicate over the raw type and its resolved generic arguments
+     * @param factory  builds the factory for a matching type
+     * @param priority higher values are evaluated first
+     */
     public static <T> void registerCustomGenericFactory(BiPredicate<Class<?>, Class<?>[]> type, BiFunction<Class<?>, Class<?>[], DataField.Factory<T>> factory, int priority) {
         synchronized (GENERIC_FIELDS) {
             GENERIC_FIELDS.add(new DataField.CustomGenericFactory<>(type, factory, priority));
@@ -111,16 +183,41 @@ public final class FieldDefinitionStorage {
         }
     }
 
+    /**
+     * Registers a value-mode factory for an exact field type (primitives, codec-backed objects).
+     * Takes precedence over the predicate chain and over the generic/access tiers.
+     *
+     * @param type    the exact field type to handle
+     * @param factory creates the {@link DataField} for a field definition
+     */
     public static <T> void registerFactory(Class<T> type, DataField.Factory<T> factory) {
         synchronized (FIELDS_CACHE) {
             FIELDS_CACHE.put(type, factory);
         }
     }
 
+    /**
+     * Registers a value-mode factory for every type assignable to {@code interfaceType}.
+     *
+     * @param interfaceType the interface (or superclass) whose implementors are matched
+     * @param factory       receives the concrete field type and returns the factory to use
+     * @param priority      higher wins
+     */
     public static <T> void registerInterfaceFactory(Class<T> interfaceType, Function<Class<?>, DataField.Factory<T>> factory, int priority) {
         registerCustomFactory(interfaceType::isAssignableFrom, factory, priority);
     }
 
+    /**
+     * Registers a value-mode factory behind an arbitrary type predicate — the main hook for
+     * making custom (non-container) types serializable, e.g. any type with a registered codec.
+     *
+     * <p>Entries are kept sorted by descending priority and the first matching predicate wins;
+     * the default predicate set installs codec-backed objects at priority 100.</p>
+     *
+     * @param type     predicate deciding whether this factory handles a field type
+     * @param factory  receives the concrete field type and returns the factory to use
+     * @param priority higher values are evaluated first
+     */
     public static <T> void registerCustomFactory(Predicate<Class<?>> type, Function<Class<?>, DataField.Factory<T>> factory, int priority) {
         synchronized (FIELDS) {
             FIELDS.add(new DataField.CustomFactory<>(type, factory, priority));
@@ -128,6 +225,22 @@ public final class FieldDefinitionStorage {
         }
     }
 
+    /**
+     * Registers the hash/equality strategy used for change detection and default-value comparison
+     * of an exact field type.
+     *
+     * <p>Without a registration the framework falls back to
+     * {@link DataFieldDefinition#OBJECT_STRATEGY} (ordinary {@code equals}/{@code hashCode}).
+     * The library pre-registers strategies for {@link net.minecraft.world.item.ItemStack} and
+     * {@link net.minecraftforge.fluids.FluidStack}, and for the array types {@code ItemStack[]} and
+     * {@code FluidStack[]} (an array field looks up its own exact type, so it does not inherit the
+     * element's strategy). For an array of another element type, derive its strategy from the
+     * element's with {@link com.gto.datasynclib.util.HashUtil#arrayStrategy(Hash.Strategy)} instead of
+     * writing one by hand. A {@code @Strategy} annotation on a field overrides this map.</p>
+     *
+     * @param type     the exact field type the strategy applies to
+     * @param strategy the strategy to use
+     */
     public static <T> void registerStrategy(Class<T> type, Hash.Strategy<T> strategy) {
         synchronized (STRATEGIES) {
             STRATEGIES.put(type, strategy);
@@ -161,6 +274,15 @@ public final class FieldDefinitionStorage {
         syncToServerDefinitions = syncToServerList.toArray(new DataFieldDefinition[0]);
     }
 
+    /**
+     * Looks up a definition by field identity within this storage's type bucket.
+     *
+     * <p>The bucket is keyed by the field's declared type, so only fields of the same type are
+     * compared.</p>
+     *
+     * @param field the reflected field to find
+     * @return the matching definition, or {@code null} if this class does not manage that field
+     */
     public DataFieldDefinition<?> getFieldDefinition(Field field) {
         for (var definition : typeDefinitions.getOrDefault(field.getType(), Collections.emptyList())) {
             if (definition.field == field) return definition;
@@ -189,6 +311,17 @@ public final class FieldDefinitionStorage {
         return new FieldDefinitionStorage(definitions);
     }
 
+    /**
+     * Returns the scanned definition storage for a class, computing it on first request.
+     *
+     * <p>The class hierarchy is walked through superclasses (fields of every level are merged,
+     * child classes may not reuse a parent's storage key), and the result is cached globally.
+     * A class that declares no managed field inherits its parent's storage or shares a single
+     * empty instance, so this never returns {@code null}.</p>
+     *
+     * @param clazz the holder class to scan
+     * @return the (cached) definitions for that class
+     */
     public static FieldDefinitionStorage get(Class<?> clazz) {
         var storage = CACHE.get(clazz);
         if (storage != null) return storage;

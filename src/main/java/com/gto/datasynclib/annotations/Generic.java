@@ -7,8 +7,8 @@ import java.lang.annotation.Target;
 
 /**
  * Forces a field to be resolved through the <strong>generic type</strong> factory chain
- * ({@link com.gto.datasynclib.FieldDefinitionStorage#GENERIC_FIELDS_CACHE}) rather than
- * the direct type factory chain.
+ * (the {@code GENERIC_FIELDS_CACHE} of {@link com.gto.datasynclib.FieldDefinitionStorage})
+ * rather than the direct type factory chain.
  *
  * <p>Normally, a field's type is resolved through the FIELDS cache first, falling back to
  * GENERIC only when the direct type lookup fails. This annotation reverses that priority

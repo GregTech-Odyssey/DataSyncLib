@@ -33,7 +33,7 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;
             for (var element : instance) {
-                element.markAsChanged();
+                if (element != null) element.markAsChanged();
             }
             return true;
         }
