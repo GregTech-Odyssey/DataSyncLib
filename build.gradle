@@ -242,3 +242,8 @@ gtoPublish {
     curseforgeProjectId   = '123456'    // CurseForge 项目 ID（启用 CurseForge 时必填）
     curseforgeJavaVersion = 'Java 21'   // Java 版本（启用 CurseForge 时必填，如 Java 8, Java 17, Java 21, Java 25）
 }
+
+java {
+    withSourcesJar()
+}
+
