@@ -43,7 +43,7 @@ public final class ByteArrayAccess extends AbstractFieldAccess<byte[]> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, byte @NotNull [] instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, byte @NotNull [] instance, boolean autoDetectOnly) {
         if (!Arrays.equals(snapshot, instance)) {
             snapshot = instance.clone();
             return true;

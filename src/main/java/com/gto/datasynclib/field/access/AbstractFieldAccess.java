@@ -22,8 +22,8 @@ import org.jetbrains.annotations.Nullable;
  *   <li><strong>Public interface methods</strong> (from {@link com.gto.datasynclib.DataField}):
  *     {@link #detectChange}, {@link #writeToBuffer}, {@link #readFromBuffer},
  *     {@link #writeToData}, {@link #readFromData} — handle the common logic:
- *     null checks, instance identity tracking, {@code createInstance} wrapping, and listener
- *     invocation. Skip conditions are evaluated in exactly two places: the {@code skipSync}
+ *     null checks, instance identity tracking, {@code instanceAsValue} wrapping, and listener
+ *     invocation. Skip predicates are evaluated in exactly two places: the {@code skipSync}
  *     check in {@link #detectChange} and the {@code skipSave} check in {@link #writeToData};
  *     {@code writeToBuffer}/{@code readFromBuffer}/{@code readFromData} perform no skip checks.</li>
  *   <li><strong>Protected template methods</strong> (implemented by subclasses):
@@ -38,8 +38,8 @@ import org.jetbrains.annotations.Nullable;
  *       object reference against the previously-seen one. If a different object is now
  *       assigned to the field, the field is automatically marked as changed. If it's
  *       the same object, content-level change detection ({@link #hasChange}) is invoked.</li>
- *   <li><strong>{@code createInstance} mode:</strong> When the field's definition has
- *       {@link com.gto.datasynclib.DataFieldDefinition#createInstance} = {@code true},
+ *   <li><strong>{@code instanceAsValue} mode:</strong> When the field's definition has
+ *       {@link com.gto.datasynclib.DataFieldDefinition#instanceAsValue} = {@code true},
  *       the container itself (not just its contents) is serialized. This handles fields
  *       that may be {@code null} and need full instance replacement on deserialization.
  *       Also supports a legacy data version ({@code dataVersion == -1}) migration path.</li>
@@ -94,17 +94,17 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
     }
 
     @Override
-    public boolean detectChange(@NotNull LogicalSide side, @NotNull Object source, boolean autoOnly) {
+    public boolean detectChange(@NotNull LogicalSide side, @NotNull Object source, boolean autoDetectOnly) {
         var instance = getInstance(source);
         if (definition.skipSync(side, source, instance)) return false;
         if (this.instance != instance) {
             this.instance = instance;
             markAsChanged(source);
-            if (instance != null && mustDetect()) hasChange(side, instance, autoOnly);
+            if (instance != null && mustDetect()) hasChange(side, instance, autoDetectOnly);
             return true;
         }
         if (instance == null) return changed;
-        if (hasChange(side, instance, autoOnly)) {
+        if (hasChange(side, instance, autoDetectOnly)) {
             markAsChanged(source);
             return true;
         }
@@ -114,7 +114,7 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
     @Override
     public final void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean writeAll) {
         var value = getInstance(source);
-        if (definition.createInstance) {
+        if (definition.instanceAsValue) {
             if (value == null) {
                 data.writeBoolean(false);
             } else {
@@ -128,7 +128,7 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
     @Override
     public final void readFromBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data) {
         T value;
-        if (definition.createInstance) {
+        if (definition.instanceAsValue) {
             if (data.readBoolean()) {
                 value = definition.decode(source, data);
             } else {
@@ -154,7 +154,7 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
     public final @NotNull Data writeToData(@NotNull Object source) {
         var definition = this.definition;
         var value = getInstance(source);
-        if (definition.createInstance) {
+        if (definition.instanceAsValue) {
             if (value == null) {
                 return NullData.INSTANCE;
             } else {
@@ -171,7 +171,7 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
     @Override
     public final void readFromData(@NotNull Object source, @NotNull Data data, int dataVersion) {
         T value = null;
-        if (definition.createInstance) {
+        if (definition.instanceAsValue) {
             if (dataVersion == -1) {
                 if (data instanceof StringMapData mapData && !mapData.isEmpty()) {
                     var uid = mapData.get("uid");
@@ -192,7 +192,7 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
             if (value != null) doReadData(value, data, dataVersion);
         }
         // Load listener (@SaveToDisk(listener = "...")): `value` is the container that has just
-        // been read (in place, or freshly decoded for `createInstance` fields), or null when the
+        // been read (in place, or freshly decoded for `instanceAsValue` fields), or null when the
         // stored entry is a null marker / the field is absent. Never called on the sync path.
         var listener = definition.getSaveListener();
         if (listener != null) {
@@ -215,11 +215,11 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
      *       as changed.</li>
      * </ol>
      */
-    protected abstract boolean hasChange(@NotNull LogicalSide side, @NotNull T instance, boolean autoOnly);
+    protected abstract boolean hasChange(@NotNull LogicalSide side, @NotNull T instance, boolean autoDetectOnly);
 
     /**
      * Template method: write the container's <em>contents</em> to the network buffer.
-     * Called by {@link #writeToBuffer} after null/instance/createInstance handling.
+     * Called by {@link #writeToBuffer} after null/instance handling.
      *
      * @param writeAll only meaningful for implementations that delegate to a nested
      *                 {@link com.gto.datasynclib.FieldDataManager} (holder/child-manager
@@ -230,19 +230,19 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
 
     /**
      * Template method: read the container's <em>contents</em> from the network buffer.
-     * Called by {@link #readFromBuffer} after null/instance/createInstance handling.
+     * Called by {@link #readFromBuffer} after null/instance handling.
      */
     protected abstract void doReadBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull FriendlyByteBuf data);
 
     /**
      * Template method: serialize the container's <em>contents</em> to a Data object.
-     * Called by {@link #writeToData} after null/instance/createInstance/skip handling.
+     * Called by {@link #writeToData} after null/instance/skip handling.
      */
     protected abstract @NotNull Data doWriteData(@NotNull Object source, @NotNull T instance);
 
     /**
      * Template method: deserialize the container's <em>contents</em> from a Data object.
-     * Called by {@link #readFromData} after null/instance/createInstance handling.
+     * Called by {@link #readFromData} after null/instance handling.
      */
     protected abstract void doReadData(@NotNull T instance, @NotNull Data data, int dataVersion);
 }

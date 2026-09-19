@@ -46,5 +46,5 @@ public @interface Access {
      * {@code false} (default) if the instance always exists and only its
      * contents need serialization
      */
-    boolean createInstance() default false;
+    boolean instanceAsValue() default false;
 }

@@ -26,7 +26,7 @@ import net.minecraft.network.FriendlyByteBuf;
  *   <li>{@link #writeCustomSaveData}/{@link #readCustomSaveData} — inject extra data before
  *       field-level disk serialization</li>
  *   <li>{@link #scheduleUpdate(LogicalSide)} — called after receiving sync data for fields
- *       with {@code notifyUpdate = true}, for triggering re-renders or validation</li>
+ *       with {@code scheduleUpdate = true}, for triggering re-renders or validation</li>
  * </ul>
  *
  * @see FieldDataManager

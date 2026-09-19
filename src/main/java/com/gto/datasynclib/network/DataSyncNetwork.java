@@ -150,14 +150,14 @@ public class DataSyncNetwork {
      * @param be       the block entity to sync
      * @param all      {@code true} to write all fields regardless of dirty state (full sync);
      *                 {@code false} to write only changed fields (incremental sync)
-     * @param autoOnly {@code true} to only detect changes on fields with
-     *                 {@code autoUpdate = true}; {@code false} to force-detect all fields
+     * @param autoDetectOnly {@code true} to only detect changes on fields with
+     *                 {@code autoDetect = true}; {@code false} to force-detect all fields
      */
-    public void syncBlockEntityToClient(@NotNull BlockEntity be, boolean all, boolean autoOnly) {
+    public void syncBlockEntityToClient(@NotNull BlockEntity be, boolean all, boolean autoDetectOnly) {
         if (be instanceof IFieldDataHolder holder
                 && be.getLevel() instanceof ServerLevel level
                 && holder.getFieldDataManager().hasSyncFields(LogicalSide.SERVER)
-                && holder.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, autoOnly)) {
+                && holder.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, autoDetectOnly)) {
             byte[] data = holder.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, all);
             var packet = new BlockEntitySyncPacket(be.getBlockPos(), data);
             level.getServer().execute(() ->
@@ -173,15 +173,15 @@ public class DataSyncNetwork {
      * @param be       the block entity to sync
      * @param all      {@code true} to write all fields (full sync);
      *                 {@code false} for incremental (only changed fields)
-     * @param autoOnly {@code true} to only detect changes on fields with
-     *                 {@code autoUpdate = true}; {@code false} to force-detect all fields
+     * @param autoDetectOnly {@code true} to only detect changes on fields with
+     *                 {@code autoDetect = true}; {@code false} to force-detect all fields
      */
-    public void syncBlockEntityToServer(@NotNull BlockEntity be, boolean all, boolean autoOnly) {
+    public void syncBlockEntityToServer(@NotNull BlockEntity be, boolean all, boolean autoDetectOnly) {
         var level = be.getLevel();
         if (level == null || !level.isClientSide()) return;
         if (be instanceof IFieldDataHolder holder
                 && holder.getFieldDataManager().hasSyncFields(LogicalSide.CLIENT)
-                && holder.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.CLIENT, autoOnly)) {
+                && holder.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.CLIENT, autoDetectOnly)) {
             byte[] data = holder.getFieldDataManager().writeToNetworkBuffer(LogicalSide.CLIENT, all);
             var packet = new BlockEntitySyncPacket(be.getBlockPos(), data);
             Minecraft.getInstance().execute(() -> CHANNEL.sendToServer(packet));
@@ -196,15 +196,15 @@ public class DataSyncNetwork {
      * @param entity   the entity to sync
      * @param all      {@code true} to write all fields (full sync);
      *                 {@code false} for incremental (only changed fields)
-     * @param autoOnly {@code true} to only detect changes on fields with
-     *                 {@code autoUpdate = true}; {@code false} to force-detect all fields
+     * @param autoDetectOnly {@code true} to only detect changes on fields with
+     *                 {@code autoDetect = true}; {@code false} to force-detect all fields
      */
-    public void syncEntityToClient(@NotNull Entity entity, boolean all, boolean autoOnly) {
+    public void syncEntityToClient(@NotNull Entity entity, boolean all, boolean autoDetectOnly) {
         if (entity.level().isClientSide()) return;
         if (entity instanceof IFieldDataHolder holder
                 && entity.level() instanceof ServerLevel level
                 && holder.getFieldDataManager().hasSyncFields(LogicalSide.SERVER)
-                && holder.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, autoOnly)) {
+                && holder.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, autoDetectOnly)) {
             byte[] data = holder.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, all);
             var packet = new EntitySyncPacket(entity.getId(), data);
             level.getServer().execute(() ->
@@ -220,14 +220,14 @@ public class DataSyncNetwork {
      * @param entity   the entity to sync
      * @param all      {@code true} to write all fields (full sync);
      *                 {@code false} for incremental (only changed fields)
-     * @param autoOnly {@code true} to only detect changes on fields with
-     *                 {@code autoUpdate = true}; {@code false} to force-detect all fields
+     * @param autoDetectOnly {@code true} to only detect changes on fields with
+     *                 {@code autoDetect = true}; {@code false} to force-detect all fields
      */
-    public void syncEntityToServer(@NotNull Entity entity, boolean all, boolean autoOnly) {
+    public void syncEntityToServer(@NotNull Entity entity, boolean all, boolean autoDetectOnly) {
         if (!entity.level().isClientSide()) return;
         if (entity instanceof IFieldDataHolder holder
                 && holder.getFieldDataManager().hasSyncFields(LogicalSide.CLIENT)
-                && holder.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.CLIENT, autoOnly)) {
+                && holder.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.CLIENT, autoDetectOnly)) {
             byte[] data = holder.getFieldDataManager().writeToNetworkBuffer(LogicalSide.CLIENT, all);
             var packet = new EntitySyncPacket(entity.getId(), data);
             Minecraft.getInstance().execute(() -> CHANNEL.sendToServer(packet));

@@ -44,7 +44,7 @@ public final class BooleanArrayAccess extends AbstractFieldAccess<boolean[]> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, boolean @NotNull [] instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, boolean @NotNull [] instance, boolean autoDetectOnly) {
         if (!Arrays.equals(snapshot, instance)) {
             snapshot = instance.clone();
             return true;

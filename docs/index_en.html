@@ -164,7 +164,7 @@ li { margin: 4px 0; }
 
 <!-- ===== HERO ===== -->
 <div class="hero">
-    <h1>DataSyncLib <span class="version">v26.9.3 for Minecraft 1.20.1</span></h1>
+    <h1>DataSyncLib <span class="version">v26.9.4 for Minecraft 1.20.1</span></h1>
     <p>An annotation-driven Minecraft data synchronization framework — automatic client-server field sync, change detection, and disk persistence.</p>
     <div class="badge-row">
         <span class="badge green">Minecraft 1.20.1</span>
@@ -183,7 +183,7 @@ li { margin: 4px 0; }
 <h2 id="features">Key Features</h2>
 <div class="card-grid">
     <div class="card"><h4>🔁 Bidirectional Sync</h4><p><code>@SyncToClient</code> and <code>@SyncToServer</code> handle server↔client field synchronization automatically. Async-safe.</p></div>
-    <div class="card"><h4>💾 Auto Persistence</h4><p><code>@SaveToDisk</code> fields are automatically written to/read from NBT, with custom keys, conditional saves, and default-value exclusion.</p></div>
+    <div class="card"><h4>💾 Auto Persistence</h4><p><code>@SaveToDisk</code> fields are automatically written to/read from NBT, with custom keys, <code>skipWhen</code> predicates, and default-value exclusion.</p></div>
     <div class="card"><h4>📡 Incremental Sync</h4><p>Built-in dirty flag mechanism transmits only changed fields. VarInt index-addressed wire format minimizes bandwidth.</p></div>
     <div class="card"><h4>🔧 Extensible Codec</h4><p>Unified <code>DataSyncCodec</code> registry supporting both stream codecs and data codecs. 30+ pre-registered types.</p></div>
     <div class="card"><h4>📢 Change Notification</h4><p><code>listener</code> callbacks and <code>NotifiableHolder</code> system trigger business logic on field value changes.</p></div>
@@ -201,7 +201,7 @@ li { margin: 4px 0; }
 <h3>1. Add Dependency</h3>
 <pre><code><span class="cmt">// build.gradle</span>
 <span class="kw">dependencies</span> {
-    <span class="kw">implementation</span> <span class="str">'com.gto:datasynclib:26.9.3'</span>
+    <span class="kw">implementation</span> <span class="str">'com.gto:datasynclib:26.9.4'</span>
 }</code></pre>
 
 <h3>2. Create a BlockEntity</h3>
@@ -234,7 +234,7 @@ li { margin: 4px 0; }
     <tbody>
         <tr><td>Annotation</td><td>@SyncToClient, @SyncToServer, @SaveToDisk, etc.</td><td>Declarative marking of field sync and persistence behavior</td></tr>
         <tr><td>Metadata</td><td>FieldDefinitionStorage, FieldAnnotationMetadata</td><td>Scan and cache class-level field definition metadata: factories, codecs, strategies</td></tr>
-        <tr><td>Definition</td><td>DataFieldDefinition&lt;T&gt;</td><td>Encapsulates per-field reflection info, getters/setters, serialization methods, conditions</td></tr>
+        <tr><td>Definition</td><td>DataFieldDefinition&lt;T&gt;</td><td>Encapsulates per-field reflection info, getters/setters, serialization methods, skip predicates</td></tr>
         <tr><td>Management</td><td>FieldDataManager, LazyFieldDataManager</td><td>Per-instance lifecycle: change detection, serialization, deserialization, with re-entrancy guards</td></tr>
         <tr><td>Field</td><td>DataField, BooleanField, IntField, ObjCodecField&hellip;</td><td>Concrete field read/write, change detection, and buffer serialization implementations</td></tr>
         <tr><td>Access</td><td>CollectionAccess, MapAccess, SerializableAccess&hellip;</td><td>Proxy access and serialization for final fields (collections/Maps/custom types)</td></tr>
@@ -250,10 +250,10 @@ li { margin: 4px 0; }
 <p>Field synchronization requires <strong>explicit calls</strong> to <code>DataSyncNetwork</code> static methods. The framework does not push data automatically on every tick.</p>
 <ol>
     <li><strong>Modify field values</strong> — change annotated fields in tick or business methods</li>
-    <li><strong>Call sync method</strong> — invoke <code>DataSyncNetwork.syncBlockEntityToClient(be, writeAll, autoOnly)</code> (server side) or <code>syncBlockEntityToServer(be, writeAll, autoOnly)</code> (client side)</li>
+    <li><strong>Call sync method</strong> — invoke <code>DataSyncNetwork.syncBlockEntityToClient(be, writeAll, autoDetectOnly)</code> (server side) or <code>syncBlockEntityToServer(be, writeAll, autoDetectOnly)</code> (client side)</li>
     <li><strong>Internal pipeline</strong> — the method internally calls <code>FieldDataManager.updateFieldDirtyFlags()</code> → <code>writeToNetworkBuffer()</code> → sends network packet</li>
     <li><strong>Remote reception</strong> — the packet triggers <code>FieldDataManager.readFromNetworkBuffer()</code> to deserialize and restore field values</li>
-    <li><strong>Update notification</strong> — if the field has <code>notifyUpdate = true</code>, <code>scheduleUpdate()</code> is called to notify UI refresh</li>
+    <li><strong>Update notification</strong> — if the field has <code>scheduleUpdate = true</code>, <code>scheduleUpdate()</code> is called to notify UI refresh</li>
 </ol>
 <div class="note"><strong>Async support:</strong> all <code>DataSyncNetwork</code> send methods are async-safe. After detecting changes and serializing, they dispatch network sends to the main thread via <code>level.getServer().execute()</code> (server) or <code>Minecraft.getInstance().execute()</code> (client).</div>
 
@@ -265,13 +265,13 @@ li { margin: 4px 0; }
 </ol>
 <div class="note warn"><strong>Important:</strong> the framework does <strong>not</strong> call <code>setChanged()</code> for you. You must call it manually after data changes, otherwise the chunk is not marked dirty and data won't be written to disk.</div>
 
-<h3>autoUpdate and markFieldsForSync</h3>
-<p>The <code>autoUpdate</code> attribute on <code>@SyncToClient</code> and <code>@SyncToServer</code> (default <code>true</code>):</p>
+<h3>autoDetect and markFieldsForSync</h3>
+<p>The <code>autoDetect</code> attribute on <code>@SyncToClient</code> and <code>@SyncToServer</code> (default <code>true</code>):</p>
 <ul>
-    <li><strong>autoUpdate = true</strong> — <code>detectChange()</code> is called automatically each time <code>updateFieldDirtyFlags()</code> runs. Best for primitives and simple objects.</li>
-    <li><strong>autoUpdate = false</strong> — no automatic change detection. You must manually call <code>markFieldsForSync("fieldName")</code> to mark it dirty, after which the next sync push will include it. Best when you need precise control over sync timing.</li>
+    <li><strong>autoDetect = true</strong> — <code>detectChange()</code> is called automatically each time <code>updateFieldDirtyFlags()</code> runs. Best for primitives and simple objects.</li>
+    <li><strong>autoDetect = false</strong> — no automatic change detection. You must manually call <code>markFieldsForSync("fieldName")</code> to mark it dirty, after which the next sync push will include it. Best when you need precise control over sync timing.</li>
 </ul>
-<p>The <code>markFieldsForSync</code> method is designed specifically for <code>autoUpdate = false</code> fields — even if the value changes, the framework won't detect it automatically; a manual mark is required.</p>
+<p>The <code>markFieldsForSync</code> method is designed specifically for <code>autoDetect = false</code> fields — even if the value changes, the framework won't detect it automatically; a manual mark is required.</p>
 
 <!-- ===== DATA FLOW ===== -->
 <h2 id="data-flow">Data Flow</h2>
@@ -388,7 +388,7 @@ li { margin: 4px 0; }
         <tr><td>Codec registry</td><td>Reference2ReferenceOpenHashMap</td><td>Direct type-to-DataSyncCodec mapping, O(1) identity lookup</td></tr>
         <tr><td>Enum codecs</td><td>ConcurrentHashMapCache</td><td>Auto-generated and cached on first enum type access</td></tr>
         <tr><td>Array codecs</td><td>ConcurrentHashMapCache</td><td>Auto-generated and cached on first array type access</td></tr>
-        <tr><td>MethodHandles</td><td>DataFieldDefinition per-field</td><td>Getter/setter/condition/listener MethodHandles resolved once at construction time</td></tr>
+        <tr><td>MethodHandles</td><td>DataFieldDefinition per-field</td><td>Getter/setter/skipWhen/listener MethodHandles resolved once at construction time</td></tr>
     </tbody>
 </table>
 
@@ -409,7 +409,7 @@ li { margin: 4px 0; }
     <thead><tr><th>Method</th><th>Description</th></tr></thead>
     <tbody>
         <tr><td>getFieldDataManager()</td><td><strong>Required.</strong> Returns the associated FieldDataManager instance</td></tr>
-        <tr><td>markFieldsForSync(String...)</td><td>Convenience default. Marks specified fields as dirty (for autoUpdate=false fields)</td></tr>
+        <tr><td>markFieldsForSync(String...)</td><td>Convenience default. Marks specified fields as dirty (for autoDetect=false fields)</td></tr>
         <tr><td>scheduleUpdate(LogicalSide)</td><td>Default. Called on field update notification. Override to trigger UI refresh etc.</td></tr>
         <tr><td>writeCustomSyncData(buf, writeAll)</td><td>Write additional custom data to the network buffer before standard field sync</td></tr>
         <tr><td>readCustomSyncData(buf)</td><td>Read additional custom data from the network buffer before standard field sync</td></tr>
@@ -424,7 +424,7 @@ li { margin: 4px 0; }
 <table>
     <thead><tr><th>Method</th><th>Description</th></tr></thead>
     <tbody>
-        <tr><td>detectChange()</td><td>Detect whether data has changed (snapshot comparison or flag). Called each sync round when autoUpdate=true</td></tr>
+        <tr><td>detectChange()</td><td>Detect whether data has changed (snapshot comparison or flag). Called each sync round when autoDetect=true</td></tr>
         <tr><td>markAsChanged()</td><td>Force-mark as changed, ensuring inclusion in next sync</td></tr>
         <tr><td>clearChanged()</td><td>Clear the change flag (called after sync/persistence completes)</td></tr>
         <tr><td>isChanged()</td><td>Check whether marked as changed</td></tr>
@@ -446,7 +446,7 @@ li { margin: 4px 0; }
         <tr><td>markAsChanged(source)</td><td>Mark the field as dirty (for a specific source object)</td></tr>
         <tr><td>isChanged(source)</td><td>Check whether the field is marked dirty</td></tr>
         <tr><td>clearChanged(source)</td><td>Clear the dirty flag</td></tr>
-        <tr><td>detectChange(side, source, autoOnly)</td><td>Detect whether field value has changed. autoOnly=true: only checks fields with autoUpdate=true; false=force-detect all fields</td></tr>
+        <tr><td>detectChange(side, source, autoDetectOnly)</td><td>Detect whether field value has changed. autoDetectOnly=true: only checks fields with autoDetect=true; false=force-detect all fields</td></tr>
         <tr><td>writeToBuffer(side, source, buf, writeAll)</td><td>Write field value to network buffer. writeAll=true writes all fields regardless of dirty state</td></tr>
         <tr><td>readFromBuffer(side, source, buf)</td><td>Read and set field value from network buffer, also triggers listener callbacks</td></tr>
         <tr><td>writeToData(source)</td><td>Encode field value to a Data object for persistence</td></tr>
@@ -463,7 +463,7 @@ li { margin: 4px 0; }
     <li><strong>Reflection info</strong> — Field, isFinal, genericType[], genericCodecs[]</li>
     <li><strong>Accessors</strong> — high-performance getters/setters via <code>MethodHandle.invokeExact()</code> (covering all primitives + Object), resolved once at construction time, approaching native field access speed</li>
     <li><strong>Serialization proxy</strong> — supports custom serialization methods specified via @Codec annotation (also invoked via MethodHandle), or auto-lookup from DataSyncCodec</li>
-    <li><strong>Condition checks</strong> — skipSync() / skipSave() method families, called via MethodHandle, supporting all primitive type method dispatch</li>
+    <li><strong>Skip-predicate checks</strong> — skipSync() / skipSave() method families, called via MethodHandle, supporting all primitive type method dispatch</li>
     <li><strong>Change strategy</strong> — FastUtil <code>Hash.Strategy</code> for change detection, defaulting to OBJECT_STRATEGY (hashCode/equals)</li>
     <li><strong>Default values</strong> — supports defaultValue string parsing and defaultValueGetter MethodHandle references</li>
     <li><strong>Listeners</strong> — getListener(side) returns callback MethodHandle invoked via invokeExact on field update</li>
@@ -475,7 +475,7 @@ li { margin: 4px 0; }
 <h3>Core Responsibilities</h3>
 <ul style="line-height: 2;">
     <li><strong>Field discovery &amp; instantiation</strong> — reads class-level metadata from <code>FieldDefinitionStorage</code>, creates DataField implementations for each field</li>
-    <li><strong>Change detection</strong> — <code>updateFieldDirtyFlags(LogicalSide, boolean autoOnly)</code> iterates sync fields, calling detectChange</li>
+    <li><strong>Change detection</strong> — <code>updateFieldDirtyFlags(LogicalSide, boolean autoDetectOnly)</code> iterates sync fields, calling detectChange</li>
     <li><strong>Network serialization</strong> — writes custom sync data first, then each dirty field as (VarInt fieldIndex, fieldPayload) pairs</li>
     <li><strong>Data persistence</strong> — via <code>writeToData()</code>/<code>readFromData()</code> using the StringMapData format</li>
     <li><strong>Re-entrancy protection</strong> — <code>updating</code> and <code>writing</code> volatile flags prevent recursion</li>
@@ -486,7 +486,7 @@ li { margin: 4px 0; }
 <table>
     <thead><tr><th>Method</th><th>Description</th></tr></thead>
     <tbody>
-        <tr><td>updateFieldDirtyFlags(side, autoOnly)</td><td>Iterates sync fields calling detectChange. Returns true if any change or dirty flag found</td></tr>
+        <tr><td>updateFieldDirtyFlags(side, autoDetectOnly)</td><td>Iterates sync fields calling detectChange. Returns true if any change or dirty flag found</td></tr>
         <tr><td>writeToNetworkBuffer(side, writeAll)</td><td>Serializes dirty fields to byte[]. writeAll=true writes all fields</td></tr>
         <tr><td>readFromNetworkBuffer(side, data)</td><td>Deserializes byte[] and restores field values, triggers listener and scheduleUpdate</td></tr>
         <tr><td>writeToData()</td><td>Serializes all @SaveToDisk fields to StringMapData</td></tr>
@@ -545,10 +545,10 @@ li { margin: 4px 0; }
 <table>
     <thead><tr><th>Method</th><th>Calling Side</th><th>Parameters</th></tr></thead>
     <tbody>
-        <tr><td>syncBlockEntityToClient(be, all, autoOnly)</td><td>Server</td><td>all: full sync (true=all fields); autoOnly: true=only check autoUpdate fields</td></tr>
-        <tr><td>syncBlockEntityToServer(be, all, autoOnly)</td><td>Client</td><td>Same as above</td></tr>
-        <tr><td>syncEntityToClient(entity, all, autoOnly)</td><td>Server</td><td>Same as above</td></tr>
-        <tr><td>syncEntityToServer(entity, all, autoOnly)</td><td>Client</td><td>Same as above</td></tr>
+        <tr><td>syncBlockEntityToClient(be, all, autoDetectOnly)</td><td>Server</td><td>all: full sync (true=all fields); autoDetectOnly: true=only check autoDetect fields</td></tr>
+        <tr><td>syncBlockEntityToServer(be, all, autoDetectOnly)</td><td>Client</td><td>Same as above</td></tr>
+        <tr><td>syncEntityToClient(entity, all, autoDetectOnly)</td><td>Server</td><td>Same as above</td></tr>
+        <tr><td>syncEntityToServer(entity, all, autoDetectOnly)</td><td>Client</td><td>Same as above</td></tr>
     </tbody>
 </table>
 <div class="note"><strong>Async mechanism:</strong> after detecting changes and serializing data, the methods dispatch the actual network send to the main thread via <code>level.getServer().execute()</code> (server) or <code>Minecraft.getInstance().execute()</code> (client), so they can be called from any thread. Additionally, when data is synced server→client, the receiving handler automatically calls <code>be.setChanged()</code> on the BlockEntity.</div>
@@ -851,9 +851,9 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 <table>
     <thead><tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
     <tbody>
-        <tr><td>notifyUpdate</td><td>boolean</td><td>false</td><td>Whether to trigger IFieldDataHolder.scheduleUpdate() on change</td></tr>
-        <tr><td>autoUpdate</td><td>boolean</td><td>true</td><td>Auto-detect changes (via dirty flag/value comparison). Set false to require manual markFieldsForSync</td></tr>
-        <tr><td>condition</td><td>String</td><td>""</td><td>Condition method name, signature T→boolean. Returns false to skip this sync round</td></tr>
+        <tr><td>scheduleUpdate</td><td>boolean</td><td>false</td><td>Whether to trigger IFieldDataHolder.scheduleUpdate() on change</td></tr>
+        <tr><td>autoDetect</td><td>boolean</td><td>true</td><td>Auto-detect changes (via dirty flag/value comparison). Set false to require manual markFieldsForSync</td></tr>
+        <tr><td>skipWhen</td><td>String</td><td>""</td><td>Skip-predicate method name, signature T→boolean. Returning true skips this field for this sync round</td></tr>
         <tr><td>listener</td><td>String</td><td>""</td><td>Callback method name on update, signature (T newVal, T oldVal)→void</td></tr>
     </tbody>
 </table>
@@ -863,9 +863,9 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 <table>
     <thead><tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
     <tbody>
-        <tr><td>autoUpdate</td><td>boolean</td><td>true</td><td>When <code>autoOnly=true</code> in sync call, only auto-detect changes on this field</td></tr>
-        <tr><td>notifyUpdate</td><td>boolean</td><td>false</td><td>Trigger server-side <code>scheduleUpdate(LogicalSide)</code> after receiving sync</td></tr>
-        <tr><td>condition</td><td>String</td><td>""</td><td>Method name returning boolean; skip sync when returning true</td></tr>
+        <tr><td>autoDetect</td><td>boolean</td><td>true</td><td>Whether this field takes part in automatic change detection (<code>updateFieldDirtyFlags(side, autoDetectOnly=true)</code>). Set false to require manual markFieldsForSync</td></tr>
+        <tr><td>scheduleUpdate</td><td>boolean</td><td>false</td><td>Trigger server-side <code>scheduleUpdate(LogicalSide)</code> after receiving sync</td></tr>
+        <tr><td>skipWhen</td><td>String</td><td>""</td><td>Skip-predicate method name, signature T→boolean. Returning true skips this field for this sync round</td></tr>
         <tr><td>listener</td><td>String</td><td>""</td><td>Change listener method with signature <code>(T newValue, T oldValue) -> void</code></td></tr>
     </tbody>
 </table>
@@ -876,8 +876,8 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
     <thead><tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
     <tbody>
         <tr><td>key</td><td>String</td><td>""</td><td>Custom storage key name; uses field name if empty</td></tr>
-        <tr><td>condition</td><td>String</td><td>""</td><td>Persistence condition method name</td></tr>
-        <tr><td>saveNull</td><td>boolean</td><td>false</td><td>Whether to write null/empty collection/empty array values</td></tr>
+        <tr><td>skipWhen</td><td>String</td><td>""</td><td>Skip-predicate method name; returning true keeps the field out of the saved data</td></tr>
+        <tr><td>saveEmpty</td><td>boolean</td><td>false</td><td>Whether to write null/empty collection/empty array values</td></tr>
         <tr><td>defaultValue</td><td>String</td><td>""</td><td>Default value (as string); skips writing when field equals this value</td></tr>
         <tr><td>defaultValueGetter</td><td>String</td><td>""</td><td>Getter method name providing the default value</td></tr>
         <tr><td>listener</td><td>String</td><td>""</td><td>Method invoked after the field has been read back from disk, signature <code>(T value) -> void</code> (the parameter type must match the field's declared type exactly — <code>int</code> for an <code>int</code> field). Fires only when the field's key is present in the loaded <code>"field_save"</code> data; never on the sync path</td></tr>
@@ -889,9 +889,9 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
     <thead><tr><th>Annotation</th><th>Target</th><th>Description</th></tr></thead>
     <tbody>
         <tr><td>@AddToManager</td><td>FIELD</td><td>Meta-annotation. Marks a field for FieldDataManager management. @SaveToDisk/@SyncToClient/@SyncToServer all extend this</td></tr>
-        <tr><td>@Access</td><td>FIELD</td><td>Marks a non-final field to use final-field Access mode. createInstance=true creates a new instance on serialization</td></tr>
+        <tr><td>@Access</td><td>FIELD</td><td>Marks a non-final field to use final-field Access mode. instanceAsValue=true encodes the container instance itself (nullable, recreated on read)</td></tr>
         <tr><td>@Codec</td><td>FIELD</td><td>Custom serialization. Two modes: ① <code>saveCodec</code>/<code>syncCodec</code> reference static fields (e.g. FieldDataCodec); ② <code>writeToData</code>/<code>readFromData</code>/<code>writeToBuffer</code>/<code>readFromBuffer</code> reference instance methods</td></tr>
-        <tr><td>@Conversion</td><td>FIELD</td><td>Stores/syncs a field as another type. <code>getFunction</code> names a static <code>Function&lt;A, B&gt;</code> field in the same class; its return type B becomes the managed type (codecs, strategies and factories are resolved for B). <code>setFunction</code> names the inverse <code>Function&lt;B, A&gt;</code> and may be omitted for final or access-mode fields</td></tr>
+        <tr><td>@Conversion</td><td>FIELD</td><td>Stores/syncs a field as another type. <code>toManaged</code> names a static <code>Function&lt;A, B&gt;</code> field in the same class; its return type B becomes the managed type (codecs, strategies and factories are resolved for B). <code>toField</code> names the inverse <code>Function&lt;B, A&gt;</code> and may be omitted for final or access-mode fields</td></tr>
         <tr><td>@Strategy</td><td>FIELD</td><td>Specifies the Hash.Strategy for change detection, referencing a static field by name</td></tr>
         <tr><td>@Generic</td><td>FIELD</td><td>Forces generic type handling for the field. Use when the field is generic but auto-detection fails</td></tr>
         <tr><td>@AdditionalHolder</td><td>FIELD</td><td>Marks a nested field: by default its internally annotated fields are flattened into the current class's FieldDataManager; with <code>childManager=true</code> the sub-object gets its own dedicated FieldDataManager child manager and is not flattened</td></tr>
@@ -918,7 +918,7 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 <p>See <code>TestBlockEntity</code> (in <code>com.gto.datasynclib.test</code>) for a complete example.</p>
 <pre><code><span class="kw">public class</span> <span class="typ">MyMachineBlockEntity</span> <span class="kw">extends</span> <span class="typ">FieldDataHolderBlockEntity</span> {
 
-    <span class="an">@SyncToClient</span>(notifyUpdate = <span class="kw">true</span>)
+    <span class="an">@SyncToClient</span>(scheduleUpdate = <span class="kw">true</span>)
     <span class="an">@SaveToDisk</span>
     <span class="kw">private int</span> progress;
 
@@ -1036,10 +1036,10 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 <h2 id="usage-auto-sync">Auto Sync Explained</h2>
 <p>Network sync requires two steps working together:</p>
 <ol>
-    <li><strong>Annotation configuration</strong> — with <code>autoUpdate = true</code> (default), the framework auto-compares old and new values to detect changes; set to <code>false</code> to require manual <code>markFieldsForSync("fieldName")</code></li>
-    <li><strong>Trigger sync explicitly</strong> — call <code>DataSyncNetwork.syncBlockEntityToClient(be, writeAll, autoOnly)</code> to trigger the actual network send</li>
+    <li><strong>Annotation configuration</strong> — with <code>autoDetect = true</code> (default), the framework auto-compares old and new values to detect changes; set to <code>false</code> to require manual <code>markFieldsForSync("fieldName")</code></li>
+    <li><strong>Trigger sync explicitly</strong> — call <code>DataSyncNetwork.syncBlockEntityToClient(be, writeAll, autoDetectOnly)</code> to trigger the actual network send</li>
 </ol>
-<pre><code><span class="cmt">// autoUpdate = true (default) — automatic change detection</span>
+<pre><code><span class="cmt">// autoDetect = true (default) — automatic change detection</span>
 <span class="an">@SyncToClient</span>
 <span class="kw">private int</span> energy;
 
@@ -1047,12 +1047,12 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
     energy += <span class="str">10</span>;  <span class="cmt">// direct modification, framework auto-detects the change</span>
     <span class="kw">if</span> (level.getGameTime() % <span class="str">20</span> == <span class="str">0</span>) {
         <span class="typ">DataSyncNetwork</span>.syncBlockEntityToClient(<span class="kw">this</span>, <span class="kw">false</span>, <span class="kw">true</span>);
-        <span class="cmt">// ↑ autoOnly=true: only checks autoUpdate fields. Internally calls updateFieldDirtyFlags(LogicalSide.SERVER, true)
+        <span class="cmt">// ↑ autoDetectOnly=true: only checks autoDetect fields. Internally calls updateFieldDirtyFlags(LogicalSide.SERVER, true)
         //    detectChange auto-discovers energy change → included in sync</span>
     }
 }</code></pre>
-<pre><code><span class="cmt">// autoUpdate = false — manual marking required</span>
-<span class="an">@SyncToClient</span>(autoUpdate = <span class="kw">false</span>)
+<pre><code><span class="cmt">// autoDetect = false — manual marking required</span>
+<span class="an">@SyncToClient</span>(autoDetect = <span class="kw">false</span>)
 <span class="kw">private int</span> energy;
 
 <span class="kw">public void</span> <span class="typ">setEnergy</span>(<span class="kw">int</span> value) {
@@ -1096,16 +1096,16 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 
 <h2 id="usage-advanced">Advanced Features</h2>
 
-<h3>Conditional Sync</h3>
-<pre><code><span class="an">@SyncToClient</span>(condition = <span class="str">"shouldSyncEnergy"</span>)
+<h3>Skipping Sync with a Predicate (skipWhen)</h3>
+<pre><code><span class="an">@SyncToClient</span>(skipWhen = <span class="str">"skipEmptyEnergy"</span>)
 <span class="kw">private int</span> energy;
 
-<span class="kw">private boolean</span> <span class="typ">shouldSyncEnergy</span>(<span class="kw">int</span> value) {
-    <span class="kw">return</span> value > <span class="str">0</span>;  <span class="cmt">// only sync when &gt; 0</span>
+<span class="kw">private boolean</span> <span class="typ">skipEmptyEnergy</span>(<span class="kw">int</span> value) {
+    <span class="kw">return</span> value &lt;= <span class="str">0</span>;  <span class="cmt">// skip sync while empty</span>
 }</code></pre>
 
 <h3>Change Listener</h3>
-<pre><code><span class="an">@SyncToClient</span>(listener = <span class="str">"onEnergyChanged"</span>, notifyUpdate = <span class="kw">true</span>)
+<pre><code><span class="an">@SyncToClient</span>(listener = <span class="str">"onEnergyChanged"</span>, scheduleUpdate = <span class="kw">true</span>)
 <span class="kw">private int</span> energy;
 
 <span class="kw">private void</span> <span class="typ">onEnergyChanged</span>(<span class="kw">int</span> newValue, <span class="kw">int</span> oldValue) {
@@ -1227,7 +1227,7 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 </table>
 
 <div class="footer">
-    <p>DataSyncLib v26.9.3 · Minecraft 1.20.1 · Forge 47.4.21 · Java 21 · License: GNU LGPL 3.0</p>
+    <p>DataSyncLib v26.9.4 · Minecraft 1.20.1 · Forge 47.4.21 · Java 21 · License: GNU LGPL 3.0</p>
 </div>
 
 </main>

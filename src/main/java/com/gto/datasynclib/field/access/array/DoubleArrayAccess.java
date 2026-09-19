@@ -43,7 +43,7 @@ public final class DoubleArrayAccess extends AbstractFieldAccess<double[]> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, double @NotNull [] instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, double @NotNull [] instance, boolean autoDetectOnly) {
         if (!Arrays.equals(snapshot, instance)) {
             snapshot = instance.clone();
             return true;

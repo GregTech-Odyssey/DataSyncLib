@@ -23,7 +23,7 @@ public final class LongCollectionAccess extends AbstractFieldAccess<LongCollecti
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull LongCollection instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull LongCollection instance, boolean autoDetectOnly) {
         var hashCode = instance.hashCode();
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;

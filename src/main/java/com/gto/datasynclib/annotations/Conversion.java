@@ -18,7 +18,7 @@ import java.lang.annotation.Target;
  *
  * <h3>How it works</h3>
  * <ol>
- *   <li>The annotation's {@link #getFunction()} points to a <strong>static</strong>
+ *   <li>The annotation's {@link #toManaged()} points to a <strong>static</strong>
  *       {@code Function<A, B>} field declared in the <em>same class</em> as the annotated
  *       field</li>
  *   <li>The function's <strong>input type</strong> ({@code A}) must match the field's
@@ -26,7 +26,7 @@ import java.lang.annotation.Target;
  *   <li>The function's <strong>return type</strong> ({@code B}) becomes the type that
  *       DataSyncLib manages — it is this type for which codecs, strategies, and factories
  *       are resolved</li>
- *   <li>Optionally, {@link #setFunction()} provides an inverse {@code Function<B, A>}
+ *   <li>Optionally, {@link #toField()} provides an inverse {@code Function<B, A>}
  *       for converting back when writing values to the field</li>
  * </ol>
  *
@@ -36,10 +36,10 @@ import java.lang.annotation.Target;
  *       {@code field.get(null)} to resolve it)</li>
  *   <li>The function must be declared in the same class as the annotated field: the lookup is
  *       {@link Class#getDeclaredField(String)}, which does <em>not</em> search superclasses</li>
- *   <li>{@code setFunction} is <strong>optional</strong> — it can be omitted for
+ *   <li>{@code toField} is <strong>optional</strong> — it can be omitted for
  *       {@code final} fields or access-mode fields (those with {@link Access @Access})
  *       because the write path is not used for those modes</li>
- *   <li>If {@code setFunction} is specified but the field is not found, it is silently
+ *   <li>If {@code toField} is specified but the field is not found, it is silently
  *       ignored (no error is thrown)</li>
  * </ul>
  *
@@ -51,18 +51,18 @@ import java.lang.annotation.Target;
  *
  * @SyncToClient
  * @SaveToDisk
- * @Conversion(getFunction = "COMPOUND_TAG_MAP_FUNCTION")
+ * @Conversion(toManaged = "COMPOUND_TAG_MAP_FUNCTION")
  * private final CompoundTag tagData = new CompoundTag();
  * // The sync/persistence system now treats this field as Map<String, Tag>
  * }</pre>
  *
- * <h3>With setFunction (for mutable fields)</h3>
+ * <h3>With toField (for mutable fields)</h3>
  * <pre>{@code
  * private static final Function<MyStorage, MyView> TO_VIEW = MyStorage::toView;
  * private static final Function<MyView, MyStorage> FROM_VIEW = MyView::toStorage;
  *
  * @SyncToClient
- * @Conversion(getFunction = "TO_VIEW", setFunction = "FROM_VIEW")
+ * @Conversion(toManaged = "TO_VIEW", toField = "FROM_VIEW")
  * private MyStorage data = new MyStorage();
  * }</pre>
  *
@@ -86,7 +86,7 @@ public @interface Conversion {
      *
      * @return the static {@code Function} field name (required, must not be empty)
      */
-    String getFunction();
+    String toManaged();
 
     /**
      * The name of a <strong>static</strong> {@code Function<B, A>} field declared in
@@ -107,5 +107,5 @@ public @interface Conversion {
      * @return the static {@code Function} field name, or {@code ""} if no reverse
      * conversion is needed
      */
-    String setFunction() default "";
+    String toField() default "";
 }

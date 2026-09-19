@@ -42,7 +42,7 @@ public class Reference2IntMapAccess<K> extends AbstractFieldAccess<Reference2Int
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Reference2IntMap instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Reference2IntMap instance, boolean autoDetectOnly) {
         var hashCode = instance.hashCode();
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;

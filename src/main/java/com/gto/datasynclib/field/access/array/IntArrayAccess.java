@@ -42,7 +42,7 @@ public final class IntArrayAccess extends AbstractFieldAccess<int[]> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, int @NotNull [] instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, int @NotNull [] instance, boolean autoDetectOnly) {
         if (!Arrays.equals(snapshot, instance)) {
             snapshot = instance.clone();
             return true;

@@ -38,7 +38,7 @@ import java.io.IOException;
  * content hash). Hashing costs one {@code serializeNBT()} per check, but unlike comparing tag
  * <em>references</em> it also detects mutations of an implementation that returns its own live tag.
  * A hash collision can hide a change, and this detection is not free — on hot fields prefer manual
- * marking ({@code @SyncToClient(autoUpdate = false)} plus {@code markFieldsForSync}).</p>
+ * marking ({@code @SyncToClient(autoDetect = false)} plus {@code markFieldsForSync}).</p>
  */
 public final class TagSerializableAccess extends AbstractFieldAccess<INBTSerializable> {
 
@@ -50,7 +50,7 @@ public final class TagSerializableAccess extends AbstractFieldAccess<INBTSeriali
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull INBTSerializable instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull INBTSerializable instance, boolean autoDetectOnly) {
         var nbt = instance.serializeNBT();
         var hashCode = nbt == null ? 0 : nbt.hashCode();
         // hasHash: an empty tag hashes to 0, which must not look like "unchanged" on the first check.

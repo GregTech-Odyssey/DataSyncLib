@@ -30,13 +30,13 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, IFieldDataHolder @NotNull [] instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, IFieldDataHolder @NotNull [] instance, boolean autoDetectOnly) {
         var hashCode = HashUtil.arrayIdentityHashCode(instance);
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;
             for (var element : instance) {
                 if (element != null) {
-                    element.getFieldDataManager().updateFieldDirtyFlags(side, autoOnly);
+                    element.getFieldDataManager().updateFieldDirtyFlags(side, autoDetectOnly);
                     element.getFieldDataManager().markAsChanged();
                 }
             }
@@ -44,7 +44,7 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
         }
         boolean hasChange = false;
         for (var element : instance) {
-            if (element != null && element.getFieldDataManager().updateFieldDirtyFlags(side, autoOnly)) {
+            if (element != null && element.getFieldDataManager().updateFieldDirtyFlags(side, autoDetectOnly)) {
                 element.getFieldDataManager().markAsChanged();
                 hasChange = true;
             }
@@ -83,7 +83,7 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
                 list.addNull();
             }
         }
-        if (definition.saveNull) return list;
+        if (definition.saveEmpty) return list;
         for (var data : list) {
             if (data != NullData.INSTANCE) return list;
         }

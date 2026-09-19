@@ -43,7 +43,7 @@ public final class CharArrayAccess extends AbstractFieldAccess<char[]> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, char @NotNull [] instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, char @NotNull [] instance, boolean autoDetectOnly) {
         if (!Arrays.equals(snapshot, instance)) {
             snapshot = instance.clone();
             return true;

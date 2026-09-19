@@ -43,7 +43,7 @@ public final class LongArrayAccess extends AbstractFieldAccess<long[]> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, long @NotNull [] instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, long @NotNull [] instance, boolean autoDetectOnly) {
         if (!Arrays.equals(snapshot, instance)) {
             snapshot = instance.clone();
             return true;

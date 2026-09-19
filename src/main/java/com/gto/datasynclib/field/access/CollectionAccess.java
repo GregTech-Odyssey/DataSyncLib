@@ -31,7 +31,7 @@ public final class CollectionAccess<E> extends AbstractFieldAccess<Collection> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Collection instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Collection instance, boolean autoDetectOnly) {
         var hashCode = instance.hashCode();
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;

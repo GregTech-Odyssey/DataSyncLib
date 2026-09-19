@@ -40,7 +40,7 @@ import java.util.function.Supplier;
  * </ul>
  *
  * <p><strong>Re-entrancy guards:</strong> The {@code updating} and {@code writing} volatile flags
- * prevent recursive calls that could occur if a listener or condition method triggers another
+ * prevent recursive calls that could occur if a listener or skip-predicate method triggers another
  * update/write cycle during the same operation.
  *
  * <p><strong>Network wire format:</strong> Custom sync data is written first (via
@@ -196,12 +196,12 @@ public class FieldDataManager {
      * Updates dirty flags for fields based on changes
      *
      * @param side     the logical side
-     * @param autoOnly if {@code true}, only fields with {@code autoUpdate = true}
+     * @param autoDetectOnly if {@code true}, only fields with {@code autoDetect = true}
      *                 are checked; if {@code false}, all sync fields are checked
-     *                 regardless of their {@code autoUpdate} setting
+     *                 regardless of their {@code autoDetect} setting
      * @return true if any changes were detected
      */
-    public boolean updateFieldDirtyFlags(LogicalSide side, boolean autoOnly) {
+    public boolean updateFieldDirtyFlags(LogicalSide side, boolean autoDetectOnly) {
         if (updating) return false;
         updating = true;
         try {
@@ -213,7 +213,7 @@ public class FieldDataManager {
                 if (!field.mustDetect() && field.isChanged(source)) {
                     hasChange = true;
                 } else {
-                    if ((!autoOnly || d.autoUpdate(side)) && field.detectChange(side, holder.getSource(d), autoOnly)) {
+                    if ((!autoDetectOnly || d.autoDetect(side)) && field.detectChange(side, holder.getSource(d), autoDetectOnly)) {
                         hasChange = true;
                     }
                 }
@@ -284,7 +284,7 @@ public class FieldDataManager {
                     var f = fields[index];
                     var d = f.getDefinition();
                     f.readFromBuffer(side, holder.getSource(d), wrapper);
-                    if (d.notifyUpdate(side)) {
+                    if (d.scheduleUpdate(side)) {
                         update = true;
                     }
                 }
@@ -327,7 +327,7 @@ public class FieldDataManager {
                 if (f != null) {
                     var result = f.writeToData(holder.getSource(d));
                     if (result.isNone()) continue;
-                    if (result != NullData.INSTANCE || d.saveNull) data.put(d.key, result);
+                    if (result != NullData.INSTANCE || d.saveEmpty) data.put(d.key, result);
                 } else {
                     throw ReflectUtil.createFieldNotFoundException(field);
                 }
@@ -373,7 +373,7 @@ public class FieldDataManager {
             var d = field.getDefinition();
             var result = field.writeToData(holder.getSource(d));
             if (result.isNone()) continue;
-            if (result != NullData.INSTANCE || d.saveNull) data.put(d.key, result);
+            if (result != NullData.INSTANCE || d.saveEmpty) data.put(d.key, result);
         }
         return data.isEmpty() ? NullData.INSTANCE : data;
     }
@@ -403,7 +403,7 @@ public class FieldDataManager {
             var d = field.getDefinition();
             var result = field.writeToData(holder.getSource(d));
             if (result.isNone()) continue;
-            if (result != NullData.INSTANCE || d.saveNull) data.put(d.key, result);
+            if (result != NullData.INSTANCE || d.saveEmpty) data.put(d.key, result);
         }
         return data.isEmpty() ? NullData.INSTANCE : data;
     }

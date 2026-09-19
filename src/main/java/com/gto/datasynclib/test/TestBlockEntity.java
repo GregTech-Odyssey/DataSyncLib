@@ -40,7 +40,7 @@ import java.util.function.Function;
 /**
  * Development-only block entity used as the subject of {@link TestBlockEntityTests}: it carries one
  * field per access/factory family so the suite can drive every managed code path through a real
- * {@code BlockEntity} (NBT save/load, network buffers, listeners, conditions, child managers, ...).
+ * {@code BlockEntity} (NBT save/load, network buffers, listeners, skip predicates, child managers, ...).
  *
  * <h3>How to read this class as an example</h3>
  * <p>Every field below is annotated the way an application would annotate it, and the comment above
@@ -178,11 +178,11 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     int withDefault = 7;
 
     /** Skipped while {@link #skipMe(int)} says so. */
-    @SaveToDisk(condition = "skipMe")
-    int conditioned = 0;
+    @SaveToDisk(skipWhen = "skipMe")
+    int skipped = 0;
 
-    /** {@code autoUpdate = false}: only sent after an explicit markFieldsForSync. */
-    @SyncToClient(autoUpdate = false)
+    /** {@code autoDetect = false}: only sent after an explicit markFieldsForSync. */
+    @SyncToClient(autoDetect = false)
     int manual = 0;
 
     /** Exercises the {@code @SaveToDisk(listener = ...)} hook added in this version. */
@@ -201,7 +201,7 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
 
     /**
      * {@code @Conversion} example: the field is a {@code CompoundTag}, but the sync system
-     * manages it as a {@code Map<String, Tag>} via this static Function. No setFunction is
+     * manages it as a {@code Map<String, Tag>} via this static Function. No toField is
      * needed because the field is {@code final} (the map is mutated in-place through the
      * {@code CompoundTag} API — {@code tagData.putInt(...)} etc.).
      */
@@ -209,7 +209,7 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
 
     @SyncToClient
     @SaveToDisk
-    @Conversion(getFunction = "COMPOUND_TAG_MAP_FUNCTION")
+    @Conversion(toManaged = "COMPOUND_TAG_MAP_FUNCTION")
     final CompoundTag tagData = new CompoundTag();
 
     TestBlockEntity(BlockPos worldPosition, BlockState blockState) {
@@ -237,10 +237,10 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     }
 
     /**
-     * Condition method referenced by {@code @SaveToDisk(condition = "skipMe")}.
+     * Skip predicate referenced by {@code @SaveToDisk(skipWhen = "skipMe")}.
      *
      * <p><b>Signature:</b> {@code (T fieldType) -> boolean}, non-static, declared on the same class as
-     * the field (same rule for {@code @SyncToClient(condition = ...)}/ {@code @SyncToServer(...)}). The
+     * the field (same rule for {@code @SyncToClient(skipWhen = ...)}/ {@code @SyncToServer(...)}). The
      * field is skipped when it returns {@code true}.</p>
      */
     boolean skipMe(int value) {
@@ -304,14 +304,14 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
      * Server-side tick: the pattern to copy is <em>change the fields, then ask the framework to sync</em>.
      *
      * <pre>{@code
-     * DataSyncNetwork.syncBlockEntityToClient(this, all, autoOnly);
+     * DataSyncNetwork.syncBlockEntityToClient(this, all, autoDetectOnly);
      * //  all      = false -> incremental (only changed fields), true -> full state
-     * //  autoOnly = true  -> only fields with autoUpdate = true are watched, false -> all of them
+     * //  autoDetectOnly = true  -> only fields with autoDetect = true are watched, false -> all of them
      * // The call is async-safe: the snapshot is taken now, the packet is sent on the server thread.
      * }</pre>
      *
      * <p>Persistence needs {@code setChanged()} (here driven by the {@link #isDirty} flag through
-     * {@link #updateTick()}); fields declared with {@code autoUpdate = false} additionally need
+     * {@link #updateTick()}); fields declared with {@code autoDetect = false} additionally need
      * {@code getFieldDataManager().markFieldsForSync("name")} before the sync call.</p>
      */
     protected void serverTick(ServerLevel level) {
@@ -334,7 +334,7 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
 
     /**
      * Client-side tick: the client→server direction, used here for the {@code @SyncToServer} field.
-     * Because {@code objectHolder} is not marked with {@code autoUpdate = false}, the explicit
+     * Because {@code objectHolder} is not marked with {@code autoDetect = false}, the explicit
      * {@code markFieldsForSync} call below is only there to demonstrate the manual-marking API.
      */
     protected void clientTick() {

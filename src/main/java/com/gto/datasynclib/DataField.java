@@ -77,12 +77,12 @@ public interface DataField<T> {
      *
      * @param side     the logical side initiating the detection
      * @param source   the owning object
-     * @param autoOnly {@code true} to only detect changes on fields whose
-     *                 {@code autoUpdate} annotation is enabled; {@code false} to
+     * @param autoDetectOnly {@code true} to only detect changes on fields whose
+     *                 {@code autoDetect} annotation is enabled; {@code false} to
      *                 force detection on all fields regardless of annotation
      * @return {@code true} if the value has changed and the field should be synced
      */
-    boolean detectChange(@NotNull LogicalSide side, @NotNull Object source, boolean autoOnly);
+    boolean detectChange(@NotNull LogicalSide side, @NotNull Object source, boolean autoDetectOnly);
 
     /**
      * Writes the field's current value to a network buffer.
@@ -133,7 +133,7 @@ public interface DataField<T> {
      *
      * <p>When {@code true}, the manager still consults this flag but detection is attempted
      * even for a field that was not marked dirty; when {@code false}, a field that is neither
-     * dirty nor {@code autoUpdate} for the current side is skipped entirely, so a manual
+     * dirty nor {@code autoDetect} for the current side is skipped entirely, so a manual
      * {@link #markAsChanged} is what gets it sent.</p>
      *
      * <p>This is used by container types (e.g., {@code IFieldDataHolder} accessors)

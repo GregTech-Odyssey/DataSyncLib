@@ -49,7 +49,7 @@ import java.util.Objects;
  * framework end to end: definition scanning and lookup, codec resolution, disk and network
  * round-trips (full and incremental), the block-entity NBT paths ({@code saveAdditional}/{@code load}
  * and the chunk-load {@code field_sync} tag), listeners (including {@code @SaveToDisk(listener)}),
- * dirty-flag/marking APIs, single-field helpers, conditions, default-value skipping, child managers,
+ * dirty-flag/marking APIs, single-field helpers, skip predicates, default-value skipping, child managers,
  * {@code @Conversion}, Forge {@code INBTSerializable} (scalar and array), the built-in
  * registry/enum helpers, and the registered change-detection strategies for {@code ItemStack}/
  * {@code FluidStack} (scalar and array).
@@ -83,7 +83,7 @@ public final class TestBlockEntityTests {
         section("networkIncremental", this::networkIncremental);
         section("listeners", this::listeners);
         section("dirtyFlags", this::dirtyFlags);
-        section("conditionsAndDefaults", this::conditionsAndDefaults);
+        section("skipPredicatesAndDefaults", this::skipPredicatesAndDefaults);
         section("singleFieldApi", this::singleFieldApi);
         section("childManagerAndConversion", this::childManagerAndConversion);
         section("registryEnumAndStrategy", this::registryEnumAndStrategy);
@@ -114,7 +114,7 @@ public final class TestBlockEntityTests {
         // Keys come from the field name unless @SaveToDisk(key = ...) overrides it.
         for (var key : List.of("i", "uuids", "stacks", "stack", "fluid", "tanks", "directions", "uuidSet", "map", "aabb", "a",
                 "b", "ints", "floats", "intList", "object2IntMap", "handler", "handlerArray", "module",
-                "globalPos", "sectionPos", "vec3i", "withDefault", "conditioned", "loaded", "tagData")) {
+                "globalPos", "sectionPos", "vec3i", "withDefault", "skipped", "loaded", "tagData")) {
             expect("definitions.key." + key, manager.getFieldDefinition(key) != null, true);
         }
 
@@ -214,8 +214,8 @@ public final class TestBlockEntityTests {
      * <p><b>Usage:</b> {@code manager.writeToData()} returns a {@link StringMapData} keyed by field name
      * (or {@code @SaveToDisk(key = ...)}) and {@code readFromData(data, version)} restores it;
      * {@code writeAllToData()/readAllFromData()} additionally carry fields that are only
-     * {@code @AddToManager}. Values equal to their configured default, and values skipped by a condition,
-     * never appear in the map.</p>
+     * {@code @AddToManager}. Values equal to their configured default, and values skipped by a
+     * {@code skipWhen} predicate, never appear in the map.</p>
      */
     private void diskRoundTrip() {
         TestBlockEntity src = mutate(newEntity());
@@ -232,10 +232,10 @@ public final class TestBlockEntityTests {
         dstAll.getFieldDataManager().readAllFromData(all, FieldDataHolderBlockEntity.VERSION);
         expectSaved("diskAll", src, dstAll);
 
-        // A field skipped by its condition or equal to its default must not appear in the map.
+        // A field skipped by its skipWhen predicate or equal to its default must not appear in the map.
         if (saved instanceof StringMapData map) {
             expect("disk.defaultSkipped", map.containsKey("withDefault"), false);
-            expect("disk.conditionSkipped", map.containsKey("conditioned"), false);
+            expect("disk.skipWhenSkipped", map.containsKey("skipped"), false);
             expect("disk.handlerPresent", map.containsKey("handler"), true);
             expect("disk.handlerArrayPresent", map.containsKey("handlerArray"), true);
             expect("disk.childModulePresent", map.containsKey("module"), true);
@@ -267,13 +267,13 @@ public final class TestBlockEntityTests {
         // Mutating a field past its default makes it persist.
         TestBlockEntity other = newEntity();
         other.withDefault = 8;
-        other.conditioned = -1; // condition returns true → still skipped
+        other.skipped = -1; // skipMe returns true → still skipped
         CompoundTag otherTag = other.saveToTag();
         if (otherTag.get("field_save") instanceof ByteArrayTag array) {
             Data data = Data.readData(array.getAsByteArray());
             if (data instanceof StringMapData map) {
                 expect("nbt.nonDefaultWritten", map.containsKey("withDefault"), true);
-                expect("nbt.negativeConditionSkipped", map.containsKey("conditioned"), false);
+                expect("nbt.negativeSkipWhenSkipped", map.containsKey("skipped"), false);
             } else {
                 expect("nbt.nonDefaultMap", true, false);
             }
@@ -334,9 +334,9 @@ public final class TestBlockEntityTests {
     /**
      * Incremental sync — the normal per-tick path.
      *
-     * <p><b>Usage:</b> {@code updateFieldDirtyFlags(side, autoOnly)} detects what changed and
+     * <p><b>Usage:</b> {@code updateFieldDirtyFlags(side, autoDetectOnly)} detects what changed and
      * {@code writeToNetworkBuffer(side, false)} sends only those fields as a sequence of
-     * (fieldIndex, payload) pairs; a field declared with {@code autoUpdate = false} needs an explicit
+     * (fieldIndex, payload) pairs; a field declared with {@code autoDetect = false} needs an explicit
      * {@code markFieldsForSync(name)} first. The assertions also pin down that an incremental buffer stays
      * smaller than a full one, and that a single changed slot of an {@code ItemStackHandler[]} does not
      * re-send the other slots.</p>
@@ -368,7 +368,7 @@ public final class TestBlockEntityTests {
         byte[] arrayIncremental = arrayFull.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, false);
         expect("netIncremental.arraySmaller", arrayIncremental.length < arrayFullBytes.length, true);
 
-        // markFieldsForSync forces a field with autoUpdate = false to be sent. The entity is primed
+        // markFieldsForSync forces a field with autoDetect = false to be sent. The entity is primed
         // first, because a brand-new one reports every field as changed on its first check.
         TestBlockEntity manual = mutate(newEntity());
         manual.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true);
@@ -481,26 +481,26 @@ public final class TestBlockEntityTests {
     }
 
     /**
-     * Conditional persistence and default-value skipping.
+     * Skip predicates and default-value skipping.
      *
      * <p><b>Usage:</b> {@code @SaveToDisk(defaultValue = "7")} keeps matching values out of the saved
-     * data, and {@code @SaveToDisk(condition = "method")} skips a field whenever that boolean-returning
-     * method returns true. The same {@code condition} attribute exists on {@code @SyncToClient} and
+     * data, and {@code @SaveToDisk(skipWhen = "method")} skips a field whenever that boolean-returning
+     * method returns true. The same {@code skipWhen} attribute exists on {@code @SyncToClient} and
      * {@code @SyncToServer} for the network side.</p>
      */
-    private void conditionsAndDefaults() {
+    private void skipPredicatesAndDefaults() {
         TestBlockEntity be = newEntity();
-        be.conditioned = -5; // skipMe returns true → skipped
+        be.skipped = -5; // skipMe returns true → skipped
         be.withDefault = 7;  // equals the @SaveToDisk default → skipped
 
         Data data = be.getFieldDataManager().writeToData();
         boolean skipped = !(data instanceof StringMapData map)
-                || (!map.containsKey("conditioned") && !map.containsKey("withDefault"));
-        expect("conditions.skipped", skipped, true);
+                || (!map.containsKey("skipped") && !map.containsKey("withDefault"));
+        expect("skipPredicates.skipped", skipped, true);
 
-        // The condition method itself also has to be reachable for the annotation to resolve.
-        expect("conditions.method", be.skipMe(-1), true);
-        expect("conditions.methodFalse", be.skipMe(1), false);
+        // The skip-predicate method itself also has to be reachable for the annotation to resolve.
+        expect("skipPredicates.method", be.skipMe(-1), true);
+        expect("skipPredicates.methodFalse", be.skipMe(1), false);
     }
 
     /**
@@ -540,7 +540,7 @@ public final class TestBlockEntityTests {
      *
      * <p><b>Usage:</b> {@code @AdditionalHolder(childManager = true)} gives a plain POJO its own
      * {@code FieldDataManager} — the sub-object needs no interface and is serialized as a single field,
-     * recursively. {@code @Conversion(getFunction = "staticField")} exposes a field as another type (here a
+     * recursively. {@code @Conversion(toManaged = "staticField")} exposes a field as another type (here a
      * {@code CompoundTag} managed as a {@code Map}), which is how a field can be stored and compared
      * through a more convenient representation.</p>
      */

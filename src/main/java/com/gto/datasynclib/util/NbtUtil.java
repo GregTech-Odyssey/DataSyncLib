@@ -63,7 +63,7 @@ public class NbtUtil {
      *
      * <p>Usage:
      * <pre>{@code
-     * @Conversion(getFunction = "COMPOUND_TAG_MAP")
+     * @Conversion(toManaged = "COMPOUND_TAG_MAP")
      * private final CompoundTag data = new CompoundTag();
      * }</pre>
      */

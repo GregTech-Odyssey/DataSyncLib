@@ -36,7 +36,7 @@ public final class MapAccess<K, V> extends AbstractFieldAccess<Map> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Map instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Map instance, boolean autoDetectOnly) {
         var hashCode = instance.hashCode();
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;

@@ -51,10 +51,10 @@ public class MyBlockEntity extends FieldDataHolderBlockEntity {
     @SaveToDisk
     private int energy = 0;
 
-    @SyncToClient(notifyUpdate = true)  // 值变更时触发客户端 scheduleUpdate
+    @SyncToClient(scheduleUpdate = true)  // 值变更时触发客户端 scheduleUpdate
     private String status = "idle";
 
-    @SyncToServer(autoUpdate = false)   // 仅手动标记后才同步
+    @SyncToServer(autoDetect = false)   // 仅手动标记后才同步
     private int clientConfig = 0;
 
     public MyBlockEntity(BlockPos pos, BlockState state) {
@@ -67,7 +67,7 @@ public class MyBlockEntity extends FieldDataHolderBlockEntity {
         DataSyncNetwork.syncBlockEntityToClient(this, false, true);  // 异步安全
     }
 
-    // notifyUpdate=true 的字段变更时，客户端会调用此方法
+    // scheduleUpdate=true 的字段变更时，客户端会调用此方法
     @Override
     public void scheduleUpdate(LogicalSide side) {
         if (side.isClient()) {
@@ -101,12 +101,12 @@ class InventoryData {
 }
 
 class EnergyData {
-    @SaveToDisk @SyncToClient(condition = "shouldSyncEnergy")
+    @SaveToDisk @SyncToClient(skipWhen = "skipEmptyEnergy")
     private long storedEnergy;
 
-    // 条件方法：返回 true 时跳过同步（storedEnergy <= 0 不同步）
-    private boolean shouldSyncEnergy(long value) {
-        return value > 0;
+    // 跳过方法：返回 true 时不参与本轮同步（storedEnergy <= 0 不同步）
+    private boolean skipEmptyEnergy(long value) {
+        return value <= 0;
     }
 }
 
@@ -171,9 +171,9 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 
 > **关键要点：**
 > - 同步需要显式调用 `DataSyncNetwork.syncBlockEntityToClient()`（异步安全，可跨线程调用）
-> - `autoUpdate = false` 的字段需要手动调用 `markFieldsForSync()` 才会同步
+> - `autoDetect = false` 的字段需要手动调用 `markFieldsForSync()` 才会同步
 > - 磁盘持久化需要手动调用 BlockEntity 的 `setChanged()`
-> - `syncBlockEntityToClient(be, false, true)` 中：`false`=增量同步（仅变更字段），`true`=仅检查 `autoUpdate=true` 的字段
+> - `syncBlockEntityToClient(be, false, true)` 中：`false`=增量同步（仅变更字段），`true`=仅检查 `autoDetect=true` 的字段
 > - 完整示例参考 `TestBlockEntity`
 
 ### 高级用法：Registry 全局 codec 自动注册
@@ -210,13 +210,13 @@ Class<?>[] args = ReflectUtil.getResolvedGenericArguments(fieldType, HashMap.cla
 
 | 注解 | 作用 | 常用属性 |
 |------|------|---------|
-| `@SyncToClient` | 服务端→客户端同步 | `autoUpdate`（默认 true）、`notifyUpdate`、`condition`、`listener` |
-| `@SyncToServer` | 客户端→服务端同步 | `autoUpdate`（默认 true）、`notifyUpdate`、`condition`、`listener` |
-| `@SaveToDisk` | 磁盘持久化 | `key`（自定义键名）、`condition`、`saveNull`、`defaultValue`、`listener`（磁盘加载回调） |
-| `@Access` | 强制使用访问模式（容器类） | `createInstance` |
+| `@SyncToClient` | 服务端→客户端同步 | `autoDetect`（默认 true）、`scheduleUpdate`、`skipWhen`、`listener` |
+| `@SyncToServer` | 客户端→服务端同步 | `autoDetect`（默认 true）、`scheduleUpdate`、`skipWhen`、`listener` |
+| `@SaveToDisk` | 磁盘持久化 | `key`（自定义键名）、`skipWhen`、`saveEmpty`、`defaultValue`、`listener`（磁盘加载回调） |
+| `@Access` | 强制使用访问模式（容器类） | `instanceAsValue` |
 | `@AdditionalHolder` | 递归扫描嵌套对象字段，或为子对象生成独立子管理器 | `childManager`（true=子管理器模式） |
 | `@Codec` | 自定义序列化方式 | `saveCodec` / `syncCodec` / `writeToData` 等 |
-| `@Conversion` | 以另一种类型存储/同步字段（静态 `Function`） | `getFunction`（必填）、`setFunction`（可选） |
+| `@Conversion` | 以另一种类型存储/同步字段（静态 `Function`） | `toManaged`（必填）、`toField`（可选） |
 | `@Strategy` | 自定义变更检测策略 | `value`（static 字段名） |
 | `@Generic` | 强制使用泛型工厂链 | — |
 | `@AddToManager` | 加入管理但不自动同步/持久化 | — |
@@ -243,7 +243,7 @@ Class<?>[] args = ReflectUtil.getResolvedGenericArguments(fieldType, HashMap.cla
         │     └── FieldDataManager.readFromNetworkBuffer(CLIENT, data)
         │           ├── readCustomSyncData()
         │           ├── while buf: readVarInt(索引) → field.readFromBuffer()
-        │           └── notifyUpdate → scheduleUpdate()
+        │           └── scheduleUpdate=true → scheduleUpdate()
 ```
 
 ### 持久化流程

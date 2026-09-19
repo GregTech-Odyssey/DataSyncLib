@@ -47,8 +47,8 @@ public final class FieldDataHolderAccess extends AbstractFieldAccess<IFieldDataH
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull IFieldDataHolder instance, boolean autoOnly) {
-        return instance.getFieldDataManager().updateFieldDirtyFlags(side, autoOnly);
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull IFieldDataHolder instance, boolean autoDetectOnly) {
+        return instance.getFieldDataManager().updateFieldDirtyFlags(side, autoDetectOnly);
     }
 
     @Override

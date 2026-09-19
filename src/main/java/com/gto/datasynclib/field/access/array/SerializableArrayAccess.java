@@ -28,7 +28,7 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, IDataSerializable @NotNull [] instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, IDataSerializable @NotNull [] instance, boolean autoDetectOnly) {
         var hashCode = HashUtil.arrayIdentityHashCode(instance);
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;
@@ -78,7 +78,7 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
                 list.addNull();
             }
         }
-        if (definition.saveNull) return list;
+        if (definition.saveEmpty) return list;
         for (var data : list) {
             if (data != NullData.INSTANCE) return list;
         }

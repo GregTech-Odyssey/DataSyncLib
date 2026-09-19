@@ -41,7 +41,7 @@ public final class SerializableAccess extends AbstractFieldAccess<IDataSerializa
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull IDataSerializable instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull IDataSerializable instance, boolean autoDetectOnly) {
         return instance.detectChange();
     }
 

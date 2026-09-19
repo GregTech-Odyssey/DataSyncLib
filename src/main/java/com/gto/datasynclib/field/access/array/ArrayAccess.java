@@ -41,7 +41,7 @@ import java.util.Arrays;
  * FieldDefinitionStorage.registerStrategy(MyKey[].class, HashUtil.arrayStrategy(MyKeyHashStrategy.ALL));
  * }</pre>
  *
- * <p>For large arrays prefer {@code @SyncToClient(autoUpdate = false)} plus
+ * <p>For large arrays prefer {@code @SyncToClient(autoDetect = false)} plus
  * {@code markFieldsForSync} instead of paying that scan every tick.</p>
  *
  * <p>Null elements are encoded with a boolean prefix.</p>
@@ -64,7 +64,7 @@ public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, T @NotNull [] instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, T @NotNull [] instance, boolean autoDetectOnly) {
         var hashCode = strategy != null ? strategy.hashCode(instance) : Arrays.hashCode(instance);
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;
@@ -109,7 +109,7 @@ public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
                 list.addNull();
             }
         }
-        if (definition.saveNull) return list;
+        if (definition.saveEmpty) return list;
         for (var data : list) {
             if (data != NullData.INSTANCE) return list;
         }

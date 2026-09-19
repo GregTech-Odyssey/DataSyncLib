@@ -43,7 +43,7 @@ import java.util.BitSet;
  *
  * <h3>Persistence format</h3>
  * <p>A {@link ListData} with one entry per slot (null slots become {@code NullData.INSTANCE}); the
- * list is suppressed ({@link NullData#NONE}) when every slot is null and {@code saveNull} is off,
+ * list is suppressed ({@link NullData#NONE}) when every slot is null and {@code saveEmpty} is off,
  * matching the other array accesses.</p>
  *
  * <h3>Change detection</h3>
@@ -57,7 +57,7 @@ import java.util.BitSet;
  * unlike comparing tag references — a mutation of an implementation that returns its own live tag is
  * still detected. A length change re-primes every slot and marks them all dirty. As with any
  * hash-based accessor a collision can hide a change; on hot arrays prefer manual marking
- * ({@code @SyncToClient(autoUpdate = false)} plus {@code markFieldsForSync}), which still results in
+ * ({@code @SyncToClient(autoDetect = false)} plus {@code markFieldsForSync}), which still results in
  * a full payload because the framework cannot know which slot moved.</p>
  */
 public final class TagSerializableArrayAccess extends AbstractFieldAccess<INBTSerializable[]> {
@@ -79,7 +79,7 @@ public final class TagSerializableArrayAccess extends AbstractFieldAccess<INBTSe
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, INBTSerializable @NotNull [] instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, INBTSerializable @NotNull [] instance, boolean autoDetectOnly) {
         if (this.slotHashes.length != instance.length) {
             // Different shape: everything has to be sent. Every slot is primed in one pass so the
             // next check does not report the same slots a second time.
@@ -165,7 +165,7 @@ public final class TagSerializableArrayAccess extends AbstractFieldAccess<INBTSe
                 list.add(DataCodecs.TAG_CODEC.encode(nbt));
             }
         }
-        if (definition.saveNull) return list;
+        if (definition.saveEmpty) return list;
         for (var data : list) {
             if (data != NullData.INSTANCE) return list;
         }

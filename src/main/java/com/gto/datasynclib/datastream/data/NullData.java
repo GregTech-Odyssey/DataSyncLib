@@ -15,7 +15,7 @@ import org.jetbrains.annotations.ApiStatus;
  *       serialization entirely. When a field write method returns {@code NONE},
  *       the field entry is <em>skipped</em> and nothing is written. This is the
  *       mechanism by which fields signal "I have nothing to write" (e.g., empty
- *       collections, default values, skip conditions).</li>
+ *       collections, default values, skip predicates).</li>
  * </ul>
  *
  * <p><strong>Important:</strong> Callers that process {@code Data} returned from
@@ -29,7 +29,7 @@ import org.jetbrains.annotations.ApiStatus;
 public enum NullData implements ImmutableData {
 
     /**
-     * Explicit null — will be serialized as a null entry when {@code saveNull} is true.
+     * Explicit null — will be serialized as a null entry when {@code saveEmpty} is true.
      * This is the wire-format null value (type ID 0).
      */
     INSTANCE,
@@ -37,7 +37,7 @@ public enum NullData implements ImmutableData {
     /**
      * Internal sentinel — signals "do not write this entry at all."
      * Used by field write methods to indicate that no data should be persisted
-     * (e.g., empty collections, values matching defaults, or skip-condition-triggered).
+     * (e.g., empty collections, values matching defaults, or skip-predicate-triggered).
      *
      * <p>This value should NEVER appear in serialized output. If it does, it
      * indicates a bug in a caller that failed to check for NONE before serializing.</p>

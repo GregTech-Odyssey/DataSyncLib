@@ -43,10 +43,10 @@ public class MyBlockEntity extends FieldDataHolderBlockEntity {
     @SaveToDisk
     private int energy = 0;
 
-    @SyncToClient(notifyUpdate = true)  // Triggers scheduleUpdate on client
+    @SyncToClient(scheduleUpdate = true)  // Triggers scheduleUpdate on client
     private String status = "idle";
 
-    @SyncToServer(autoUpdate = false)   // Only synced when explicitly marked
+    @SyncToServer(autoDetect = false)   // Only synced when explicitly marked
     private int clientConfig = 0;
 
     public MyBlockEntity(BlockPos pos, BlockState state) {
@@ -86,10 +86,10 @@ class InventoryData {
 }
 
 class EnergyData {
-    @SaveToDisk @SyncToClient(condition = "shouldSyncEnergy")
+    @SaveToDisk @SyncToClient(skipWhen = "skipEmptyEnergy")
     private long storedEnergy;
 
-    private boolean shouldSyncEnergy(long value) {
+    private boolean skipEmptyEnergy(long value) {
         return value > 0;  // Skip sync when empty
     }
 }
@@ -139,10 +139,10 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 
 | Annotation | Purpose | Key Attributes |
 |------------|---------|---------------|
-| `@SyncToClient` | Server→Client sync | `autoUpdate`, `notifyUpdate`, `condition`, `listener` |
-| `@SyncToServer` | Client→Server sync | `autoUpdate`, `notifyUpdate`, `condition`, `listener` |
-| `@SaveToDisk` | Disk persistence | `key`, `condition`, `saveNull`, `defaultValue`, `defaultValueGetter` |
-| `@Access` | Force access-mode for containers | `createInstance` |
+| `@SyncToClient` | Server→Client sync | `autoDetect`, `scheduleUpdate`, `skipWhen`, `listener` |
+| `@SyncToServer` | Client→Server sync | `autoDetect`, `scheduleUpdate`, `skipWhen`, `listener` |
+| `@SaveToDisk` | Disk persistence | `key`, `skipWhen`, `saveEmpty`, `defaultValue`, `defaultValueGetter` |
+| `@Access` | Force access-mode for containers | `instanceAsValue` |
 | `@AdditionalHolder` | Recursively scan nested object fields | — |
 | `@Codec` | Custom serialization | `saveCodec` / `syncCodec` / `writeToData` / `readFromData` |
 | `@Strategy` | Custom change detection strategy | `value` (static field name) |
@@ -165,7 +165,7 @@ repositories {
 }
 
 dependencies {
-    implementation fg.deobf("com.gto:datasynclib-forge-1.20.1:26.7.5")
+    implementation fg.deobf("com.gto:datasynclib-forge-1.20.1:26.9.4")
 }
 ```
 

@@ -405,7 +405,7 @@ public final class ReflectUtil {
      * returns) or {@code Object.class} (when null).</p>
      *
      * <p>This is used by {@link com.gto.datasynclib.FieldAnnotationMetadata} when creating
-     * handles for conditions ({@code -> boolean}) and listeners ({@code -> void}).</p>
+     * handles for skip predicates ({@code -> boolean}) and listeners ({@code -> void}).</p>
      *
      * @param lookup     the lookup with access to the method's declaring class
      * @param method     the method to create a handle for (may be null)

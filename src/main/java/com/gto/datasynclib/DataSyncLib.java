@@ -142,7 +142,7 @@ public final class DataSyncLib {
         // Priority sits below the two library interfaces above (so an explicit IFieldDataHolder/
         // IDataSerializable still wins) and above plain Collection/Map.
         // Note: change detection compares serializeNBT() deeply on every check, so on hot fields
-        // prefer @SyncToClient(autoUpdate = false) + markFieldsForSync.
+        // prefer @SyncToClient(autoDetect = false) + markFieldsForSync.
         registerAccessInterfaceFactory(INBTSerializable.class, k -> TagSerializableAccess::new, 1000);
 
         // Access-mode factories: FastUtil primitive collections → general Collection (descending specificity)

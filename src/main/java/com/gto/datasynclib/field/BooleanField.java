@@ -10,7 +10,7 @@ import org.jetbrains.annotations.NotNull;
 
 /**
  * DataField implementation for boolean values. Tracks the previous value for change detection
- * comparison, handles sync conditions via {@code skipSync}, default value filtering for
+ * comparison, handles sync skip predicates via {@code skipSync}, default value filtering for
  * persistence, and invokes the configured {@code @SyncToClient/@SyncToServer} listener on every
  * value applied by {@code readFromBuffer} — not only when the value actually changed.
  */

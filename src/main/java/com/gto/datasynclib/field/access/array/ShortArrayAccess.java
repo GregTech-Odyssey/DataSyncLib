@@ -43,7 +43,7 @@ public final class ShortArrayAccess extends AbstractFieldAccess<short[]> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, short @NotNull [] instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, short @NotNull [] instance, boolean autoDetectOnly) {
         if (!Arrays.equals(snapshot, instance)) {
             snapshot = instance.clone();
             return true;

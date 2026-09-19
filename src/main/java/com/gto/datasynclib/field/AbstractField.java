@@ -14,7 +14,7 @@ import org.jetbrains.annotations.NotNull;
  * assigns whatever {@link #hasChange(LogicalSide, Object)} reports to the dirty flag
  * (so it can also <em>clear</em> a manual {@link #markAsChanged}), while subclasses implement
  * {@code hasChange} for type-specific value comparison — including evaluating the
- * {@code skipSync} condition, which therefore happens inside the subclass.</p>
+ * {@code skipSync} predicate, which therefore happens inside the subclass.</p>
  *
  * <p>Provides common change tracking ({@code markAsChanged/clearChanged/isChanged})
  * backed by a simple boolean flag. Subclasses track a snapshot of the previous value
@@ -60,13 +60,13 @@ public abstract class AbstractField<T> implements DataField<T> {
     }
 
     @Override
-    public final boolean detectChange(@NotNull LogicalSide side, @NotNull Object source, boolean autoOnly) {
+    public final boolean detectChange(@NotNull LogicalSide side, @NotNull Object source, boolean autoDetectOnly) {
         return changed = hasChange(side, source);
     }
 
     /**
      * Template method: report whether the current value differs from the snapshot, and evaluate
-     * the field's {@code skipSync} condition. Implementations are responsible for both.
+     * the field's {@code skipSync} predicate. Implementations are responsible for both.
      *
      * @return {@code true} if the field should be included in the next sync
      */

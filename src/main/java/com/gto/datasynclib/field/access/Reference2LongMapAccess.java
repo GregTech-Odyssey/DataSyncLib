@@ -30,7 +30,7 @@ public class Reference2LongMapAccess<K> extends AbstractFieldAccess<Reference2Lo
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Reference2LongMap instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Reference2LongMap instance, boolean autoDetectOnly) {
         var hashCode = instance.hashCode();
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;

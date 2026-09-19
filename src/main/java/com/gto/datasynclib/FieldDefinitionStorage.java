@@ -382,9 +382,9 @@ public final class FieldDefinitionStorage {
      *       {@code @SyncToServer}, or {@code @AddToManager}), resolves any
      *       {@code @Conversion} annotation:
      *       <ul>
-     *         <li>Looks up the static {@code getFunction} field (required)</li>
+     *         <li>Looks up the static {@code toManaged} field (required)</li>
      *         <li>Infers the managed type from the function's second generic parameter</li>
-     *         <li>Optionally looks up the static {@code setFunction} field (silently
+     *         <li>Optionally looks up the static {@code toField} field (silently
      *             skipped if absent — common for final/access-mode fields)</li>
      *       </ul>
      *   </li>
@@ -436,7 +436,7 @@ public final class FieldDefinitionStorage {
             if (conversion != null) {
                 try {
                     // Resolve the forward conversion function: static Function<FieldType, ManagedType>
-                    conversionField = clazz.getDeclaredField(conversion.getFunction());
+                    conversionField = clazz.getDeclaredField(conversion.toManaged());
                     conversionField.setAccessible(true);
                     conversionGetFunction = (Function) conversionField.get(null);
                     // The managed type is the return type (2nd generic param) of the Function
@@ -444,11 +444,11 @@ public final class FieldDefinitionStorage {
                     try {
                         // Resolve the reverse conversion function: static Function<ManagedType, FieldType>
                         // This is optional — if absent, the setter path won't use conversion
-                        var f = clazz.getDeclaredField(conversion.setFunction());
+                        var f = clazz.getDeclaredField(conversion.toField());
                         f.setAccessible(true);
                         conversionSetFunction = (Function) f.get(null);
                     } catch (NoSuchFieldException ignored) {
-                        // setFunction is optional; silently skip for final/access-mode fields
+                        // toField is optional; silently skip for final/access-mode fields
                     }
                 } catch (NoSuchFieldException | IllegalAccessException e) {
                     throw new RuntimeException(e);
@@ -489,7 +489,7 @@ public final class FieldDefinitionStorage {
             return new DataFieldDefinition<>(
                     lookup, field, type, ChildManagerAccess::new,
                     source, annotations, new Class[0],
-                    isFinal, annotations.createAccessInstance(), STRATEGIES,
+                    isFinal, annotations.instanceAsValue(), STRATEGIES,
                     null, null);
         } catch (Throwable e) {
             throw new RuntimeException("Failed to create child-manager definition for field: " + ReflectUtil.getFieldDetailedName(field), e);
@@ -530,7 +530,7 @@ public final class FieldDefinitionStorage {
 
     private static DataFieldDefinition<?> createAccessFieldDefinition(MethodHandles.Lookup lookup, Field field, Class<?> type, @Nullable Function<Object, Object> source, FieldAnnotationMetadata annotations, Class<?>[] genericType, boolean isFinal, Function conversionGetFunction, Function conversionSetFunction) {
         var factory = ACCESS_CACHE.getCache(type);
-        return new DataFieldDefinition<>(lookup, field, type, factory, source, annotations, genericType, isFinal, annotations.createAccessInstance(), STRATEGIES, conversionGetFunction, conversionSetFunction);
+        return new DataFieldDefinition<>(lookup, field, type, factory, source, annotations, genericType, isFinal, annotations.instanceAsValue(), STRATEGIES, conversionGetFunction, conversionSetFunction);
     }
 
     private static DataFieldDefinition<?> createGenericFieldDefinition(MethodHandles.Lookup lookup, Field field, Class<?> type, @Nullable Function<Object, Object> source, FieldAnnotationMetadata annotations, Class<?>[] genericType, boolean isFinal, Function conversionGetFunction, Function conversionSetFunction) {

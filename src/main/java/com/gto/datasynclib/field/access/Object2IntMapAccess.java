@@ -42,7 +42,7 @@ public class Object2IntMapAccess<K> extends AbstractFieldAccess<Object2IntMap> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Object2IntMap instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Object2IntMap instance, boolean autoDetectOnly) {
         var hashCode = instance.hashCode();
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;

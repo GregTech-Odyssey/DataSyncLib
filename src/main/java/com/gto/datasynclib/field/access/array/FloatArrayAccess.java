@@ -43,7 +43,7 @@ public final class FloatArrayAccess extends AbstractFieldAccess<float[]> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, float @NotNull [] instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, float @NotNull [] instance, boolean autoDetectOnly) {
         if (!Arrays.equals(snapshot, instance)) {
             snapshot = instance.clone();
             return true;

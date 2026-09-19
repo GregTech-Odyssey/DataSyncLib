@@ -31,7 +31,7 @@ public class Object2LongMapAccess<K> extends AbstractFieldAccess<Object2LongMap>
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Object2LongMap instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull Object2LongMap instance, boolean autoDetectOnly) {
         var hashCode = instance.hashCode();
         if (hashCode != this.hashCode) {
             this.hashCode = hashCode;

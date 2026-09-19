@@ -20,9 +20,9 @@ import java.lang.annotation.Target;
  * is <em>not</em> written to disk, saving space. This is useful for fields
  * whose initial/default state is common (e.g., 0, empty, false).</p>
  *
- * <h3>Save condition:</h3>
- * <p>{@link #condition()} references a method with signature {@code (T) -> boolean}.
- * When the method returns {@code true}, the field is <em>skipped</em> entirely.</p>
+ * <h3>Skip predicate:</h3>
+ * <p>{@link #skipWhen()} references a method with signature {@code (T) -> boolean}.
+ * When the method returns {@code true}, the field is <em>skipped</em> entirely (not written).</p>
  *
  * <h3>Load listener:</h3>
  * <p>{@link #listener()} references a method with signature {@code (T) -> void} that is
@@ -47,12 +47,13 @@ public @interface SaveToDisk {
     String key() default "";
 
     /**
-     * Condition for persisting to disk.
-     * Method signature: T -> boolean
+     * Method that decides whether this field is skipped when writing to disk.
+     * Method signature: {@code (T) -> boolean}, where {@code T} is the field's declared type.
+     * Returning {@code true} means "do not persist this field".
      *
-     * @return the method name for the condition check
+     * @return the name of the skip-predicate method, or an empty string for none
      */
-    String condition() default "";
+    String skipWhen() default "";
 
     /**
      * Whether to write null values, empty collections, or empty arrays to disk.
@@ -60,7 +61,7 @@ public @interface SaveToDisk {
      *
      * @return true if null and empty values should be saved
      */
-    boolean saveNull() default false;
+    boolean saveEmpty() default false;
 
     /**
      * If the field value equals this value, it will not be written to disk.
@@ -102,22 +103,22 @@ public @interface SaveToDisk {
      * <ul>
      *   <li>Only when the field's key is present in the loaded {@code field_save} payload,
      *       i.e. the field was written on the previous save; a field skipped by
-     *       {@link #condition()}, matched by {@link #defaultValue()}, or absent from older
+     *       {@link #skipWhen()}, matched by {@link #defaultValue()}, or absent from older
      *       data does not fire it.</li>
      *   <li>After the decoded value has been assigned to the field (for containers the
      *       contents have already been read in place).</li>
      *   <li>Not on the network sync path ({@code readFromBuffer}), and not for the chunk-load
      *       sync carried by {@code field_sync} — those only trigger
      *       {@code @SyncToClient/@SyncToServer(listener = ...)} and
-     *       {@code notifyUpdate}/{@code scheduleUpdate}.</li>
+     *       {@code scheduleUpdate}.</li>
      * </ul>
      *
      * <p>For container-type fields the listener receives the container instance itself, or
-     * {@code null} when the stored entry is a null marker (e.g. a {@code createInstance}
+     * {@code null} when the stored entry is a null marker (e.g. a {@code instanceAsValue}
      * field saved as null); the listener is never expected to construct the value.</p>
      *
      * @return the name of the load-listener method, or an empty string for none
-     * @see #condition()
+     * @see #skipWhen()
      */
     String listener() default "";
 }

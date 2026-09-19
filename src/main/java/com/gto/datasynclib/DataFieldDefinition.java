@@ -20,7 +20,8 @@ import java.util.function.Function;
  * {@code @SaveToDisk}, {@code @SyncToClient}, or {@code @SyncToServer}.
  *
  * <p>Provides typed getters/setters for all primitive types plus Object, change-detection
- * strategies, skip-sync/save condition handling, and encoding/decoding via both network buffers
+ * strategies, the skip-sync/save predicates ({@code skipWhen} on {@code @SaveToDisk} and
+ * {@code @SyncTo*}), and encoding/decoding via both network buffers
  * ({@link FriendlyByteBuf}) and persistent {@link Data} objects.</p>
  *
  * @param <T> the declared type of the underlying field
@@ -59,9 +60,11 @@ public final class DataFieldDefinition<T> {
      */
     public final boolean isFinal;
     /**
-     * Whether the access layer should create a new instance on read (vs. mutate in-place).
+     * Whether the access layer treats the container instance itself as the value: {@code null} is
+     * preserved as a null marker and a fresh instance is created on read, instead of mutating the
+     * existing container in place.
      */
-    public final boolean createInstance;
+    public final boolean instanceAsValue;
     /**
      * The hash/equality strategy for change detection. Defaults to {@link #OBJECT_STRATEGY}.
      */
@@ -86,7 +89,7 @@ public final class DataFieldDefinition<T> {
 
     /**
      * Forward conversion function resolved from {@link com.gto.datasynclib.annotations.Conversion @Conversion}
-     * annotation's {@code getFunction}. Converts from the field's declared type to the managed type
+     * annotation's {@code toManaged}. Converts from the field's declared type to the managed type
      * when <strong>reading</strong> the field value (e.g., {@code CompoundTag → Map<String, Tag>}).
      *
      * <p>This is applied automatically in {@link #get(Object)}: if non-null, the raw value from
@@ -100,14 +103,14 @@ public final class DataFieldDefinition<T> {
 
     /**
      * Reverse conversion function resolved from {@link com.gto.datasynclib.annotations.Conversion @Conversion}
-     * annotation's {@code setFunction}. Converts from the managed type back to the field's
+     * annotation's {@code toField}. Converts from the managed type back to the field's
      * declared type when <strong>writing</strong> the field value (e.g., {@code Map<String, Tag> → CompoundTag}).
      *
      * <p>This is applied automatically in {@link #set(Object, Object)}: if non-null, the incoming
      * value is passed through this function before being written to the field via the VarHandle setter.</p>
      *
      * <p>{@code null} if the field has no {@code @Conversion} annotation, or if the annotation's
-     * {@code setFunction} was empty/absent (common for {@code final} or access-mode fields).</p>
+     * {@code toField} was empty/absent (common for {@code final} or access-mode fields).</p>
      */
     @Nullable
     public final Function<T, Object> conversionSet;
@@ -123,7 +126,7 @@ public final class DataFieldDefinition<T> {
     /**
      * Whether null values should be persisted to disk.
      */
-    public final boolean saveNull;
+    public final boolean saveEmpty;
     /**
      * Whether this field syncs from server to client.
      */
@@ -136,12 +139,12 @@ public final class DataFieldDefinition<T> {
     private final Object defaultValue;
     private final MethodHandle defaultValueHandle;
 
-    private final MethodHandle saveCondition;
-    private final MethodHandle syncToClientCondition;
-    private final MethodHandle syncToServerCondition;
+    private final MethodHandle saveSkipWhen;
+    private final MethodHandle syncToClientSkipWhen;
+    private final MethodHandle syncToServerSkipWhen;
 
-    private final boolean notifyClientUpdate;
-    private final boolean notifyServerUpdate;
+    private final boolean scheduleClientUpdate;
+    private final boolean scheduleServerUpdate;
     private final boolean autoSyncToClient;
     private final boolean autoSyncToServer;
 
@@ -163,24 +166,24 @@ public final class DataFieldDefinition<T> {
     private final MethodHandle serverListenerHandle;
 
     @SuppressWarnings("unchecked")
-    DataFieldDefinition(MethodHandles.Lookup lookup, Field field, Class<?> type, DataField.Factory<T> factory, @Nullable Function<Object, Object> source, FieldAnnotationMetadata fieldAnnotations, Class<?>[] genericType, boolean isFinal, boolean createInstance, Map<Class<?>, Hash.Strategy<?>> strategies, @Nullable Function<Object, T> conversionGet, @Nullable Function<T, Object> conversionSet) {
+    DataFieldDefinition(MethodHandles.Lookup lookup, Field field, Class<?> type, DataField.Factory<T> factory, @Nullable Function<Object, Object> source, FieldAnnotationMetadata fieldAnnotations, Class<?>[] genericType, boolean isFinal, boolean instanceAsValue, Map<Class<?>, Hash.Strategy<?>> strategies, @Nullable Function<Object, T> conversionGet, @Nullable Function<T, Object> conversionSet) {
         this.field = field;
         this.factory = factory;
         this.source = source;
         this.key = fieldAnnotations.key();
-        this.saveNull = fieldAnnotations.saveNull();
+        this.saveEmpty = fieldAnnotations.saveEmpty();
         this.defaultValue = fieldAnnotations.defaultValue();
         this.isSave = fieldAnnotations.isSave();
         this.isSyncToClient = fieldAnnotations.isSyncToClient();
         this.isSyncToServer = fieldAnnotations.isSyncToServer();
-        this.notifyClientUpdate = fieldAnnotations.notifyClientUpdate();
-        this.notifyServerUpdate = fieldAnnotations.notifyServerUpdate();
+        this.scheduleClientUpdate = fieldAnnotations.scheduleClientUpdate();
+        this.scheduleServerUpdate = fieldAnnotations.scheduleServerUpdate();
         this.autoSyncToClient = fieldAnnotations.autoSyncToClient();
         this.autoSyncToServer = fieldAnnotations.autoSyncToServer();
-        this.createInstance = createInstance;
+        this.instanceAsValue = instanceAsValue;
         this.conversionGet = conversionGet;
         this.conversionSet = conversionSet;
-        this.codec = (isFinal || !createInstance) ? null : fieldAnnotations.dataCodec() != null ? DataSyncCodec.of(fieldAnnotations.streamCodec(), fieldAnnotations.dataCodec()) : (DataSyncCodec<T>) DataSyncCodec.get(type);
+        this.codec = (isFinal || !instanceAsValue) ? null : fieldAnnotations.dataCodec() != null ? DataSyncCodec.of(fieldAnnotations.streamCodec(), fieldAnnotations.dataCodec()) : (DataSyncCodec<T>) DataSyncCodec.get(type);
         this.genericType = genericType;
         this.genericCodecs = new DataSyncCodec[genericType.length];
         this.isFinal = isFinal;
@@ -201,9 +204,9 @@ public final class DataFieldDefinition<T> {
         this.saveListenerHandle = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.readSaveListener());
         this.clientListenerHandle = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.clientUpdateListener());
         this.serverListenerHandle = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.serverUpdateListener());
-        this.saveCondition = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.saveCondition(), boolean.class);
-        this.syncToClientCondition = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.syncToClientCondition(), boolean.class);
-        this.syncToServerCondition = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.syncToServerCondition(), boolean.class);
+        this.saveSkipWhen = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.saveSkipWhen(), boolean.class);
+        this.syncToClientSkipWhen = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.syncToClientSkipWhen(), boolean.class);
+        this.syncToServerSkipWhen = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.syncToServerSkipWhen(), boolean.class);
     }
 
     public boolean hasDefaultValue() {
@@ -310,180 +313,180 @@ public final class DataFieldDefinition<T> {
     }
 
     public boolean skipSync(LogicalSide side, Object source, boolean value) {
-        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
-        if (conditions == null) return false;
+        var skipWhen = side.isClient() ? this.syncToServerSkipWhen : this.syncToClientSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSync(LogicalSide side, Object source, byte value) {
-        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
-        if (conditions == null) return false;
+        var skipWhen = side.isClient() ? this.syncToServerSkipWhen : this.syncToClientSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSync(LogicalSide side, Object source, short value) {
-        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
-        if (conditions == null) return false;
+        var skipWhen = side.isClient() ? this.syncToServerSkipWhen : this.syncToClientSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSync(LogicalSide side, Object source, int value) {
-        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
-        if (conditions == null) return false;
+        var skipWhen = side.isClient() ? this.syncToServerSkipWhen : this.syncToClientSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSync(LogicalSide side, Object source, long value) {
-        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
-        if (conditions == null) return false;
+        var skipWhen = side.isClient() ? this.syncToServerSkipWhen : this.syncToClientSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSync(LogicalSide side, Object source, float value) {
-        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
-        if (conditions == null) return false;
+        var skipWhen = side.isClient() ? this.syncToServerSkipWhen : this.syncToClientSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSync(LogicalSide side, Object source, double value) {
-        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
-        if (conditions == null) return false;
+        var skipWhen = side.isClient() ? this.syncToServerSkipWhen : this.syncToClientSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSync(LogicalSide side, Object source, char value) {
-        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
-        if (conditions == null) return false;
+        var skipWhen = side.isClient() ? this.syncToServerSkipWhen : this.syncToClientSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSync(LogicalSide side, Object source, T value) {
-        var conditions = side.isClient() ? this.syncToServerCondition : this.syncToClientCondition;
-        if (conditions == null) return false;
+        var skipWhen = side.isClient() ? this.syncToServerSkipWhen : this.syncToClientSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSave(Object source, boolean value) {
-        var conditions = this.saveCondition;
-        if (conditions == null) return false;
+        var skipWhen = this.saveSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSave(Object source, byte value) {
-        var conditions = this.saveCondition;
-        if (conditions == null) return false;
+        var skipWhen = this.saveSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSave(Object source, short value) {
-        var conditions = this.saveCondition;
-        if (conditions == null) return false;
+        var skipWhen = this.saveSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSave(Object source, int value) {
-        var conditions = this.saveCondition;
-        if (conditions == null) return false;
+        var skipWhen = this.saveSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSave(Object source, long value) {
-        var conditions = this.saveCondition;
-        if (conditions == null) return false;
+        var skipWhen = this.saveSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSave(Object source, float value) {
-        var conditions = this.saveCondition;
-        if (conditions == null) return false;
+        var skipWhen = this.saveSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSave(Object source, double value) {
-        var conditions = this.saveCondition;
-        if (conditions == null) return false;
+        var skipWhen = this.saveSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSave(Object source, char value) {
-        var conditions = this.saveCondition;
-        if (conditions == null) return false;
+        var skipWhen = this.saveSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
     }
 
     public boolean skipSave(Object source, T value) {
-        var conditions = this.saveCondition;
-        if (conditions == null) return false;
+        var skipWhen = this.saveSkipWhen;
+        if (skipWhen == null) return false;
         try {
-            return (boolean) conditions.invokeExact(source, value);
+            return (boolean) skipWhen.invokeExact(source, value);
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
@@ -601,7 +604,7 @@ public final class DataFieldDefinition<T> {
      * Returns the disk-load listener declared via {@code @SaveToDisk(listener = "...")}.
      *
      * <p>The handle is {@code (Object source, T value) void}; {@code value} is the value that
-     * has just been restored from disk, and is {@code null} for container/{@code createInstance}
+     * has just been restored from disk, and is {@code null} for container/{@code instanceAsValue}
      * fields stored as a null marker. Invoke it with
      * {@link MethodHandle#invokeExact(Object, Object)} (exact static argument types!) after the
      * value has been applied to the field:</p>
@@ -627,11 +630,11 @@ public final class DataFieldDefinition<T> {
         return saveListenerHandle;
     }
 
-    boolean notifyUpdate(LogicalSide side) {
-        return side.isClient() ? notifyClientUpdate : notifyServerUpdate;
+    boolean scheduleUpdate(LogicalSide side) {
+        return side.isClient() ? scheduleClientUpdate : scheduleServerUpdate;
     }
 
-    boolean autoUpdate(LogicalSide side) {
+    boolean autoDetect(LogicalSide side) {
         return side.isServer() ? autoSyncToClient : autoSyncToServer;
     }
 

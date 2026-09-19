@@ -50,10 +50,10 @@ public class MyBlockEntity extends FieldDataHolderBlockEntity {
     @SaveToDisk
     private int energy = 0;
 
-    @SyncToClient(notifyUpdate = true)  // Triggers scheduleUpdate on client
+    @SyncToClient(scheduleUpdate = true)  // Triggers scheduleUpdate on client
     private String status = "idle";
 
-    @SyncToServer(autoUpdate = false)   // Only synced when explicitly marked
+    @SyncToServer(autoDetect = false)   // Only synced when explicitly marked
     private int clientConfig = 0;
 
     public MyBlockEntity(BlockPos pos, BlockState state) {
@@ -66,7 +66,7 @@ public class MyBlockEntity extends FieldDataHolderBlockEntity {
         DataSyncNetwork.syncBlockEntityToClient(this, false, true);  // Async-safe
     }
 
-    // Called on client when a notifyUpdate field changes
+    // Called on client when a scheduleUpdate field changes
     @Override
     public void scheduleUpdate(LogicalSide side) {
         if (side.isClient()) {
@@ -100,11 +100,11 @@ class InventoryData {
 }
 
 class EnergyData {
-    @SaveToDisk @SyncToClient(condition = "shouldSyncEnergy")
+    @SaveToDisk @SyncToClient(skipWhen = "skipEmptyEnergy")
     private long storedEnergy;
 
-    private boolean shouldSyncEnergy(long value) {
-        return value > 0;  // Skip sync when empty
+    private boolean skipEmptyEnergy(long value) {
+        return value <= 0;  // skip syncing while the tank is empty
     }
 }
 
@@ -170,9 +170,9 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 
 > **Key points:**
 > - Sync requires explicit calls to `DataSyncNetwork.syncBlockEntityToClient()` (async-safe).
-> - `autoUpdate = false` fields need `markFieldsForSync()` calls to trigger sync.
+> - `autoDetect = false` fields need `markFieldsForSync()` calls to trigger sync.
 > - Persistence requires manual `setChanged()` calls on the BlockEntity.
-> - `syncBlockEntityToClient(be, false, true)`: `false` = incremental (only changed), `true` = only fields with `autoUpdate=true`.
+> - `syncBlockEntityToClient(be, false, true)`: `false` = incremental (only changed), `true` = only fields with `autoDetect=true`.
 > - See `TestBlockEntity` for a complete example with all features.
 
 ### Advanced: Registry Global Codec Auto-Registration
@@ -209,13 +209,13 @@ Supports generic superclasses, generic interfaces (`List<T>`), multi-level inher
 
 | Annotation | Purpose | Key Attributes |
 |------------|---------|---------------|
-| `@SyncToClient` | Server→Client sync | `autoUpdate` (default true), `notifyUpdate`, `condition`, `listener` |
-| `@SyncToServer` | Client→Server sync | `autoUpdate` (default true), `notifyUpdate`, `condition`, `listener` |
-| `@SaveToDisk` | Disk persistence | `key`, `condition`, `saveNull`, `defaultValue`, `defaultValueGetter`, `listener` (disk-load callback) |
-| `@Access` | Force access-mode (for containers) | `createInstance` |
+| `@SyncToClient` | Server→Client sync | `autoDetect` (default true), `scheduleUpdate`, `skipWhen`, `listener` |
+| `@SyncToServer` | Client→Server sync | `autoDetect` (default true), `scheduleUpdate`, `skipWhen`, `listener` |
+| `@SaveToDisk` | Disk persistence | `key`, `skipWhen`, `saveEmpty`, `defaultValue`, `defaultValueGetter`, `listener` (disk-load callback) |
+| `@Access` | Force access-mode (for containers) | `instanceAsValue` |
 | `@AdditionalHolder` | Recursively scan nested object fields, or spawn a dedicated child manager | `childManager` (true = child-manager mode) |
 | `@Codec` | Custom serialization | `saveCodec` / `syncCodec` / `writeToData` / `readFromData` etc. |
-| `@Conversion` | Store/sync a field as another type via static `Function`s | `getFunction` (required), `setFunction` (optional) |
+| `@Conversion` | Store/sync a field as another type via static `Function`s | `toManaged` (required), `toField` (optional) |
 | `@Strategy` | Custom change detection strategy | `value` (static field name) |
 | `@Generic` | Force generic-type factory resolution | — |
 | `@AddToManager` | Add to manager without auto sync/persist | — |
@@ -242,7 +242,7 @@ Client receive
         │     └── FieldDataManager.readFromNetworkBuffer(CLIENT, data)
         │           ├── readCustomSyncData()
         │           ├── while buf: readVarInt(index) → field.readFromBuffer()
-        │           └── notifyUpdate → scheduleUpdate()
+        │           └── scheduleUpdate=true → scheduleUpdate()
 ```
 
 ### Persistence Flow

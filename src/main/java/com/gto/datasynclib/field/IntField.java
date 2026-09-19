@@ -16,12 +16,12 @@ import org.jetbrains.annotations.NotNull;
  * {@link #writeToBuffer} and — only when a listener is configured — by
  * {@link #readFromBuffer}; a receive-only holder therefore keeps its earlier snapshot.
  * The value is read via {@link DataFieldDefinition#getInt(Object)} (VarHandle), so this is
- * extremely fast. Sync conditions ({@code @SyncToClient(condition = "...")}) are checked
+ * extremely fast. Sync skip predicates ({@code @SyncToClient(skipWhen = "...")}) are checked
  * before comparison.</p>
  *
  * <h3>Persistence:</h3>
  * <p>Skips writing if the value matches the configured default (avoids storing redundant
- * data) or if the save condition returns {@code true}. Otherwise writes as {@link com.gto.datasynclib.datastream.data.IntData}.</p>
+ * data) or if the save skip predicate returns {@code true}. Otherwise writes as {@link com.gto.datasynclib.datastream.data.IntData}.</p>
  *
  * <h3>Listener notification:</h3>
  * <p>On the receiving side, if a listener MethodHandle is configured, it is invoked with

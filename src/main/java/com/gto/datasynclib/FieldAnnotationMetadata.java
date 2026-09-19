@@ -32,7 +32,7 @@ final class FieldAnnotationMetadata {
     private final SyncToServer syncToServer;
 
     private final String key;
-    private final boolean saveNull;
+    private final boolean saveEmpty;
     private final Object defaultValue;
     private final Method defaultValueGetter;
     /**
@@ -42,9 +42,9 @@ final class FieldAnnotationMetadata {
     private final Method readSaveListener;
     private final Method clientUpdateListener;
     private final Method serverUpdateListener;
-    private final Method saveCondition;
-    private final Method syncToClientCondition;
-    private final Method syncToServerCondition;
+    private final Method saveSkipWhen;
+    private final Method syncToClientSkipWhen;
+    private final Method syncToServerSkipWhen;
     private final Hash.Strategy strategy;
     private final ByteStreamCodec streamCodec;
     private final DataCodec dataCodec;
@@ -52,13 +52,13 @@ final class FieldAnnotationMetadata {
     private final Method readFromData;
     private final Method writeToBuffer;
     private final Method readFromBuffer;
-    private final boolean notifyClientUpdate;
-    private final boolean notifyServerUpdate;
+    private final boolean scheduleClientUpdate;
+    private final boolean scheduleServerUpdate;
     private final boolean autoSyncToClient;
     private final boolean autoSyncToServer;
     private final boolean hasGeneric;
     private final boolean hasAccessAnnotation;
-    private final boolean createAccessInstance;
+    private final boolean instanceAsValue;
 
     FieldAnnotationMetadata(Class<?> clazz, Field field, Class<?> type, SaveToDisk saveToDisk, SyncToClient syncToClient, SyncToServer syncToServer) {
         var access = field.getAnnotation(Access.class);
@@ -69,13 +69,13 @@ final class FieldAnnotationMetadata {
         this.syncToClient = syncToClient;
         this.syncToServer = syncToServer;
         this.key = saveToDisk == null || saveToDisk.key().isEmpty() ? field.getName() : saveToDisk.key();
-        this.saveNull = saveToDisk == null || saveToDisk.saveNull();
+        this.saveEmpty = saveToDisk == null || saveToDisk.saveEmpty();
         this.defaultValue = saveToDisk == null ? null : ReflectUtil.parse(type, saveToDisk.defaultValue());
-        this.notifyClientUpdate = syncToClient != null && syncToClient.notifyUpdate();
-        this.notifyServerUpdate = syncToServer != null && syncToServer.notifyUpdate();
-        this.autoSyncToClient = syncToClient != null && syncToClient.autoUpdate();
-        this.autoSyncToServer = syncToServer != null && syncToServer.autoUpdate();
-        this.createAccessInstance = this.hasAccessAnnotation && access.createInstance();
+        this.scheduleClientUpdate = syncToClient != null && syncToClient.scheduleUpdate();
+        this.scheduleServerUpdate = syncToServer != null && syncToServer.scheduleUpdate();
+        this.autoSyncToClient = syncToClient != null && syncToClient.autoDetect();
+        this.autoSyncToServer = syncToServer != null && syncToServer.autoDetect();
+        this.instanceAsValue = this.hasAccessAnnotation && access.instanceAsValue();
 
         if (saveToDisk != null && !saveToDisk.defaultValueGetter().isEmpty()) {
             var method = ReflectUtil.getAccessibleMethod(clazz, saveToDisk.defaultValueGetter());
@@ -85,7 +85,7 @@ final class FieldAnnotationMetadata {
             this.defaultValueGetter = null;
         }
 
-        // Load listener: resolved with the field's exact declared type (same rule as `condition`),
+        // Load listener: resolved with the field's exact declared type (same rule as `skipWhen`),
         // i.e. a non-static method on the declaring class taking the field type as its only
         // parameter. Stored as a Method here and turned into a MethodHandle by
         // DataFieldDefinition; the readFromData implementations invoke it after a disk load.
@@ -113,28 +113,28 @@ final class FieldAnnotationMetadata {
             this.serverUpdateListener = null;
         }
 
-        if (saveToDisk != null && !saveToDisk.condition().isEmpty()) {
-            var method = ReflectUtil.getAccessibleMethod(clazz, saveToDisk.condition(), type);
+        if (saveToDisk != null && !saveToDisk.skipWhen().isEmpty()) {
+            var method = ReflectUtil.getAccessibleMethod(clazz, saveToDisk.skipWhen(), type);
             method.setAccessible(true);
-            this.saveCondition = method;
+            this.saveSkipWhen = method;
         } else {
-            this.saveCondition = null;
+            this.saveSkipWhen = null;
         }
 
-        if (syncToClient != null && !syncToClient.condition().isEmpty()) {
-            var method = ReflectUtil.getAccessibleMethod(clazz, syncToClient.condition(), type);
+        if (syncToClient != null && !syncToClient.skipWhen().isEmpty()) {
+            var method = ReflectUtil.getAccessibleMethod(clazz, syncToClient.skipWhen(), type);
             method.setAccessible(true);
-            this.syncToClientCondition = method;
+            this.syncToClientSkipWhen = method;
         } else {
-            this.syncToClientCondition = null;
+            this.syncToClientSkipWhen = null;
         }
 
-        if (syncToServer != null && !syncToServer.condition().isEmpty()) {
-            var method = ReflectUtil.getAccessibleMethod(clazz, syncToServer.condition(), type);
+        if (syncToServer != null && !syncToServer.skipWhen().isEmpty()) {
+            var method = ReflectUtil.getAccessibleMethod(clazz, syncToServer.skipWhen(), type);
             method.setAccessible(true);
-            this.syncToServerCondition = method;
+            this.syncToServerSkipWhen = method;
         } else {
-            this.syncToServerCondition = null;
+            this.syncToServerSkipWhen = null;
         }
 
         var strategy = field.getAnnotation(Strategy.class);

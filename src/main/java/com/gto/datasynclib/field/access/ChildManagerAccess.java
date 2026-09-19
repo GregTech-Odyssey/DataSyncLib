@@ -100,10 +100,10 @@ public final class ChildManagerAccess<T> extends AbstractFieldAccess<T> {
     }
 
     @Override
-    protected boolean hasChange(@NotNull LogicalSide side, @NotNull T instance, boolean autoOnly) {
+    protected boolean hasChange(@NotNull LogicalSide side, @NotNull T instance, boolean autoDetectOnly) {
         var holder = asHolder(instance);
         if (holder == null) return false;
-        return holder.getFieldDataManager().updateFieldDirtyFlags(side, autoOnly);
+        return holder.getFieldDataManager().updateFieldDirtyFlags(side, autoDetectOnly);
     }
 
     @Override

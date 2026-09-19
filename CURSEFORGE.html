@@ -47,10 +47,10 @@
     @SaveToDisk
     private int energy = 0;
 
-    @SyncToClient(notifyUpdate = true)  // Triggers scheduleUpdate on client
+    @SyncToClient(scheduleUpdate = true)  // Triggers scheduleUpdate on client
     private String status = "idle";
 
-    @SyncToServer(autoUpdate = false)   // Only synced when explicitly marked
+    @SyncToServer(autoDetect = false)   // Only synced when explicitly marked
     private int clientConfig = 0;
 
     public MyBlockEntity(BlockPos pos, BlockState state) {
@@ -88,10 +88,10 @@ class InventoryData {
 }
 
 class EnergyData {
-    @SaveToDisk @SyncToClient(condition = "shouldSyncEnergy")
+    @SaveToDisk @SyncToClient(skipWhen = "skipEmptyEnergy")
     private long storedEnergy;
 
-    private boolean shouldSyncEnergy(long value) {
+    private boolean skipEmptyEnergy(long value) {
         return value &gt; 0;  // Skip sync when empty
     }
 }</code></pre>
@@ -136,10 +136,10 @@ private MyConfig config = new MyConfig();</code></pre>
 
 <table>
 <tr><th>Annotation</th><th>Purpose</th><th>Key Attributes</th></tr>
-<tr><td><code>@SyncToClient</code></td><td>Server→Client sync</td><td><code>autoUpdate</code>, <code>notifyUpdate</code>, <code>condition</code>, <code>listener</code></td></tr>
-<tr><td><code>@SyncToServer</code></td><td>Client→Server sync</td><td><code>autoUpdate</code>, <code>notifyUpdate</code>, <code>condition</code>, <code>listener</code></td></tr>
-<tr><td><code>@SaveToDisk</code></td><td>Disk persistence</td><td><code>key</code>, <code>condition</code>, <code>saveNull</code>, <code>defaultValue</code>, <code>defaultValueGetter</code></td></tr>
-<tr><td><code>@Access</code></td><td>Force access-mode for containers</td><td><code>createInstance</code></td></tr>
+<tr><td><code>@SyncToClient</code></td><td>Server→Client sync</td><td><code>autoDetect</code>, <code>scheduleUpdate</code>, <code>skipWhen</code>, <code>listener</code></td></tr>
+<tr><td><code>@SyncToServer</code></td><td>Client→Server sync</td><td><code>autoDetect</code>, <code>scheduleUpdate</code>, <code>skipWhen</code>, <code>listener</code></td></tr>
+<tr><td><code>@SaveToDisk</code></td><td>Disk persistence</td><td><code>key</code>, <code>skipWhen</code>, <code>saveEmpty</code>, <code>defaultValue</code>, <code>defaultValueGetter</code></td></tr>
+<tr><td><code>@Access</code></td><td>Force access-mode for containers</td><td><code>instanceAsValue</code></td></tr>
 <tr><td><code>@AdditionalHolder</code></td><td>Recursively scan nested object fields</td><td>—</td></tr>
 <tr><td><code>@Codec</code></td><td>Custom serialization</td><td><code>saveCodec</code> / <code>syncCodec</code> / <code>writeToData</code> / <code>readFromData</code></td></tr>
 <tr><td><code>@Strategy</code></td><td>Custom change detection strategy</td><td><code>value</code> (static field name)</td></tr>
@@ -165,7 +165,7 @@ private MyConfig config = new MyConfig();</code></pre>
 }
 
 dependencies {
-    implementation fg.deobf("com.gto:datasynclib-forge-1.20.1:26.7.5")
+    implementation fg.deobf("com.gto:datasynclib-forge-1.20.1:26.9.4")
 }</code></pre>
 
 <hr>
