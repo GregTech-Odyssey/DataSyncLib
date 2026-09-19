@@ -92,7 +92,7 @@ class EnergyData {
     private long storedEnergy;
 
     private boolean skipEmptyEnergy(long value) {
-        return value &gt; 0;  // Skip sync when empty
+        return value &lt;= 0;  // skip syncing while the tank is empty
     }
 }</code></pre>
 
