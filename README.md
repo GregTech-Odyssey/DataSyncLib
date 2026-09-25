@@ -175,6 +175,7 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 > - `syncBlockEntityToClient(be, false, true)`: `false` = incremental (only changed), `true` = only fields with `autoDetect=true`.
 > - Network reads/writes take an explicit `SyncContext` (registry access + connection type), because a `RegistryFriendlyByteBuf` can only be built from a `RegistryAccess`.
 > - See `TestBlockEntity` for a complete example with all features.
+> - Run the tests with `gradlew runGameTestServer`: `DataSyncGameTests` is the NeoForge GameTest suite and the task fails unless the log reports `All N required tests passed`. A development client/server additionally runs `TestBlockEntityTests` and `DataSyncSelfTests` once per JVM (from `TestBlockEntity.serverTick`).
 
 ### Advanced: Registry Global Codec Auto-Registration
 

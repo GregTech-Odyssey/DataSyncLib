@@ -583,6 +583,7 @@ StreamCodec&lt;RegistryFriendlyByteBuf, MyType&gt; stream = StreamCodecs.fromDat
     <li><strong>Auto-generated arrays</strong> — all non-primitive array types auto-generate codecs on first access via ConcurrentHashMapCache</li>
     <li><strong>Generic support</strong> — register() accepts Class&lt;?&gt;... genericTypes, using identityHashCode-wrapped arrays as cache keys</li>
     <li><strong>Minecraft integration</strong> — register(type, Registry) convenience method auto-creates codecs from Minecraft registries</li>
+    <li><strong>Registry holders</strong> — every registry-entry codec has a holder counterpart (<code>ITEM_HOLDER_CODEC</code>, <code>FLUID_HOLDER_CODEC</code>, …); a field declared <code>Holder&lt;X&gt;</code> resolves it through the generic key <code>(Holder.class, X.class)</code>, so no <code>@Codec</code> is needed. Static registries keep the compact VarInt id on the wire; a <strong>data-driven</strong> registry (enchantments — 1.21 has no <code>BuiltInRegistries.ENCHANTMENT</code>) uses <code>registerDynamicHolder(...)</code> with <code>StreamCodecs/DataCodecs.ofDynamicHolder(ResourceKey)</code>: the key travels on both paths and is resolved through the buffer's registry access and <code>RegistryContext.current()</code> respectively (<code>ENCHANTMENT_HOLDER_CODEC</code> is <code>Holder&lt;Enchantment&gt;</code>)</li>
 </ul>
 
 <!-- ===== FieldDataCodec ===== -->
@@ -929,7 +930,7 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 
 <!-- ===== USAGE ===== -->
 <h2 id="usage-blockentity">BlockEntity Usage (Recommended)</h2>
-<p>See <code>TestBlockEntity</code> (in <code>com.gto.datasynclib.test</code>) for a complete example.</p>
+<p>See <code>TestBlockEntity</code> (in <code>com.gto.datasynclib.test</code>) for a complete example; the same package holds <code>DataSyncGameTests</code>, a NeoForge GameTest suite you run with <code>gradlew runGameTestServer</code> (the task fails unless the log reports <code>All N required tests passed</code>), while <code>TestBlockEntityTests</code>/<code>DataSyncSelfTests</code> run once per JVM from <code>TestBlockEntity.serverTick</code>.</p>
 <pre><code><span class="kw">public class</span> <span class="typ">MyMachineBlockEntity</span> <span class="kw">extends</span> <span class="typ">FieldDataHolderBlockEntity</span> {
 
     <span class="an">@SyncToClient</span>(scheduleUpdate = <span class="kw">true</span>)

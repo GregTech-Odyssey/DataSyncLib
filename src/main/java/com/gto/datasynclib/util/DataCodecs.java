@@ -7,14 +7,13 @@ import com.gto.datasynclib.datastream.data.IntArrayData;
 import com.gto.datasynclib.datastream.data.LongData;
 import com.gto.datasynclib.datastream.data.StringData;
 import lombok.experimental.UtilityClass;
-import net.minecraft.core.BlockPos;
+import net.minecraft.core.*;
 import net.minecraft.core.Registry;
-import net.minecraft.core.SectionPos;
-import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
@@ -301,5 +300,25 @@ public class DataCodecs {
      */
     public <T> DataCodec<T> of(Registry<T> registry) {
         return DataCodec.of(obj -> RESOURCE_LOCATION_CODEC.encode(registry.getKey(obj)), (data, dataVersion) -> registry.get(RESOURCE_LOCATION_CODEC.decode(data, dataVersion)));
+    }
+
+    public <T> DataCodec<Holder<T>> ofHolder(Registry<T> registry) {
+        return DataCodec.of(obj -> RESOURCE_LOCATION_CODEC.encode(registry.getKey(obj.value())), (data, dataVersion) -> registry.getHolder(RESOURCE_LOCATION_CODEC.decode(data, dataVersion)).orElseThrow());
+    }
+
+    /**
+     * Holder codec for a <em>data-driven</em> registry (enchantments, biomes, damage types, ...): the
+     * entry is stored as its registry key and resolved through {@link RegistryContext#current()} — the
+     * provider the persistence path already publishes around a load — because there is no static
+     * {@link Registry} object to look the key up in.
+     *
+     * @param registryKey the registry key, e.g. {@link net.minecraft.core.registries.Registries#ENCHANTMENT}
+     */
+    public <T> DataCodec<Holder<T>> ofDynamicHolder(ResourceKey<? extends Registry<T>> registryKey) {
+        return DataCodec.of(
+                obj -> RESOURCE_LOCATION_CODEC.encode(obj.unwrapKey().orElseThrow().location()),
+                (data, dataVersion) -> RegistryContext.current().lookupOrThrow(registryKey)
+                        .get(ResourceKey.create(registryKey, RESOURCE_LOCATION_CODEC.decode(data, dataVersion)))
+                        .orElseThrow());
     }
 }

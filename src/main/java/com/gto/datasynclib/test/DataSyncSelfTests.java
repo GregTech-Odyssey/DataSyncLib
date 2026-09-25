@@ -1,6 +1,7 @@
 package com.gto.datasynclib.test;
 
 import com.gto.datasynclib.DataSyncCodec;
+import com.gto.datasynclib.DataSyncLib;
 import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
@@ -48,8 +49,20 @@ public final class DataSyncSelfTests {
 
     private final List<String> failures = new ArrayList<>();
 
+    /** Failed checks of the most recent run, or {@code -1} while the suite has not run yet. */
+    private static volatile int lastFailures = -1;
+
     private DataSyncSelfTests(SyncContext context) {
         this.context = context;
+    }
+
+    /**
+     * Failed checks of the most recent {@link #runAll(SyncContext)} run, or {@code -1} before the
+     * first one; the suite otherwise only reports through the logger, so this is what lets a GameTest
+     * gate on it (see {@code DataSyncGameTests.devSuiteRunFromTheTickPathReportsClean}).
+     */
+    public static int lastFailures() {
+        return lastFailures;
     }
 
     /**
@@ -76,6 +89,7 @@ public final class DataSyncSelfTests {
         boolean enabled = true;
 
         @SaveToDisk
+        @SyncToClient
         Direction facing = Direction.NORTH;
 
         @SaveToDisk
@@ -105,9 +119,11 @@ public final class DataSyncSelfTests {
         boolean enabled;
 
         @SaveToDisk
+        @SyncToClient
         String name = "";
 
         @SaveToDisk
+        @SyncToClient
         Direction facing = Direction.WEST;
 
         @SaveToDisk
@@ -448,6 +464,9 @@ public final class DataSyncSelfTests {
         expect("net.facing", src.facing, dst.facing);
         expect("net.child.ticks", src.child.ticks, dst.child.ticks);
         expect("net.child.facing", src.child.facing, dst.child.facing);
+        // Save-only state stays behind: flat.s and child.values have no @SyncToClient.
+        expect("net.flat.sSaveOnlyUntouched", dst.flat.s, "");
+        expect("net.child.valuesSaveOnlyUntouched", dst.child.values, List.of());
     }
 
     private void testNullAndDefaultSkipping() {
@@ -497,10 +516,11 @@ public final class DataSyncSelfTests {
     }
 
     private void report() {
+        lastFailures = failures.size();
         if (failures.isEmpty()) {
-            System.out.println(LOG + "ALL TESTS PASSED");
+            DataSyncLib.LOGGER.info(LOG + "ALL TESTS PASSED");
         } else {
-            System.err.println(LOG + failures.size() + " FAILURE(S): " + failures);
+            DataSyncLib.LOGGER.error(LOG + failures.size() + " FAILURE(S): " + failures);
         }
     }
 

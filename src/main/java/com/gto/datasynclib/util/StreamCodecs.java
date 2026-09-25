@@ -7,10 +7,8 @@ import java.lang.reflect.Array;
 import java.math.BigInteger;
 import java.util.UUID;
 import lombok.experimental.UtilityClass;
-import net.minecraft.core.BlockPos;
+import net.minecraft.core.*;
 import net.minecraft.core.Registry;
-import net.minecraft.core.SectionPos;
-import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -18,6 +16,7 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentSerialization;
 import net.minecraft.network.codec.*;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
@@ -193,6 +192,22 @@ public class StreamCodecs {
      */
     public static <T> StreamCodec<RegistryFriendlyByteBuf, T> of(Registry<T> registry) {
         return StreamCodec.of((stream, obj) -> stream.writeVarInt(registry.getId(obj)), stream -> registry.byId(stream.readVarInt()));
+    }
+
+    public static <T> StreamCodec<RegistryFriendlyByteBuf, Holder<T>> ofHolder(Registry<T> registry) {
+        return StreamCodec.of((stream, obj) -> stream.writeVarInt(registry.getId(obj.value())), stream -> registry.getHolder(stream.readVarInt()).orElseThrow());
+    }
+
+    /**
+     * Holder codec for a <em>data-driven</em> registry (enchantments, biomes, damage types, ...): the
+     * wire carries the entry's registry key, because a dynamic registry has no stable numeric id — the
+     * buffer's own registry access resolves it, so no lookup parameter is needed. Delegates to
+     * {@link ByteBufCodecs#holderRegistry(ResourceKey)}.
+     *
+     * @param registryKey the registry key, e.g. {@link net.minecraft.core.registries.Registries#ENCHANTMENT}
+     */
+    public static <T> StreamCodec<RegistryFriendlyByteBuf, Holder<T>> ofDynamicHolder(ResourceKey<? extends Registry<T>> registryKey) {
+        return ByteBufCodecs.holderRegistry(registryKey);
     }
 
     public static final StreamCodec<RegistryFriendlyByteBuf, boolean[]> BOOLEANS_CODEC = new StreamCodec<>() {

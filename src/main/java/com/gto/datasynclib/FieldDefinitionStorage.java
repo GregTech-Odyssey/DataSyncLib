@@ -275,19 +275,31 @@ public final class FieldDefinitionStorage {
     }
 
     /**
-     * Looks up a definition by field identity within this storage's type bucket.
+     * Looks up a definition by the declared field it was created from.
      *
-     * <p>The bucket is keyed by the field's declared type, so only fields of the same type are
-     * compared.</p>
+     * <p>{@link Class#getDeclaredField(String)} (and {@code getDeclaredFields()}) hands out a fresh
+     * {@link Field} copy on every call, so the match is by <em>declaration</em> — declaring class and
+     * name — instead of by handle identity; a caller that reflected the field itself can therefore
+     * look it up. The bucket is keyed by the field's declared type, so only fields of the same type
+     * are compared.</p>
      *
      * @param field the reflected field to find
      * @return the matching definition, or {@code null} if this class does not manage that field
      */
     public DataFieldDefinition<?> getFieldDefinition(Field field) {
         for (var definition : typeDefinitions.getOrDefault(field.getType(), Collections.emptyList())) {
-            if (definition.field == field) return definition;
+            if (isSameField(definition.field, field)) return definition;
         }
         return null;
+    }
+
+    /**
+     * {@code true} when two handles denote the same declared field. {@link Field} does not override
+     * {@code equals}, and the JDK hands out a copy per reflective lookup, so the declaration has to
+     * be compared instead of the handles.
+     */
+    private static boolean isSameField(Field a, Field b) {
+        return a.getDeclaringClass() == b.getDeclaringClass() && a.getName().equals(b.getName());
     }
 
     private FieldDefinitionStorage() {

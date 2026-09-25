@@ -232,6 +232,10 @@ public interface CombinedCodec<T> extends DataCodec<T>, StreamCodec<RegistryFrie
      * (VarInt) followed by the elements, the disk side writes a {@code ListData}. An empty (or
      * non-list) payload decodes to a zero-length array. Elements are boxed; primitive arrays have
      * their own codecs and do not need this builder.
+     *
+     * <p>Every element must be non-null — the compact per-element format has no presence marker.
+     * Array <em>fields</em> are unaffected: they are encoded by the access layer, which writes a
+     * presence boolean per element and therefore does support null slots.</p>
      */
     static <T> DataSyncCodec<T[]> array(Class<T> type, CombinedCodec<T> codec) {
         return DataSyncCodec.of(

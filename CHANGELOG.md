@@ -39,7 +39,27 @@ publishing its own `26.9.x` versions, so the two lines share the annotation API 
   the field declaration — only `@SyncToServer` fields are read — so no extra opt-in interface is required.
 
 ### New Features
+- **`Holder` codec series**: every registry-entry codec gained its holder counterpart — `ITEM_HOLDER_CODEC`,
+  `BLOCK_HOLDER_CODEC`, `FLUID_HOLDER_CODEC`, `ENTITY_TYPE_HOLDER_CODEC`,
+  `BLOCK_ENTITY_TYPE_HOLDER_CODEC`, `MOB_EFFECT_HOLDER_CODEC`, `SOUND_EVENT_HOLDER_CODEC`,
+  `ATTRIBUTE_HOLDER_CODEC`, `PARTICLE_TYPE_HOLDER_CODEC`, `MENU_TYPE_HOLDER_CODEC`,
+  `RECIPE_TYPE_HOLDER_CODEC`. A field declared `Holder<X>` therefore resolves through the generic lookup
+  `(Holder.class, X.class)` with no `@Codec` annotation; a static registry keeps the compact VarInt id on
+  the wire (`StreamCodecs.ofHolder`) and the registry key on disk (`DataCodecs.ofHolder`).
+- **Data-driven registries**: `DataSyncCodec.registerDynamicHolder(...)` with
+  `StreamCodecs/DataCodecs.ofDynamicHolder(ResourceKey)` for registries that have no stable numeric id —
+  the key travels on both paths and is resolved through the buffer's registry access on the wire (vanilla
+  `ByteBufCodecs.holderRegistry`) and through `RegistryContext.current()` on disk. This is how
+  `ENCHANTMENT_HOLDER_CODEC` (`Holder<Enchantment>`) is registered: 1.21 has no
+  `BuiltInRegistries.ENCHANTMENT`, only the `Registries.ENCHANTMENT` key, and vanilla exchanges
+  enchantments as holders.
 - `RegistryContext` and the `util/cache` helpers, used by the 1.21 codec paths.
+- **NeoForge GameTest suite**: `com.gto.datasynclib.test.DataSyncGameTests` drives the framework inside a
+  real server (a placed test block entity, real registries) and covers the disk round trip of every field
+  family, the chunk-load tag, full and incremental network sync, the dirty-flag/marking APIs, skip
+  predicates and default-value skipping, codec lookups with data- and stream-side byte round trips, the
+  registry/enum/strategy helpers and the entity paths. `gradlew runGameTestServer` fails unless the server
+  log reports `All N required tests passed`.
 
 ### Changes
 - The 1.20.1 `dataVersion == -1` compatibility branches are gone (`AbstractFieldAccess#readFromData`,

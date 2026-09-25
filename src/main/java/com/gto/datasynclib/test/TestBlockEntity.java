@@ -20,9 +20,11 @@ import lombok.Getter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.GlobalPos;
+import net.minecraft.core.Holder;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.Vec3i;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
@@ -83,8 +85,12 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     @SaveToDisk
     final String[] uuids = new String[3];
 
-    /** Array of a type without content equality — see the array strategy registration for ItemStack[]. */
+    /**
+     * Array of a type without content equality — see the array strategy registration for ItemStack[].
+     * Persisted and synced, so the registered array strategy is exercised on both paths.
+     */
     @SaveToDisk
+    @SyncToClient
     final ItemStack[] stacks = new ItemStack[9];
 
     /** Scalar {@code ItemStack}: exercises the registered {@link com.gto.datasynclib.util.ItemStackHashStrategy}. */
@@ -98,11 +104,24 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     FluidStack fluid = new FluidStack(Fluids.WATER, 1000);
 
     /**
-     * Fluid array ({@code ArrayAccess} + the {@code FluidStack} codec), covered by the registered
-     * {@link com.gto.datasynclib.util.FluidStackArrayHashStrategy} so an element refilled in place is
-     * detected; a {@code null} slot means "no fluid" and is encoded as such.
+     * Static-registry {@code Holder} field: exercises the Holder codec series of
+     * {@link DataSyncCodec}, which a field declared {@code Holder<Item>} resolves through the
+     * generic lookup key {@code (Holder.class, Item.class)}. The wire carries the VarInt registry
+     * id, the disk the registry key, and both come back as the registry's own holder, so
+     * {@code heldItem.value()} is the registered singleton.
      */
     @SaveToDisk
+    @SyncToClient
+    Holder<Item> heldItem = BuiltInRegistries.ITEM.wrapAsHolder(Items.DIAMOND);
+
+    /**
+     * Fluid array ({@code ArrayAccess} + the {@code FluidStack} codec), covered by the registered
+     * {@link com.gto.datasynclib.util.FluidStackArrayHashStrategy} so an element refilled in place is
+     * detected; a {@code null} slot means "no fluid" and is encoded as such. Persisted and synced,
+     * so the array strategy is exercised on both paths.
+     */
+    @SaveToDisk
+    @SyncToClient
     final FluidStack[] tanks = new FluidStack[3];
 
     /** Nested array: the element is itself an array, so it goes through {@code ArrayAccess} with an enum-array codec. */
@@ -422,11 +441,12 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
         String lastReceived = null;
 
         B() {
-            c.setReceiverListener((s, n, o) -> {
-                DataSyncLib.LOGGER.info("D changed: {} {} {}", s, n, o);
+            // ObjSyncListener is (side, oldValue, newValue) — the receiver hook records the new value.
+            c.setReceiverListener((side, oldValue, newValue) -> {
+                DataSyncLib.LOGGER.info("D changed: {} {} {}", side, oldValue, newValue);
                 b = Items.COPPER_INGOT;
                 receiverCalls++;
-                lastReceived = n;
+                lastReceived = newValue;
             });
         }
 

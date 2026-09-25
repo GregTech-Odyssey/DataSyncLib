@@ -10,11 +10,7 @@ import com.gto.datasynclib.util.cache.ConcurrentHashMapCache;
 import com.gto.datasynclib.util.cache.MapCache;
 import com.mojang.serialization.Codec;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.GlobalPos;
-import net.minecraft.core.Registry;
-import net.minecraft.core.SectionPos;
-import net.minecraft.core.Vec3i;
+import net.minecraft.core.*;
 import net.minecraft.core.particles.ParticleType;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -446,8 +442,33 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     /**
      * Convenience overload of {@link #register(Class, StreamEncoder, StreamDecoder, DataEncoder, DataDecoder, Class[])} using one codec per path.
      */
-    public static <T> DataSyncCodec<T> register(Class<T> type, StreamCodec<? super RegistryFriendlyByteBuf, T> streamCodec, DataCodec<T> dataCodec, Class<?>... genericTypes) {
+    public static <T> DataSyncCodec<T> register(Class<?> type, StreamCodec<? super RegistryFriendlyByteBuf, T> streamCodec, DataCodec<T> dataCodec, Class<?>... genericTypes) {
         return register(type, streamCodec, streamCodec, dataCodec, dataCodec, genericTypes);
+    }
+
+
+    /**
+     * Registers a codec for a Minecraft registry type.
+     */
+    public static <T> DataSyncCodec<Holder<T>> register(Class<?> type, Registry<T> registry, Class<?>... genericTypes) {
+        return register(type, StreamCodecs.ofHolder(registry), DataCodecs.ofHolder(registry),genericTypes);
+    }
+
+    /**
+     * Registers a {@code Holder} codec for a <em>data-driven</em> registry (enchantments, biomes,
+     * damage types, ...), which has no static {@link Registry} constant and no stable numeric id: the
+     * network side carries the registry key (resolved through the buffer's registry access) and the
+     * disk side resolves it through {@link RegistryContext#current()} during a load.
+     *
+     * <p>The registered key is {@code (type, genericTypes)}, so a field declared as
+     * {@code Holder<Enchantment>} resolves it without a {@code @Codec} annotation.</p>
+     *
+     * @param type         the holder class, normally {@code Holder.class}
+     * @param registryKey  the registry key, e.g. {@link Registries#ENCHANTMENT}
+     * @param genericTypes the element type(s), which form the lookup key together with {@code type}
+     */
+    public static <T> DataSyncCodec<Holder<T>> registerDynamicHolder(Class<?> type, ResourceKey<? extends Registry<T>> registryKey, Class<?>... genericTypes) {
+        return register(type, StreamCodecs.ofDynamicHolder(registryKey), DataCodecs.ofDynamicHolder(registryKey), genericTypes);
     }
 
     // ===== Pre-registered codec constants =====
@@ -492,26 +513,36 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
 
     public static final DataSyncCodec<BigInteger> BIG_INTEGER_CODEC = register(BigInteger.class, StreamCodecs.BIG_INTEGER_CODEC, DataCodec.BIG_INTEGER_CODEC);
 
-    // ---- Minecraft registry entries (registry id on the wire, key on disk) ----
+    // ---- Minecraft registry entries: the plain value codec and the Holder variant of each one.
+    // Static registries write a VarInt registry id on the wire and the registry key on disk; the
+    // dynamic-registry Holder codec below carries the key on both paths. ----
     public static final DataSyncCodec<Item> ITEM_CODEC = register(Item.class, BuiltInRegistries.ITEM);
+    public static final DataSyncCodec<Holder<Item>> ITEM_HOLDER_CODEC = register(Holder.class, BuiltInRegistries.ITEM, Item.class);
     public static final DataSyncCodec<Block> BLOCK_CODEC = register(Block.class, BuiltInRegistries.BLOCK);
+    public static final DataSyncCodec<Holder<Block>> BLOCK_HOLDER_CODEC = register(Holder.class, BuiltInRegistries.BLOCK, Block.class);
     public static final DataSyncCodec<Fluid> FLUID_CODEC = register(Fluid.class, BuiltInRegistries.FLUID);
+    public static final DataSyncCodec<Holder<Fluid>> FLUID_HOLDER_CODEC = register(Holder.class, BuiltInRegistries.FLUID, Fluid.class);
     public static final DataSyncCodec<EntityType<?>> ENTITY_TYPE_CODEC = register((Class<EntityType<?>>) (Class<?>) EntityType.class, BuiltInRegistries.ENTITY_TYPE);
+    public static final DataSyncCodec<Holder<EntityType<?>>> ENTITY_TYPE_HOLDER_CODEC = register(Holder.class, BuiltInRegistries.ENTITY_TYPE, EntityType.class);
     public static final DataSyncCodec<BlockEntityType<?>> BLOCK_ENTITY_TYPE_CODEC = register((Class<BlockEntityType<?>>) (Class<?>) BlockEntityType.class, BuiltInRegistries.BLOCK_ENTITY_TYPE);
+    public static final DataSyncCodec<Holder<BlockEntityType<?>>> BLOCK_ENTITY_TYPE_HOLDER_CODEC = register(Holder.class, BuiltInRegistries.BLOCK_ENTITY_TYPE, BlockEntityType.class);
     public static final DataSyncCodec<MobEffect> MOB_EFFECT_CODEC = register(MobEffect.class, BuiltInRegistries.MOB_EFFECT);
-    /**
-     * Enchantments are dynamic registry holders in 1.21; select explicitly via {@code @Codec}.
-     */
-    public static final DataSyncCodec<net.minecraft.core.Holder<Enchantment>> ENCHANTMENT_CODEC = of(
-            (buf, holder) -> Enchantment.STREAM_CODEC.encode(buf, holder),
-            buf -> Enchantment.STREAM_CODEC.decode(buf),
-            holder -> StringData.valueOf(holder.unwrapKey().orElseThrow().location().toString()),
-            (data, version) -> RegistryContext.current().lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(ResourceKey.create(Registries.ENCHANTMENT, ResourceLocation.parse(data.getString()))));
+    public static final DataSyncCodec<Holder<MobEffect>> MOB_EFFECT_HOLDER_CODEC = register(Holder.class, BuiltInRegistries.MOB_EFFECT, MobEffect.class);
     public static final DataSyncCodec<SoundEvent> SOUND_EVENT_CODEC = register(SoundEvent.class, BuiltInRegistries.SOUND_EVENT);
+    public static final DataSyncCodec<Holder<SoundEvent>> SOUND_EVENT_HOLDER_CODEC = register(Holder.class, BuiltInRegistries.SOUND_EVENT, SoundEvent.class);
     public static final DataSyncCodec<Attribute> ATTRIBUTE_CODEC = register(Attribute.class, BuiltInRegistries.ATTRIBUTE);
+    public static final DataSyncCodec<Holder<Attribute>> ATTRIBUTE_HOLDER_CODEC = register(Holder.class, BuiltInRegistries.ATTRIBUTE, Attribute.class);
     public static final DataSyncCodec<ParticleType<?>> PARTICLE_TYPE_CODEC = register((Class<ParticleType<?>>) (Class<?>) ParticleType.class, BuiltInRegistries.PARTICLE_TYPE);
+    public static final DataSyncCodec<Holder<ParticleType<?>>> PARTICLE_TYPE_HOLDER_CODEC = register(Holder.class, BuiltInRegistries.PARTICLE_TYPE, ParticleType.class);
     public static final DataSyncCodec<MenuType<?>> MENU_TYPE_CODEC = register((Class<MenuType<?>>) (Class<?>) MenuType.class, BuiltInRegistries.MENU);
+    public static final DataSyncCodec<Holder<MenuType<?>>> MENU_TYPE_HOLDER_CODEC = register(Holder.class, BuiltInRegistries.MENU, MenuType.class);
     public static final DataSyncCodec<RecipeType<?>> RECIPE_TYPE_CODEC = register((Class<RecipeType<?>>) (Class<?>) RecipeType.class, BuiltInRegistries.RECIPE_TYPE);
+    public static final DataSyncCodec<Holder<RecipeType<?>>> RECIPE_TYPE_HOLDER_CODEC = register(Holder.class, BuiltInRegistries.RECIPE_TYPE, RecipeType.class);
+    /**
+     * Enchantments are a data-driven registry on 1.21 (no {@code BuiltInRegistries} constant, no stable
+     * id), and vanilla APIs exchange them as {@code Holder<Enchantment>}, so only the Holder form exists.
+     */
+    public static final DataSyncCodec<Holder<Enchantment>> ENCHANTMENT_HOLDER_CODEC = registerDynamicHolder(Holder.class, Registries.ENCHANTMENT, Enchantment.class);
 
     // ---- Minecraft value types ----
     public static final DataSyncCodec<ResourceLocation> RESOURCE_LOCATION_CODEC = register(ResourceLocation.class, StreamCodecs.RESOURCE_LOCATION_CODEC, DataCodecs.RESOURCE_LOCATION_CODEC);

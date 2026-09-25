@@ -28,6 +28,7 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.ByteArrayTag;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -80,6 +81,12 @@ public final class TestBlockEntityTests {
     private final List<String> failures = new ArrayList<>();
     private int checks;
 
+    /** Failed checks of the most recent run, or {@code -1} while the suite has not run yet. */
+    private static volatile int lastFailures = -1;
+
+    /** Checks executed by the most recent run, or {@code 0} while the suite has not run yet. */
+    private static volatile int lastChecks;
+
     /** Registry/connection context of the side running the suite (the ticking level's registries). */
     private final SyncContext context;
 
@@ -93,6 +100,20 @@ public final class TestBlockEntityTests {
 
     public static void runAll(SyncContext context) {
         new TestBlockEntityTests(context).run();
+    }
+
+    /**
+     * Failed checks of the most recent {@link #runAll(SyncContext)} run, or {@code -1} before the
+     * first one. The suite itself only logs, so this is what lets a GameTest gate on it (see
+     * {@code DataSyncGameTests.devSuiteRunFromTheTickPathReportsClean}) instead of on a log line.
+     */
+    public static int lastFailures() {
+        return lastFailures;
+    }
+
+    /** Checks executed by the most recent run, or {@code 0} before the first one. */
+    public static int lastChecks() {
+        return lastChecks;
     }
 
     private void run() {
@@ -139,7 +160,7 @@ public final class TestBlockEntityTests {
         expect("definitions.syncedToServer", manager.hasSyncFields(LogicalSide.CLIENT), true);
 
         // Keys come from the field name unless @SaveToDisk(key = ...) overrides it.
-        for (var key : List.of("i", "uuids", "stacks", "stack", "fluid", "tanks", "directions", "uuidSet", "map", "aabb", "a",
+        for (var key : List.of("i", "uuids", "stacks", "stack", "fluid", "heldItem", "tanks", "directions", "uuidSet", "map", "aabb", "a",
                 "b", "ints", "floats", "intList", "object2IntMap", "handler", "handlerArray", "module",
                 "globalPos", "sectionPos", "vec3i", "withDefault", "skipped", "loaded", "tagData")) {
             expect("definitions.key." + key, manager.getFieldDefinition(key) != null, true);
@@ -267,6 +288,14 @@ public final class TestBlockEntityTests {
             expect("disk.handlerArrayPresent", map.containsKey("handlerArray"), true);
             expect("disk.childModulePresent", map.containsKey("module"), true);
         }
+
+        // The same field is written while the predicate accepts the value, so the assertion above
+        // really comes from the predicate and not from the field being unwritable in general.
+        TestBlockEntity notSkipped = mutate(newEntity());
+        notSkipped.skipped = 1; // skipMe(1) is false → persisted
+        expect("disk.skipWhenWritten",
+                notSkipped.getFieldDataManager().writeToData() instanceof StringMapData written
+                        && written.containsKey("skipped"), true);
     }
 
     /**
@@ -394,13 +423,28 @@ public final class TestBlockEntityTests {
         expect("netIncremental.applied", src.synced, client.synced);
         expectSynced("netIncremental.clientState", src, client);
 
-        // A single changed slot of an INBTSerializable array must not re-send the other slots.
+        // A single changed slot of an INBTSerializable array must not re-send the other slots. The
+        // full write is primed afterwards so the array's baseline is the state the peer just received;
+        // a brand-new entity reports every field as changed on its first check, which without the
+        // prime would make the "delta" carry every slot again.
         TestBlockEntity arrayFull = mutate(newEntity());
         byte[] arrayFullBytes = arrayFull.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, true);
+        prime(arrayFull);
         arrayFull.handlerArray[1].setStackInSlot(0, new ItemStack(Items.EMERALD, 9));
         arrayFull.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true);
         byte[] arrayIncremental = arrayFull.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, false);
         expect("netIncremental.arraySmaller", arrayIncremental.length < arrayFullBytes.length, true);
+
+        // The delta is really incremental: an already-synced receiver gets the edited slot while the
+        // slots the delta does not mention keep the state the full write gave them.
+        TestBlockEntity arrayClient = newEntity();
+        clear(arrayClient);
+        arrayClient.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, context, arrayFullBytes);
+        arrayClient.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, context, arrayIncremental);
+        expect("netIncremental.arraySlotApplied",
+                ItemStack.matches(arrayClient.handlerArray[1].getStackInSlot(0), new ItemStack(Items.EMERALD, 9)), true);
+        expect("netIncremental.arrayOtherSlotKept",
+                ItemStack.matches(arrayClient.handlerArray[1].getStackInSlot(1), new ItemStack(Items.DIAMOND, 3)), true);
 
         // markFieldsForSync forces a field with autoDetect = false to be sent. The entity is primed
         // first, because a brand-new one reports every field as changed on its first check.
@@ -599,7 +643,10 @@ public final class TestBlockEntityTests {
         TestBlockEntity client = newEntity();
         client.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, context, bytes);
         expect("child.netTicks", client.module.ticks, 900);
-        expect("child.netValues", client.module.values, List.of(3, 4));
+        // Only @SyncToClient members of the child manager travel: `values` is @SaveToDisk only and
+        // holds its own (constructor) value on the receiver, while the disk path above restored it.
+        expect("child.netValuesSaveOnlyUntouched", client.module.values, List.of(1));
+        expect("child.netValuesNotTransferred", client.module.values.equals(src.module.values), false);
 
         // @Conversion: the CompoundTag is managed as a Map<String, Tag> and must survive both paths.
         expect("conversion.disk", dst.tagData.getInt("converted"), 21);
@@ -779,7 +826,10 @@ public final class TestBlockEntityTests {
      * in a live game — which is the point: the suite runs from the development server tick.
      */
     private TestBlockEntity newEntity() {
-        return new TestBlockEntity(POS, Blocks.IRON_BLOCK.defaultBlockState());
+        // 1.21 validates the state passed to a block entity against the states its type is registered
+        // for, so a stand-in state such as Blocks.IRON_BLOCK now throws "Invalid block entity ...";
+        // the real test block state is what the type is built with.
+        return new TestBlockEntity(POS, ModBlocks.TEST_BLOCK.get().defaultBlockState());
     }
 
     /**
@@ -812,6 +862,7 @@ public final class TestBlockEntityTests {
         be.tanks[1] = new FluidStack(Fluids.WATER, 4000);
         be.fluid = new FluidStack(Fluids.LAVA, 750);
         be.fluid.set(DataComponents.CUSTOM_NAME, Component.literal("fluid-proof"));
+        be.heldItem = BuiltInRegistries.ITEM.wrapAsHolder(Items.GOLD_INGOT);
         be.directions[0][0] = Direction.UP;
         be.uuidSet.clear();
         be.uuidSet.add("set-a");
@@ -843,6 +894,9 @@ public final class TestBlockEntityTests {
         be.vec3i = new Vec3i(7, 8, 9);
         be.loaded = 4242;
         be.synced = 99;
+        // A skip-triggering value: the skipWhen predicate is exercised on the disk path (see
+        // diskRoundTrip, which also proves the same field is written while the predicate is false).
+        be.skipped = -1;
         be.tagData.putInt("aaa", 99);
         return be;
     }
@@ -859,6 +913,7 @@ public final class TestBlockEntityTests {
         be.stack = ItemStack.EMPTY;
         Arrays.fill(be.tanks, null);
         be.fluid = FluidStack.EMPTY;
+        be.heldItem = BuiltInRegistries.ITEM.wrapAsHolder(Items.AIR);
         for (var row : be.directions) {
             Arrays.fill(row, null);
         }
@@ -895,6 +950,7 @@ public final class TestBlockEntityTests {
         expect(prefix + ".uuids", Arrays.equals(src.uuids, dst.uuids), true);
         expect(prefix + ".stacks", stacksEqual(src.stacks, dst.stacks), true);
         expect(prefix + ".fluid", fluidsEqual(src.fluid, dst.fluid), true);
+        expect(prefix + ".heldItem", src.heldItem.value(), dst.heldItem.value());
         expect(prefix + ".tanks", fluidsEqual(src.tanks, dst.tanks), true);
         expect(prefix + ".directions", Arrays.deepEquals(src.directions, dst.directions), true);
         expect(prefix + ".uuidSet", src.uuidSet, dst.uuidSet);
@@ -925,6 +981,9 @@ public final class TestBlockEntityTests {
         expect(prefix + ".b.c.value", src.b.c.value, dst.b.c.value);
         expect(prefix + ".stack", ItemStack.matches(src.stack, dst.stack), true);
         expect(prefix + ".fluid", fluidsEqual(src.fluid, dst.fluid), true);
+        expect(prefix + ".stacks", stacksEqual(src.stacks, dst.stacks), true);
+        expect(prefix + ".tanks", fluidsEqual(src.tanks, dst.tanks), true);
+        expect(prefix + ".heldItem", src.heldItem.value(), dst.heldItem.value());
         expect(prefix + ".ints", Arrays.equals(src.ints, dst.ints), true);
         expect(prefix + ".floats", Arrays.equals(src.floats, dst.floats), true);
         expect(prefix + ".intList", src.intList, dst.intList);
@@ -1028,6 +1087,8 @@ public final class TestBlockEntityTests {
     }
 
     private void report() {
+        lastChecks = checks;
+        lastFailures = failures.size();
         if (failures.isEmpty()) {
             DataSyncLib.LOGGER.info(LOG + "ALL " + checks + " CHECKS PASSED");
         } else {

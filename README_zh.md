@@ -176,6 +176,7 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 > - `syncBlockEntityToClient(be, false, true)` 中：`false`=增量同步（仅变更字段），`true`=仅检查 `autoDetect=true` 的字段
 > - 每次网络读写都要显式传入 `SyncContext`（注册表 + 连接类型）—— `RegistryFriendlyByteBuf` 只能由 `RegistryAccess` 构造
 > - 完整示例参考 `TestBlockEntity`
+> - 跑测试：`gradlew runGameTestServer` 执行 `DataSyncGameTests`（NeoForge GameTest 套件），日志未出现 `All N required tests passed` 时任务会直接失败；开发用客户端/服务端还会由 `TestBlockEntity.serverTick` 每 JVM 跑一次 `TestBlockEntityTests` 与 `DataSyncSelfTests`
 
 ### 高级用法：Registry 全局 codec 自动注册
 

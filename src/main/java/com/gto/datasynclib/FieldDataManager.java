@@ -120,14 +120,17 @@ public class FieldDataManager {
         return null;
     }
 
+    /**
+     * Looks a definition up by the declared field it was created from.
+     *
+     * <p>{@link java.lang.reflect.Field} has no value-based equality and the JDK returns a copy per
+     * reflective lookup, so the storage matches the <em>declaration</em> (declaring class and name)
+     * rather than the handle.</p>
+     *
+     * @see FieldDefinitionStorage#getFieldDefinition(Field)
+     */
     public DataFieldDefinition<?> getFieldDefinition(Field field) {
-        for (var definition : storage.typeDefinitions.getOrDefault(field.getType(), Collections.emptyList())) {
-            try {
-                if (definition.field == field) return definition;
-            } catch (Throwable ignored) {
-            }
-        }
-        return null;
+        return storage.getFieldDefinition(field);
     }
 
     public DataFieldDefinition<?> getFieldDefinition(String fieldName) {

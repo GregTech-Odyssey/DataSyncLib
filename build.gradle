@@ -45,6 +45,7 @@ neoForge {
 
         gameTestServer {
             type = 'gameTestServer'
+            gameDirectory = project.file('run-gametest')
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
 
@@ -104,6 +105,17 @@ tasks.named('processResources', ProcessResources).configure {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+}
+
+// `gradlew runGameTestServer` runs the NeoForge GameTest suite; the server itself exits with code 0
+// even when a test fails, so the log is checked for the "All N required tests passed" line.
+tasks.named('runGameTestServer') {
+    doLast {
+        def logFile = file('run-gametest/logs/latest.log')
+        if (!logFile.exists() || !(logFile.text =~ /All \d+ required tests passed/)) {
+            throw new GradleException('GameTest server did not report passing tests; inspect run-gametest/logs/latest.log')
+        }
+    }
 }
 
 tasks.named('jar', Jar).configure {

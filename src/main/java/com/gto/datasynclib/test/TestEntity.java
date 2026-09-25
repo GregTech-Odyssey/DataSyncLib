@@ -40,9 +40,12 @@ public class TestEntity extends Entity implements IFieldDataHolder {
     @SyncToClient
     private float speed;
 
+    // Not final: a final field is handled in access-mode, which needs an access factory for the field
+    // type, and there is none for an immutable value such as String. A plain (value-mode) field is
+    // encoded through the String codec instead.
     @SaveToDisk
     @SyncToClient
-    private final String title = "";
+    private String title = "";
 
     // Child-manager mode: managed by a dedicated sub-manager, not flattened into this entity's manager.
     @SaveToDisk

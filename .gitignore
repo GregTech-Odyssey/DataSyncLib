@@ -1,6 +1,7 @@
 build/
 *.ipr
 run/
+run-gametest/
 *.iws
 out/
 *.iml
