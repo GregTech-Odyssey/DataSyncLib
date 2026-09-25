@@ -11,7 +11,13 @@ public record DoubleData(double value) implements NumericData {
 
     public static final DoubleData ZERO = new DoubleData(0.0);
 
-    @Deprecated(forRemoval = true)
+    /**
+     * Prefer the {@code valueOf(...)} factory below, which returns cached instances where the range
+     * allows it. This constructor is public only because a record's canonical constructor cannot be
+     * narrower than the record itself, so {@code new ...} cannot be hidden from callers; it is not
+     * deprecated for removal and behaves exactly like the factory — it just allocates.
+     */
+    @Deprecated
     public DoubleData {
     }
 

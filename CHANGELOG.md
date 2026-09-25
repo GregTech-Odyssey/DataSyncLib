@@ -41,6 +41,17 @@ publishing its own `26.9.x` versions, so the two lines share the annotation API 
 ### New Features
 - `RegistryContext` and the `util/cache` helpers, used by the 1.21 codec paths.
 
+### Changes
+- The 1.20.1 `dataVersion == -1` compatibility branches are gone (`AbstractFieldAccess#readFromData`,
+  `SerializableArrayAccess#doReadData`): the 1.21 line is new, so no old payloads exist. The format-version
+  parameter itself (`dataVersion`, `FieldDataHolderBlockEntity.VERSION`/`dataVersion()`,
+  `field_data_dataVersion`) is kept, it is the mechanism for future format changes.
+- `ByteData`/`CharData`/`DoubleData`/`FloatData`/`IntData`/`LongData`/`ShortData`/`StringData`: the canonical
+  constructor is now plain `@Deprecated` instead of `@Deprecated(forRemoval = true)`. A public record's
+  canonical constructor cannot be narrower than the record, so `new ...` can never be hidden and "removal"
+  was a promise the class cannot keep; the annotation is only there to steer hot paths to the cached
+  `valueOf(...)` factories.
+
 ### Notes
 - The 1.21 adaptations follow [MachineLib](https://github.com/GregTech-Odyssey/MachineLib)'s
   `com.moakiee.machinelib.sync` package, which is itself derived from DataSyncLib 26.9.4 and carries the
