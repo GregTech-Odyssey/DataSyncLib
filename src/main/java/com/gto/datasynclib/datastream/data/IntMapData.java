@@ -33,7 +33,7 @@ public record IntMapData(Int2ObjectMap<Data> value) implements MapData {
     }
 
     public static IntMapData read(ByteBuf stream) {
-        var size = com.gto.datasynclib.DecodeLimits.size(Data.readVarInt(stream), stream, 0);
+        var size = Data.readVarInt(stream);
         var map = new Int2ObjectOpenHashMap<Data>(size);
         for (int i = 0; i < size; i++) {
             map.put(Data.readVarInt(stream), Data.readData(stream));

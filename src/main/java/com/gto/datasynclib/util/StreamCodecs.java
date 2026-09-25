@@ -1,6 +1,5 @@
 package com.gto.datasynclib.util;
 
-import com.gto.datasynclib.DecodeLimits;
 import com.gto.datasynclib.RegistryContext;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.datastream.data.Data;
@@ -39,8 +38,7 @@ import net.neoforged.neoforge.fluids.FluidStack;
  *
  * <p>Where Minecraft already ships a matching codec ({@code ResourceLocation.STREAM_CODEC},
  * {@code ItemStack.OPTIONAL_STREAM_CODEC}, {@code ComponentSerialization.STREAM_CODEC}, ...) the
- * constant simply re-exposes it. The array codecs bound their allocation through
- * {@link DecodeLimits} so a hostile length prefix cannot exhaust memory.</p>
+ * constant simply re-exposes it.</p>
  */
 @UtilityClass
 public class StreamCodecs {
@@ -209,7 +207,7 @@ public class StreamCodecs {
 
         @Override
         public boolean[] decode(RegistryFriendlyByteBuf buf) {
-            var length = DecodeLimits.size(buf.readVarInt(), buf, 1);
+            var length = buf.readVarInt();
             var booleans = new boolean[length];
             for (int i = 0; i < length; i++) {
                 booleans[i] = buf.readBoolean();
@@ -227,7 +225,7 @@ public class StreamCodecs {
 
         @Override
         public byte[] decode(RegistryFriendlyByteBuf buf) {
-            return buf.readByteArray(DecodeLimits.MAX_ELEMENTS);
+            return buf.readByteArray();
         }
     };
 
@@ -243,7 +241,7 @@ public class StreamCodecs {
 
         @Override
         public int[] decode(RegistryFriendlyByteBuf buf) {
-            var length = DecodeLimits.size(buf.readVarInt(), buf, 1);
+            var length = buf.readVarInt();
             var ints = new int[length];
             for (int i = 0; i < length; i++) {
                 ints[i] = buf.readVarInt();
@@ -261,7 +259,7 @@ public class StreamCodecs {
 
         @Override
         public long[] decode(RegistryFriendlyByteBuf buf) {
-            int length = DecodeLimits.size(buf.readVarInt(), buf, Long.BYTES);
+            int length = buf.readVarInt();
             long[] values = new long[length];
             for (int i = 0; i < length; i++) values[i] = buf.readLong();
             return values;
@@ -280,7 +278,7 @@ public class StreamCodecs {
 
         @Override
         public short[] decode(RegistryFriendlyByteBuf buf) {
-            var length = DecodeLimits.size(buf.readVarInt(), buf, 2);
+            var length = buf.readVarInt();
             var shorts = new short[length];
             for (int i = 0; i < length; i++) {
                 shorts[i] = buf.readShort();
@@ -301,7 +299,7 @@ public class StreamCodecs {
 
         @Override
         public char[] decode(RegistryFriendlyByteBuf buf) {
-            var length = DecodeLimits.size(buf.readVarInt(), buf, 2);
+            var length = buf.readVarInt();
             var chars = new char[length];
             for (int i = 0; i < length; i++) {
                 chars[i] = buf.readChar();
@@ -322,7 +320,7 @@ public class StreamCodecs {
 
         @Override
         public float[] decode(RegistryFriendlyByteBuf buf) {
-            var length = DecodeLimits.size(buf.readVarInt(), buf, 4);
+            var length = buf.readVarInt();
             var floats = new float[length];
             for (int i = 0; i < length; i++) {
                 floats[i] = buf.readFloat();
@@ -343,7 +341,7 @@ public class StreamCodecs {
 
         @Override
         public double[] decode(RegistryFriendlyByteBuf buf) {
-            var length = DecodeLimits.size(buf.readVarInt(), buf, 8);
+            var length = buf.readVarInt();
             var doubles = new double[length];
             for (int i = 0; i < length; i++) {
                 doubles[i] = buf.readDouble();
@@ -358,7 +356,7 @@ public class StreamCodecs {
 
     public static final StreamCodec<RegistryFriendlyByteBuf, UUID> UUID_CODEC = StreamCodec.of((buf, value) -> buf.writeUUID(value), buf -> buf.readUUID());
 
-    public static final StreamCodec<RegistryFriendlyByteBuf, BigInteger> BIG_INTEGER_CODEC = StreamCodec.of((buf, value) -> buf.writeByteArray(value.toByteArray()), buf -> new BigInteger(buf.readByteArray(DecodeLimits.MAX_ELEMENTS)));
+    public static final StreamCodec<RegistryFriendlyByteBuf, BigInteger> BIG_INTEGER_CODEC = StreamCodec.of((buf, value) -> buf.writeByteArray(value.toByteArray()), buf -> new BigInteger(buf.readByteArray()));
 
     /**
      * Bridge persistent {@link Data} into a stream: the payload keeps the disk layout, so the
@@ -378,8 +376,7 @@ public class StreamCodecs {
     }
 
     /**
-     * Object array codec: a VarInt length followed by that many elements. The length is bounded by
-     * {@link DecodeLimits} before the array is allocated.
+     * Object array codec: a VarInt length followed by that many elements.
      */
     public static <T> StreamCodec<RegistryFriendlyByteBuf, T[]> array(Class<T> type, StreamCodec<? super RegistryFriendlyByteBuf, T> codec) {
         return StreamCodec.of((buf, values) -> {
@@ -388,7 +385,7 @@ public class StreamCodecs {
                 codec.encode(buf, value);
             }
         }, buf -> {
-            int size = DecodeLimits.size(buf.readVarInt(), buf, 0);
+            int size = buf.readVarInt();
             @SuppressWarnings("unchecked")
             T[] result = (T[]) Array.newInstance(type, size);
             for (int i = 0; i < size; i++) {

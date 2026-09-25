@@ -16,31 +16,31 @@ publishing its own `26.9.x` versions, so the two lines share the annotation API 
   `context.listener().getConnectionType()`). Server→client payloads are validated by dimension, chunk,
   block-entity type and distance before they are applied.
 - **Codecs**: `ByteStreamCodec`, `ByteStreamEncoder` and `ByteStreamDecoder` are removed.
-  `CombinedCodec<T>` now extends `DataCodec<T>` **and** `StreamCodec<RegistryFriendlyByteBuf, T>`
-  (with the new `DecodeLimits` element/byte caps), and `StreamCodecs.fromData(DataCodec)` bridges the
-  data side. The built-in set is registered against 1.21's data-component based `ItemStack`/
-  `FluidStack`/`Component` handling.
+  `CombinedCodec<T>` now extends `DataCodec<T>` **and** `StreamCodec<RegistryFriendlyByteBuf, T>`, and
+  `StreamCodecs.fromData(DataCodec)` bridges the data side. The built-in set is registered against 1.21's
+  data-component based `ItemStack`/`FluidStack`/`Component` handling.
 - **Sync context**: every network read/write takes a `SyncContext` (registry access + connection type)
   because a `RegistryFriendlyByteBuf` can only be created with a `RegistryAccess`:
   `FieldDataManager#writeToNetworkBuffer(LogicalSide, SyncContext, boolean)` /
   `readFromNetworkBuffer(LogicalSide, SyncContext, byte[])`, and the same parameter reaches
-  `IFieldDataHolder`, `FieldDataCodec` and the per-field buffer methods.
+  `IFieldDataHolder`, `FieldDataCodec` and the per-field buffer methods. Sending everything to one
+  observer stays a forced full write (`writeToNetworkBuffer(..., true)`, which
+  `DataSyncNetwork#syncBlockEntityToPlayer` uses as well).
 - **NBT/serialization**: `INBTSerializable` moved to `net.neoforged.neoforge.common.util`;
   `FieldDataHolderBlockEntity` implements the 1.21 `saveAdditional(CompoundTag, HolderLookup.Provider)` /
   `loadAdditional(CompoundTag, HolderLookup.Provider)` / `getUpdateTag(HolderLookup.Provider)` signatures.
 
 ### New Features
-- `FieldDataManager#writeSnapshot(LogicalSide, SyncContext)`: a non-consuming full-state snapshot for a
-  single authorized observer, so sending to one player no longer clears the shared delta baseline.
 - `ClientSyncTarget`: client→server updates are applied to a detached request holder that the target
   validates and merges, instead of decoding straight into live state.
-- `RegistryContext`, `SnapshotScope`, `TagMapView` and the `util/cache` helpers, used by the 1.21
-  codec/snapshot paths.
+- `RegistryContext`, `TagMapView` and the `util/cache` helpers, used by the 1.21 codec paths.
 
 ### Notes
 - The 1.21 adaptations follow [MachineLib](https://github.com/GregTech-Odyssey/MachineLib)'s
   `com.moakiee.machinelib.sync` package, which is itself derived from DataSyncLib 26.9.4 and carries the
-  same API names.
+  same API names. Its `DecodeLimits` payload caps, `SnapshotScope`/`writeSnapshot` (non-consuming
+  snapshot) machinery were deliberately **not** taken: this library favours raw throughput, and the
+  framework already offers forced full sync.
 
 ---
 

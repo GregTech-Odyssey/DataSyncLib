@@ -3,7 +3,6 @@ package com.gto.datasynclib.forge;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.RegistryContext;
-import com.gto.datasynclib.SnapshotScope;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.ListData;
 import com.gto.datasynclib.datastream.data.NullData;
@@ -139,7 +138,7 @@ public final class TagSerializableArrayAccess extends AbstractFieldAccess<INBTSe
                 }
             }
         }
-        if (!SnapshotScope.active()) dirtySlots.clear();
+        dirtySlots.clear();
     }
 
     @Override
@@ -150,7 +149,7 @@ public final class TagSerializableArrayAccess extends AbstractFieldAccess<INBTSe
             try {
                 // The tag must still be consumed for a null slot: the type byte and payload are
                 // read positionally, so skipping the load would desynchronize every later slot.
-                var tag = type.load(new ByteBufInputStream(data), NbtAccounter.create(2097152L));
+                var tag = type.load(new ByteBufInputStream(data), NbtAccounter.unlimitedHeap());
                 if (element != null) element.deserializeNBT(RegistryContext.current(), tag);
             } catch (IOException e) {
                 throw new RuntimeException(e);

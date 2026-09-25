@@ -31,8 +31,8 @@ import java.util.function.Supplier;
  *       implementation for each managed field</li>
  *   <li><strong>Detects changes</strong> — via {@link #updateFieldDirtyFlags(LogicalSide, boolean)},
  *       which iterates sync fields and calls {@link DataField#detectChange} on each</li>
- *   <li><strong>Serializes for network</strong> — via {@link #writeSnapshot(LogicalSide, SyncContext)}
- *       (non-consuming full state for a new observer), {@link #writeToNetworkBuffer(LogicalSide, SyncContext, boolean)}
+ *   <li><strong>Serializes for network</strong> — via {@link #writeToNetworkBuffer(LogicalSide, SyncContext, boolean)}
+ *       (the full state when {@code writeAll} is {@code true}, otherwise the pending delta)
  *       and {@link #readFromNetworkBuffer(LogicalSide, SyncContext, byte[])}, using an index-addressing protocol
  *       where only changed fields are written (each prefixed by a VarInt field index)</li>
  *   <li><strong>Serializes for disk</strong> — via {@link #writeToData()} and
@@ -225,25 +225,6 @@ public class FieldDataManager {
     }
 
     /**
-     * Writes a full, non-consuming snapshot of the managed field data for a new observer.
-     *
-     * <p>Unlike {@link #writeToNetworkBuffer(LogicalSide, SyncContext, boolean)}, the dirty flags of
-     * the managed fields and the manager-level {@code changed} flag are left untouched, so pending
-     * deltas meant for existing observers are not swallowed by the snapshot. Custom writers hooked
-     * through {@link IFieldDataHolder#writeCustomSyncData} must likewise not clear dirty state while
-     * a snapshot is being taken.</p>
-     *
-     * @param side    the logical side determining which fields to serialize
-     * @param context the registry/connection context used to build the network buffer
-     * @return byte array containing the serialized snapshot
-     */
-    public byte[] writeSnapshot(LogicalSide side, SyncContext context) {
-        try (var ignored = new SnapshotScope()) {
-            return writeToNetworkBuffer(side, context, true);
-        }
-    }
-
-    /**
      * Writes field data to network buffer.
      *
      * @param side     the logical side determining which fields to serialize
@@ -269,13 +250,13 @@ public class FieldDataManager {
                 if (writeAll || field.isChanged(source)) {
                     wrapper.writeVarInt(i);
                     field.writeToBuffer(side, source, wrapper, writeAll);
-                    if (!SnapshotScope.active()) field.clearChanged(source);
+                    field.clearChanged(source);
                 }
             }
             buf.readerIndex(0);
             byte[] data = new byte[buf.readableBytes()];
             buf.readBytes(data);
-            if (!SnapshotScope.active()) changed = false; // Only clear after successful serialization
+            changed = false; // Only clear after successful serialization
             return data;
         } finally {
             buf.release();
@@ -286,10 +267,7 @@ public class FieldDataManager {
     /**
      * Reads field data from network buffer
      *
-     * <p>Decoding runs inside {@link DecodeLimits}, which bounds the nesting depth (64 levels) and
-     * the element count of decoded containers, so a malformed or hostile payload cannot make the
-     * bundled codecs allocate unbounded memory. Custom codecs remain responsible for validating
-     * their own allocations.</p>
+     * <p>Custom codecs are responsible for validating their own allocations.</p>
      *
      * @param side    the logical side
      * @param context the registry/connection context used to build the network buffer
@@ -300,7 +278,7 @@ public class FieldDataManager {
         if (data.length > 0) {
             var buf = Unpooled.wrappedBuffer(data);
             var wrapper = context.buffer(buf);
-            try (var ignored = DecodeLimits.enter()) {
+            try {
                 final var fields = side.isBoth() ? allFields : side.isClient() ? syncToClientFields : syncToServerFields;
                 holder.readCustomSyncData(wrapper);
                 boolean update = false;

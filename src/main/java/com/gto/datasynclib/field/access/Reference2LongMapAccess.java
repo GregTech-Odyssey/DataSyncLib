@@ -1,7 +1,6 @@
 package com.gto.datasynclib.field.access;
 
 import com.gto.datasynclib.DataFieldDefinition;
-import com.gto.datasynclib.DecodeLimits;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.datastream.data.Data;
@@ -51,7 +50,7 @@ public class Reference2LongMapAccess<K> extends AbstractFieldAccess<Reference2Lo
 
     @Override
     protected void doReadBuffer(@NotNull LogicalSide side, @NotNull Reference2LongMap instance, @NotNull RegistryFriendlyByteBuf data) {
-        var length = DecodeLimits.size(data.readVarInt(), data, 0);
+        var length = data.readVarInt();
         instance.clear();
         for (int i = 0; i < length; i++) {
             var key = keyCodec.streamReader.decode(data);

@@ -2,7 +2,6 @@ package com.gto.datasynclib.listener;
 
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.SnapshotScope;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.LongData;
 import com.gto.datasynclib.util.holder.LongHolder;
@@ -67,7 +66,7 @@ public final class LongNotifiableHolder extends LongHolder implements IDataSeria
     public void writeBuffer(LogicalSide side, @NotNull RegistryFriendlyByteBuf data) {
         data.writeLong(value);
         senderListener.onSync(side, lastValue, value);
-        if (!SnapshotScope.active()) lastValue = value;
+        lastValue = value;
     }
 
     @Override

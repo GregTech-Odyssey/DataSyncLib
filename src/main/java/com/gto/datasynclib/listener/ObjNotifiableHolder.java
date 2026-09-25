@@ -2,7 +2,6 @@ package com.gto.datasynclib.listener;
 
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.SnapshotScope;
 import lombok.Setter;
 import lombok.experimental.Accessors;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -45,7 +44,7 @@ public final class ObjNotifiableHolder<T> extends ObjSerializableHolder<T> imple
             codec.streamWriter.encode(data, value);
         }
         senderListener.onSync(side, lastValue, value);
-        if (!SnapshotScope.active()) lastValue = value;
+        lastValue = value;
     }
 
     @Override

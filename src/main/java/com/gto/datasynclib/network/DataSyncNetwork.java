@@ -214,13 +214,14 @@ public final class DataSyncNetwork {
     /**
      * Syncs a block entity's full {@code @SyncToClient} state to one player.
      * <p>
-     * Call from the <strong>server</strong> side. The state is written as a
-     * <strong>non-consuming</strong> snapshot ({@link com.gto.datasynclib.FieldDataManager#writeSnapshot}),
-     * so the dirty baseline shared with the chunk observers is neither consumed nor cleared —
-     * this is the intended path for a player that just opened a menu or started tracking.
+     * Call from the <strong>server</strong> side. The state is written as a forced full write
+     * ({@link com.gto.datasynclib.FieldDataManager#writeToNetworkBuffer(LogicalSide, SyncContext, boolean)}
+     * with {@code writeAll = true}), which sends the full current state to this one observer. Note
+     * that a full write also clears this holder's pending delta flags — the framework offers no
+     * per-observer snapshot.
      *
      * @param be     the block entity to sync
-     * @param player the player that should receive the snapshot
+     * @param player the player that should receive the state
      */
     public static void syncBlockEntityToPlayer(BlockEntity be, ServerPlayer player) {
         if (!(be.getLevel() instanceof ServerLevel level)) return;
@@ -232,9 +233,10 @@ public final class DataSyncNetwork {
                     || !(be instanceof IFieldDataHolder holder)) return;
             PacketDistributor.sendToPlayer(
                     player,
-                    packet(be, holder.getFieldDataManager().writeSnapshot(
+                    packet(be, holder.getFieldDataManager().writeToNetworkBuffer(
                             LogicalSide.SERVER,
-                            new SyncContext(player.registryAccess(), player.connection.getConnectionType()))));
+                            new SyncContext(player.registryAccess(), player.connection.getConnectionType()),
+                            true)));
         });
     }
 

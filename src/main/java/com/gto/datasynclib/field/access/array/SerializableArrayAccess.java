@@ -3,7 +3,6 @@ package com.gto.datasynclib.field.access.array;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.SnapshotScope;
 import com.gto.datasynclib.SyncContext;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.ListData;
@@ -66,7 +65,7 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
                     byte[] bytes = new byte[payload.readableBytes()];
                     payload.readBytes(bytes);
                     data.writeByteArray(bytes);
-                    if (!SnapshotScope.active()) element.clearChanged();
+                    element.clearChanged();
                 } finally {
                     payload.release();
                 }

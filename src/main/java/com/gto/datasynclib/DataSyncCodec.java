@@ -135,7 +135,7 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
                     },
                     buf -> {
                         var decoder = codec.streamReader;
-                        var length = DecodeLimits.size(buf.readVarInt(), buf, 0);
+                        var length = buf.readVarInt();
                         var array = (Object[]) Array.newInstance(type, length);
                         for (int i = 0; i < length; i++) {
                             if (buf.readBoolean()) array[i] = decoder.decode(buf);

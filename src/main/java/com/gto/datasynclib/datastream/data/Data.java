@@ -146,29 +146,27 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
     // ===== Binary serialization (ByteBuf) =====
 
     static Data readData(byte id, ByteBuf stream) {
-        try (var ignored = com.gto.datasynclib.DecodeLimits.enter()) {
-            return switch (id) {
-                case NULL -> NullData.INSTANCE;
-                case BYTE -> ByteData.valueOf(stream.readByte());
-                case SHORT -> ShortData.valueOf(stream.readShort());
-                case CHAR -> CharData.valueOf(stream.readChar());
-                case INT -> IntData.valueOf(stream.readInt());
-                case LONG -> LongData.valueOf(stream.readLong());
-                case FLOAT -> FloatData.valueOf(stream.readFloat());
-                case DOUBLE -> DoubleData.valueOf(stream.readDouble());
-                case STRING -> StringData.valueOf(readString(stream));
-                case BYTE_ARRAY -> new ByteArrayData(readByteArray(stream));
-                case INT_ARRAY -> new IntArrayData(readIntArray(stream));
-                case LONG_ARRAY -> new LongArrayData(readLongArray(stream));
-                case LIST -> ListData.read(stream);
-                case STRING_MAP -> StringMapData.read(stream);
-                case CUSTOM -> CustomData.read(readVarInt(stream), stream);
-                case DATA_MAP -> DataMapData.read(stream);
-                case INT_MAP -> IntMapData.read(stream);
-                case LONG_MAP -> LongMapData.read(stream);
-                default -> throw new IllegalArgumentException("Unknown data type id: " + id);
-            };
-        }
+        return switch (id) {
+            case NULL -> NullData.INSTANCE;
+            case BYTE -> ByteData.valueOf(stream.readByte());
+            case SHORT -> ShortData.valueOf(stream.readShort());
+            case CHAR -> CharData.valueOf(stream.readChar());
+            case INT -> IntData.valueOf(stream.readInt());
+            case LONG -> LongData.valueOf(stream.readLong());
+            case FLOAT -> FloatData.valueOf(stream.readFloat());
+            case DOUBLE -> DoubleData.valueOf(stream.readDouble());
+            case STRING -> StringData.valueOf(readString(stream));
+            case BYTE_ARRAY -> new ByteArrayData(readByteArray(stream));
+            case INT_ARRAY -> new IntArrayData(readIntArray(stream));
+            case LONG_ARRAY -> new LongArrayData(readLongArray(stream));
+            case LIST -> ListData.read(stream);
+            case STRING_MAP -> StringMapData.read(stream);
+            case CUSTOM -> CustomData.read(readVarInt(stream), stream);
+            case DATA_MAP -> DataMapData.read(stream);
+            case INT_MAP -> IntMapData.read(stream);
+            case LONG_MAP -> LongMapData.read(stream);
+            default -> throw new IllegalArgumentException("Unknown data type id: " + id);
+        };
     }
 
     static Data readData(byte[] bytes) {
@@ -265,7 +263,7 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
     }
 
     static byte[] readByteArray(ByteBuf buf) {
-        byte[] array = new byte[com.gto.datasynclib.DecodeLimits.size(readVarInt(buf), buf, 1)];
+        byte[] array = new byte[readVarInt(buf)];
         buf.readBytes(array);
         return array;
     }
@@ -278,7 +276,7 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
     }
 
     static int[] readIntArray(ByteBuf buf) {
-        int i = com.gto.datasynclib.DecodeLimits.size(readVarInt(buf), buf, 4);
+        int i = readVarInt(buf);
         int[] aint = new int[i];
         for (int j = 0; j < i; ++j) {
             aint[j] = buf.readInt();
@@ -294,7 +292,7 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
     }
 
     static long[] readLongArray(ByteBuf buf) {
-        int i = com.gto.datasynclib.DecodeLimits.size(readVarInt(buf), buf, 8);
+        int i = readVarInt(buf);
         var array = new long[i];
         for (int j = 0; j < i; ++j) {
             array[j] = buf.readLong();

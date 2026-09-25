@@ -2,7 +2,6 @@ package com.gto.datasynclib.field;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.SnapshotScope;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.FloatData;
 import com.gto.datasynclib.datastream.data.NullData;
@@ -34,7 +33,7 @@ public final class FloatField extends AbstractField<Float> {
     @Override
     public void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         var value = definition.getFloat(source);
-        if (!SnapshotScope.active()) lastValue = value;
+        lastValue = value;
         data.writeFloat(value);
     }
 

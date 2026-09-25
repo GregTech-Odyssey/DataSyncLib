@@ -198,9 +198,10 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
      * key, newly-arriving players receive the current state without needing a separate
      * sync packet.</p>
      *
-     * <p>The data is encoded via {@link FieldDataManager#writeSnapshot(LogicalSide, SyncContext)}
-     * (a full, <strong>non-consuming</strong> write): the pending deltas of players that are
-     * already tracking the chunk stay queued, so a newcomer does not steal them.</p>
+     * <p>The data is encoded as a forced full write
+     * ({@link FieldDataManager#writeToNetworkBuffer(LogicalSide, SyncContext, boolean)} with
+     * {@code writeAll = true}), so a newly-arriving player always receives the current state.
+     * Note that a full write also clears this holder's pending delta flags.</p>
      *
      * @param lookup the registry lookup of the sending side
      * @return the compound tag containing vanilla data plus {@code "field_sync"} byte array
@@ -209,7 +210,7 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
     public @NotNull CompoundTag getUpdateTag(@NotNull HolderLookup.Provider lookup) {
         var tag = super.getUpdateTag(lookup);
         if (getFieldDataManager().hasSyncFields(LogicalSide.SERVER)) {
-            tag.putByteArray("field_sync", getFieldDataManager().writeSnapshot(LogicalSide.SERVER, syncContext(lookup)));
+            tag.putByteArray("field_sync", getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, syncContext(lookup), true));
         }
         return tag;
     }

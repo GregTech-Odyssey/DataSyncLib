@@ -3,7 +3,6 @@ package com.gto.datasynclib.listener;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.SnapshotScope;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.util.holder.ObjHolder;
@@ -75,7 +74,7 @@ public class ObjSerializableHolder<T> extends ObjHolder<T> implements IDataSeria
             data.writeBoolean(true);
             codec.streamWriter.encode(data, value);
         }
-        if (!SnapshotScope.active()) lastValue = value;
+        lastValue = value;
     }
 
     @Override

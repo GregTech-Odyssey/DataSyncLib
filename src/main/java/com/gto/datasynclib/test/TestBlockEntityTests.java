@@ -316,7 +316,7 @@ public final class TestBlockEntityTests {
      * Chunk-load synchronization.
      *
      * <p><b>Usage:</b> nothing to override — {@code getUpdateTag(lookup)} already embeds the full
-     * {@code @SyncToClient} state under {@code field_sync} (as a non-consuming snapshot), so a player
+     * {@code @SyncToClient} state under {@code field_sync} (a forced full write), so a player
      * entering the chunk receives the current values without a dedicated packet. 1.21 routes that tag
      * to {@code handleUpdateTag(tag, lookup)} on the receiving side instead of the old {@code load}
      * entry point, while {@code loadAdditional} now reads only {@code field_save}; so a client can

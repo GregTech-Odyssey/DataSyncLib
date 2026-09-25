@@ -1,7 +1,6 @@
 package com.gto.datasynclib.field.access;
 
 import com.gto.datasynclib.DataFieldDefinition;
-import com.gto.datasynclib.DecodeLimits;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.LongArrayData;
@@ -41,7 +40,7 @@ public final class LongCollectionAccess extends AbstractFieldAccess<LongCollecti
 
     @Override
     protected void doReadBuffer(@NotNull LogicalSide side, @NotNull LongCollection instance, @NotNull RegistryFriendlyByteBuf data) {
-        var length = DecodeLimits.size(data.readVarInt(), data, 0);
+        var length = data.readVarInt();
         instance.clear();
         for (int i = 0; i < length; i++) {
             instance.add(data.readLong());

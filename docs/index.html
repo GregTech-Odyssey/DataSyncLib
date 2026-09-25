@@ -257,7 +257,7 @@ li { margin: 4px 0; }
     <li><strong>更新通知</strong> — 若字段设置了 <code>scheduleUpdate = true</code>，调用 <code>scheduleUpdate()</code> 通知渲染刷新</li>
 </ol>
 <div class="note"><strong>异步支持：</strong>所有 <code>DataSyncNetwork</code> 的发送方法都支持异步调用。方法内部检测到变化后，通过 <code>level.getServer().execute()</code> 或 <code>Minecraft.getInstance().execute()</code> 将实际网络发送调度到主线程。</div>
-<div class="note"><strong>1.21 新增：SyncContext</strong> — 网络缓冲区现在是 <code>RegistryFriendlyByteBuf</code>，而它只能由 <code>RegistryAccess</code>（再加连接类型）构造，裸 <code>byte[]</code> 无法还原这两项信息。因此每次网络读写都要显式传入 <code>SyncContext(RegistryAccess, ConnectionType)</code>：<code>FieldDataManager#writeToNetworkBuffer(LogicalSide, SyncContext, boolean)</code>、<code>readFromNetworkBuffer(LogicalSide, SyncContext, byte[])</code>，以及新的 <code>writeSnapshot(LogicalSide, SyncContext)</code>。它取代了隐式的线程上下文；嵌套 manager 与数组子载荷直接继承父 buffer 的这两个属性。</div>
+<div class="note"><strong>1.21 新增：SyncContext</strong> — 网络缓冲区现在是 <code>RegistryFriendlyByteBuf</code>，而它只能由 <code>RegistryAccess</code>（再加连接类型）构造，裸 <code>byte[]</code> 无法还原这两项信息。因此每次网络读写都要显式传入 <code>SyncContext(RegistryAccess, ConnectionType)</code>：<code>FieldDataManager#writeToNetworkBuffer(LogicalSide, SyncContext, boolean)</code>、<code>readFromNetworkBuffer(LogicalSide, SyncContext, byte[])</code>。它取代了隐式的线程上下文；嵌套 manager 与数组子载荷直接继承父 buffer 的这两个属性。</div>
 
 <h3>持久化流程</h3>
 <ol>
@@ -489,9 +489,8 @@ li { margin: 4px 0; }
     <thead><tr><th>方法</th><th>说明</th></tr></thead>
     <tbody>
         <tr><td>updateFieldDirtyFlags(side, autoDetectOnly)</td><td>遍历同步字段调用 detectChange。有变化或已标记脏则返回 true</td></tr>
-        <tr><td>writeToNetworkBuffer(side, context, writeAll)</td><td>在 <code>SyncContext</code>（注册表 + 连接类型）下把脏字段序列化为 byte[]。writeAll=true 时写入所有字段</td></tr>
+        <tr><td>writeToNetworkBuffer(side, context, writeAll)</td><td>在 <code>SyncContext</code>（注册表 + 连接类型）下把脏字段序列化为 byte[]。writeAll=true 是<strong>强制全量写入</strong>：写入所有字段，并在写入过程中清除该 holder 的待发增量标记，因此不存在按观察者区分的快照</td></tr>
         <tr><td>readFromNetworkBuffer(side, context, data)</td><td>在 <code>SyncContext</code> 下反序列化 byte[] 并还原字段值，触发 listener 和 scheduleUpdate</td></tr>
-        <tr><td>writeSnapshot(side, context)</td><td>1.21 新增：生成<strong>非消费式</strong>全量快照（不清除脏标记、不推进已有观察者的比较基线），用于单个新观察者</td></tr>
         <tr><td>writeToData()</td><td>序列化所有 @SaveToDisk 字段为 StringMapData</td></tr>
         <tr><td>readFromData(data, dataVersion)</td><td>从 StringMapData 反序列化还原所有持久化字段</td></tr>
         <tr><td>markFieldsForSync(fields...)</td><td>按 DataFieldDefinition 或字段名字符串标记为脏</td></tr>
@@ -548,7 +547,7 @@ li { margin: 4px 0; }
     <thead><tr><th>方法</th><th>调用侧</th><th>参数</th></tr></thead>
     <tbody>
         <tr><td>syncBlockEntityToClient(be, all, autoDetectOnly)</td><td>服务端</td><td>all: 全量同步（true=全部字段）; autoDetectOnly: true=仅检查 autoDetect 字段</td></tr>
-        <tr><td>syncBlockEntityToPlayer(be, player)</td><td>服务端</td><td>用非消费快照（<code>writeSnapshot</code>）把完整状态发给单个玩家，不影响区块观察者的增量基线</td></tr>
+        <tr><td>syncBlockEntityToPlayer(be, player)</td><td>服务端</td><td>用<strong>强制全量写入</strong>（<code>FieldDataManager#writeToNetworkBuffer(LogicalSide.SERVER, SyncContext, true)</code>）把完整状态发给单个玩家。全量写入会一并清除该 holder 的待发增量标记，因此不存在按观察者区分的快照</td></tr>
         <tr><td>syncBlockEntityToServer(be, all, autoDetectOnly)</td><td>客户端</td><td>同上</td></tr>
         <tr><td>syncEntityToClient(entity, all, autoDetectOnly)</td><td>服务端</td><td>同上</td></tr>
         <tr><td>syncEntityToServer(entity, all, autoDetectOnly)</td><td>客户端</td><td>同上</td></tr>
@@ -924,7 +923,7 @@ CustomData 直接包装原始 NBT 对象（零拷贝），而 <code>convertToDat
 <table>
     <thead><tr><th>方法</th><th>自动功能</th></tr></thead>
     <tbody>
-        <tr><td><code>getUpdateTag(lookup)</code></td><td>覆写原版方法，用 <code>writeSnapshot(LogicalSide.SERVER, SyncContext)</code> 把 <code>@SyncToClient</code> 字段写入 <code>"field_sync"</code> NBT 数据。新玩家进入区块时自动接收当前状态</td></tr>
+        <tr><td><code>getUpdateTag(lookup)</code></td><td>覆写原版方法，用强制全量写入（<code>writeToNetworkBuffer(LogicalSide.SERVER, SyncContext, true)</code>）把 <code>@SyncToClient</code> 字段写入 <code>"field_sync"</code> NBT 数据。新玩家进入区块时自动接收当前状态</td></tr>
         <tr><td><code>handleUpdateTag(tag, lookup)</code></td><td>1.21 新增：客户端收到区块/方块实体数据包后，从 <code>"field_sync"</code> 反序列化（<code>LogicalSide.CLIENT</code>），不再经过 <code>loadAdditional</code></td></tr>
         <tr><td><code>saveAdditional(tag, lookup)</code></td><td>写入 <code>dataVersion()</code> 和 <code>"field_save"</code> — 所有 <code>@SaveToDisk</code> 字段的序列化数据</td></tr>
         <tr><td><code>loadAdditional(tag, lookup)</code></td><td>从 <code>"field_save"</code> 恢复磁盘数据（1.21 不再由它处理区块同步数据）</td></tr>

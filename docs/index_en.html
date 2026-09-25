@@ -256,7 +256,7 @@ li { margin: 4px 0; }
     <li><strong>Update notification</strong> — if the field has <code>scheduleUpdate = true</code>, <code>scheduleUpdate()</code> is called to notify UI refresh</li>
 </ol>
 <div class="note"><strong>Async support:</strong> all <code>DataSyncNetwork</code> send methods are async-safe. After detecting changes and serializing, they dispatch network sends to the main thread via <code>level.getServer().execute()</code> (server) or <code>Minecraft.getInstance().execute()</code> (client).</div>
-<div class="note"><strong>New in 1.21: SyncContext</strong> — the network buffer is now a <code>RegistryFriendlyByteBuf</code>, and it can only be built from a <code>RegistryAccess</code> (plus a connection type); neither can be recovered from a plain <code>byte[]</code>. Every network read/write therefore takes an explicit <code>SyncContext(RegistryAccess, ConnectionType)</code>: <code>FieldDataManager#writeToNetworkBuffer(LogicalSide, SyncContext, boolean)</code>, <code>readFromNetworkBuffer(LogicalSide, SyncContext, byte[])</code>, and the new <code>writeSnapshot(LogicalSide, SyncContext)</code>. It replaces the implicit thread context; nested managers and array sub-payloads simply inherit both attributes from the parent buffer.</div>
+<div class="note"><strong>New in 1.21: SyncContext</strong> — the network buffer is now a <code>RegistryFriendlyByteBuf</code>, and it can only be built from a <code>RegistryAccess</code> (plus a connection type); neither can be recovered from a plain <code>byte[]</code>. Every network read/write therefore takes an explicit <code>SyncContext(RegistryAccess, ConnectionType)</code>: <code>FieldDataManager#writeToNetworkBuffer(LogicalSide, SyncContext, boolean)</code>, <code>readFromNetworkBuffer(LogicalSide, SyncContext, byte[])</code>. It replaces the implicit thread context; nested managers and array sub-payloads simply inherit both attributes from the parent buffer.</div>
 
 <h3>Persistence Flow</h3>
 <ol>
@@ -488,9 +488,8 @@ li { margin: 4px 0; }
     <thead><tr><th>Method</th><th>Description</th></tr></thead>
     <tbody>
         <tr><td>updateFieldDirtyFlags(side, autoDetectOnly)</td><td>Iterates sync fields calling detectChange. Returns true if any change or dirty flag found</td></tr>
-        <tr><td>writeToNetworkBuffer(side, context, writeAll)</td><td>Serializes dirty fields to byte[] under the given <code>SyncContext</code> (registries + connection type). writeAll=true writes all fields</td></tr>
+        <tr><td>writeToNetworkBuffer(side, context, writeAll)</td><td>Serializes dirty fields to byte[] under the given <code>SyncContext</code> (registries + connection type). writeAll=true is a <strong>forced full write</strong>: every field is written and that holder's pending delta flags are cleared as part of the write, so there is no per-observer snapshot</td></tr>
         <tr><td>readFromNetworkBuffer(side, context, data)</td><td>Deserializes byte[] under the given <code>SyncContext</code> and restores field values, triggers listener and scheduleUpdate</td></tr>
-        <tr><td>writeSnapshot(side, context)</td><td>New in 1.21: a <strong>non-consuming</strong> full snapshot (does not clear dirty flags or advance other observers' baseline), for one new observer</td></tr>
         <tr><td>writeToData()</td><td>Serializes all @SaveToDisk fields to StringMapData</td></tr>
         <tr><td>readFromData(data, dataVersion)</td><td>Deserializes and restores all persisted fields from StringMapData</td></tr>
         <tr><td>markFieldsForSync(fields...)</td><td>Marks fields as dirty by DataFieldDefinition or field name string</td></tr>
@@ -547,7 +546,7 @@ li { margin: 4px 0; }
     <thead><tr><th>Method</th><th>Calling Side</th><th>Parameters</th></tr></thead>
     <tbody>
         <tr><td>syncBlockEntityToClient(be, all, autoDetectOnly)</td><td>Server</td><td>all: full sync (true=all fields); autoDetectOnly: true=only check autoDetect fields</td></tr>
-        <tr><td>syncBlockEntityToPlayer(be, player)</td><td>Server</td><td>Sends the full state to one player as a non-consuming snapshot (<code>writeSnapshot</code>), without disturbing the chunk observers' delta baseline</td></tr>
+        <tr><td>syncBlockEntityToPlayer(be, player)</td><td>Server</td><td>Sends the full state to one player as a <strong>forced full write</strong> — <code>FieldDataManager#writeToNetworkBuffer(LogicalSide.SERVER, SyncContext, true)</code>. A full write also clears that holder's pending delta flags, so there is no per-observer snapshot</td></tr>
         <tr><td>syncBlockEntityToServer(be, all, autoDetectOnly)</td><td>Client</td><td>Same as above</td></tr>
         <tr><td>syncEntityToClient(entity, all, autoDetectOnly)</td><td>Server</td><td>Same as above</td></tr>
         <tr><td>syncEntityToServer(entity, all, autoDetectOnly)</td><td>Client</td><td>Same as above</td></tr>
@@ -919,7 +918,7 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 <table>
     <thead><tr><th>Method</th><th>Auto Behavior</th></tr></thead>
     <tbody>
-        <tr><td><code>getUpdateTag(lookup)</code></td><td>Overrides vanilla to include <code>@SyncToClient</code> fields under <code>"field_sync"</code>, written with <code>writeSnapshot(LogicalSide.SERVER, SyncContext)</code>. New players receive current state on chunk load</td></tr>
+        <tr><td><code>getUpdateTag(lookup)</code></td><td>Overrides vanilla to include <code>@SyncToClient</code> fields under <code>"field_sync"</code>, written with a forced full write (<code>writeToNetworkBuffer(LogicalSide.SERVER, SyncContext, true)</code>). New players receive current state on chunk load</td></tr>
         <tr><td><code>handleUpdateTag(tag, lookup)</code></td><td>New in 1.21: the client decodes <code>"field_sync"</code> here (<code>LogicalSide.CLIENT</code>) when a chunk / block entity data packet arrives — no longer through <code>loadAdditional</code></td></tr>
         <tr><td><code>saveAdditional(tag, lookup)</code></td><td>Writes <code>dataVersion()</code> and <code>"field_save"</code> — serialized <code>@SaveToDisk</code> fields</td></tr>
         <tr><td><code>loadAdditional(tag, lookup)</code></td><td>Restores disk data from <code>"field_save"</code> (1.21 no longer routes chunk-sync data through it)</td></tr>

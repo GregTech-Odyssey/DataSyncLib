@@ -2,7 +2,6 @@ package com.gto.datasynclib.field.object;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.SnapshotScope;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.field.AbstractField;
@@ -49,7 +48,7 @@ public abstract class ObjField<T> extends AbstractField<T> {
     @Override
     public final void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         T value = definition.get(source);
-        if (!SnapshotScope.active()) lastValue = value;
+        lastValue = value;
         if (value == null) {
             data.writeBoolean(false);
         } else {

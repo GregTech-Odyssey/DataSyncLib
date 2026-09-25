@@ -1,7 +1,6 @@
 package com.gto.datasynclib.datastream.codec;
 
 import com.gto.datasynclib.DataSyncCodec;
-import com.gto.datasynclib.DecodeLimits;
 import com.gto.datasynclib.util.StreamCodecs;
 import com.mojang.datafixers.util.*;
 import com.mojang.serialization.Codec;
@@ -201,16 +200,15 @@ public interface CombinedCodec<T> extends DataCodec<T>, StreamCodec<RegistryFrie
      * Composite codec for a collection of elements: the network stream writes a VarInt size
      * followed by the elements, the disk side writes a {@code ListData} with no length prefix.
      * An empty (or non-list) payload decodes to {@code factory.apply(1)} — an empty container —
-     * rather than {@code null}. The stream size is capped at {@link DecodeLimits#MAX_ELEMENTS}
-     * so a hostile length prefix cannot pre-size the collection. Elements are boxed on both
-     * paths; see the interface documentation for the trade-off.
+     * rather than {@code null}. Elements are boxed on both paths; see the interface
+     * documentation for the trade-off.
      *
      * @param factory factory that creates the collection by expected size (e.g. {@code ArrayList::new})
      * @param codec   element combined codec
      */
     static <T, C extends Collection<T>> DataSyncCodec<C> collection(IntFunction<C> factory, CombinedCodec<T> codec) {
         return DataSyncCodec.of(
-                ByteBufCodecs.collection(factory, codec.toStreamCodec(), DecodeLimits.MAX_ELEMENTS),
+                ByteBufCodecs.collection(factory, codec.toStreamCodec()),
                 DataCodec.collection(factory, codec.toDataCodec()));
     }
 
@@ -232,9 +230,8 @@ public interface CombinedCodec<T> extends DataCodec<T>, StreamCodec<RegistryFrie
     /**
      * Composite codec for an object {@code T[]} array: the network stream writes the length
      * (VarInt) followed by the elements, the disk side writes a {@code ListData}. An empty (or
-     * non-list) payload decodes to a zero-length array. The length is bounded by
-     * {@link DecodeLimits}. Elements are boxed; primitive arrays have their own codecs and do not
-     * need this builder.
+     * non-list) payload decodes to a zero-length array. Elements are boxed; primitive arrays have
+     * their own codecs and do not need this builder.
      */
     static <T> DataSyncCodec<T[]> array(Class<T> type, CombinedCodec<T> codec) {
         return DataSyncCodec.of(
@@ -246,7 +243,7 @@ public interface CombinedCodec<T> extends DataCodec<T>, StreamCodec<RegistryFrie
      * Composite codec for {@code Map<K, V>}: the network stream writes a VarInt size followed by
      * key/value pairs, the disk side writes a flat {@code ListData} in the same interleaved order.
      * A payload with fewer than two entries decodes to {@code factory.apply(1)} — an empty map.
-     * The stream size is capped at {@link DecodeLimits#MAX_ELEMENTS}. Keys and values are boxed.
+     * Keys and values are boxed.
      *
      * @param factory factory that creates the map by expected size (e.g. {@code HashMap::new})
      * @param key     key combined codec
@@ -254,7 +251,7 @@ public interface CombinedCodec<T> extends DataCodec<T>, StreamCodec<RegistryFrie
      */
     static <K, V, M extends Map<K, V>> DataSyncCodec<M> map(IntFunction<M> factory, CombinedCodec<K> key, CombinedCodec<V> value) {
         return DataSyncCodec.of(
-                ByteBufCodecs.map(factory, key.toStreamCodec(), value.toStreamCodec(), DecodeLimits.MAX_ELEMENTS),
+                ByteBufCodecs.map(factory, key.toStreamCodec(), value.toStreamCodec()),
                 DataCodec.map(factory, key.toDataCodec(), value.toDataCodec()));
     }
 }

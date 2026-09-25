@@ -61,7 +61,7 @@ public record StringMapData(Map<String, Data> value) implements MapData {
     }
 
     public static StringMapData read(ByteBuf stream) {
-        var size = com.gto.datasynclib.DecodeLimits.size(Data.readVarInt(stream), stream, 0);
+        var size = Data.readVarInt(stream);
         var map = new HashMap<String, Data>(size);
         for (int i = 0; i < size; i++) {
             map.put(Data.readString(stream), Data.readData(stream));

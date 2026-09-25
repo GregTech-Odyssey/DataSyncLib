@@ -28,9 +28,9 @@ import java.io.IOException;
  * <h3>Wire format</h3>
  * <p>One NBT type byte followed by the payload, where {@code 0}/{@link EndTag} stands for "absent"
  * (a null serialized tag) — reading such a slot leaves the current value untouched. The payload is
- * loaded with a bounded 2 MiB {@link NbtAccounter} ({@code NbtAccounter.create(2097152L)}); 1.21
- * dropped the depth parameter from {@code TagType#load}, so this size bound is the only limit on a
- * malformed payload.</p>
+ * loaded with an unlimited {@link NbtAccounter} ({@code NbtAccounter.unlimitedHeap()}), matching the
+ * 1.20.1 behaviour; 1.21 dropped the depth parameter from {@code TagType#load}, so no size or depth
+ * bound is applied while reading.</p>
  *
  * <h3>Persistence format</h3>
  * <p>The tag goes through {@link DataCodecs#TAG_CODEC}; a null tag is written as
@@ -85,7 +85,7 @@ public final class TagSerializableAccess extends AbstractFieldAccess<INBTSeriali
         var type = TagTypes.getType(data.readByte());
         if (type == EndTag.TYPE) return;
         try {
-            var nbt = type.load(new ByteBufInputStream(data), NbtAccounter.create(2097152L));
+            var nbt = type.load(new ByteBufInputStream(data), NbtAccounter.unlimitedHeap());
             instance.deserializeNBT(RegistryContext.current(), nbt);
         } catch (IOException e) {
             throw new RuntimeException(e);

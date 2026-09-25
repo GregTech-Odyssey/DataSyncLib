@@ -33,7 +33,7 @@ public record LongMapData(Long2ObjectMap<Data> value) implements MapData {
     }
 
     public static LongMapData read(ByteBuf stream) {
-        var size = com.gto.datasynclib.DecodeLimits.size(Data.readVarInt(stream), stream, 0);
+        var size = Data.readVarInt(stream);
         var map = new Long2ObjectOpenHashMap<Data>(size);
         for (int i = 0; i < size; i++) {
             map.put(Data.readVarLong(stream), Data.readData(stream));

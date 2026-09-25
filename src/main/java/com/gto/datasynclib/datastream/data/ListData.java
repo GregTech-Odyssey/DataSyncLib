@@ -29,7 +29,7 @@ public record ListData(List<Data> value) implements CollectionData, Iterable<Dat
     }
 
     public static ListData read(ByteBuf stream) {
-        var size = com.gto.datasynclib.DecodeLimits.size(Data.readVarInt(stream), stream, 0);
+        var size = Data.readVarInt(stream);
         var list = new ArrayList<Data>(size);
         for (int i = 0; i < size; i++) {
             list.add(Data.readData(stream));

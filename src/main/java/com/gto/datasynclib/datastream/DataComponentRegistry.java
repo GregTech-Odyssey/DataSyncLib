@@ -61,7 +61,7 @@ public final class DataComponentRegistry extends Registry<String, DataComponentK
 
     @Override
     public DataComponentMap decode(RegistryFriendlyByteBuf buf) {
-        var size = com.gto.datasynclib.DecodeLimits.size(buf.readVarInt(), buf, 0);
+        var size = buf.readVarInt();
         var map = new DataComponentMap(size);
         for (int i = 0; i < size; i++) {
             var keyId = buf.readVarInt();
