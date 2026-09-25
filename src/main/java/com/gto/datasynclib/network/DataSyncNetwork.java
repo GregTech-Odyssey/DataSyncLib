@@ -37,16 +37,17 @@ import java.util.Objects;
  * {@link IPayloadContext#flow()}:</p>
  * <ul>
  *   <li>{@code CLIENTBOUND} (S2C) — applied on the client with {@link LogicalSide#CLIENT}</li>
- *   <li>{@code SERVERBOUND} (C2S) — validated on the server, decoded into a detached request
- *       holder and then applied with {@link LogicalSide#SERVER}</li>
+ *   <li>{@code SERVERBOUND} (C2S) — validated on the server and then applied with
+ *       {@link LogicalSide#SERVER}; only the fields declared {@code @SyncToServer} are read</li>
  * </ul>
  *
  * <p>NeoForge runs these handlers on the game thread, so the mutable holders are only ever
  * touched on their owning thread. A received payload is always re-validated against the
  * receiver's own level before it is used: dimension, chunk presence, block entity type or
  * entity identity, and — for C2S — the sender's distance (at most 8 blocks) to the target.
- * A live holder is never decoded into directly for C2S: the payload goes into a detached
- * request holder created by the target (see {@link ClientSyncTarget}).</p>
+ * The field declarations are the actual gate for C2S:
+ * {@code readFromNetworkBuffer(LogicalSide.SERVER, ...)} only consumes the fields that the
+ * holder declared as {@code @SyncToServer}, so a client cannot write anything else.</p>
  *
  * <p>Synchronization is push-based: nothing is sent automatically, callers drive it from
  * their own tick/logic through the {@code syncXxxToServer/Client} helpers below. Those helpers
@@ -115,11 +116,11 @@ public final class DataSyncNetwork {
                         new SyncContext(level.registryAccess(), context.listener().getConnectionType()),
                         packet.data());
             }
-        } else if (context.player() instanceof ServerPlayer player
+        } else if (entity instanceof IFieldDataHolder holder
+                && context.player() instanceof ServerPlayer player
                 && player.distanceToSqr(packet.pos().getCenter()) <= 64) {
-            applyClientRequest(
-                    entity,
-                    player,
+            holder.getFieldDataManager().readFromNetworkBuffer(
+                    LogicalSide.SERVER,
                     new SyncContext(player.registryAccess(), context.listener().getConnectionType()),
                     packet.data());
         }
@@ -148,39 +149,14 @@ public final class DataSyncNetwork {
                         new SyncContext(level.registryAccess(), context.listener().getConnectionType()),
                         packet.data());
             }
-        } else if (context.player() instanceof ServerPlayer player
+        } else if (entity instanceof IFieldDataHolder holder
+                && context.player() instanceof ServerPlayer player
                 && player.distanceToSqr(entity) <= 64) {
-            applyClientRequest(
-                    entity,
-                    player,
+            holder.getFieldDataManager().readFromNetworkBuffer(
+                    LogicalSide.SERVER,
                     new SyncContext(player.registryAccess(), context.listener().getConnectionType()),
                     packet.data());
         }
-    }
-
-    /**
-     * Applies one client-to-server request that the receiver has already matched to a target
-     * and distance-checked.
-     * <p>
-     * The target must opt in through {@link ClientSyncTarget}: it decides whether the player
-     * may send, provides a <strong>detached</strong> request holder, and validates the decoded
-     * values before they reach authoritative state. Decoding into the live holder itself is a
-     * bug, so it is rejected here.
-     *
-     * @param target      the block entity or entity the payload addressed
-     * @param player      the player that sent the request
-     * @param syncContext registries and connection type of the sending connection
-     * @param data        the serialized field data
-     */
-    public static void applyClientRequest(Object target, ServerPlayer player, SyncContext syncContext, byte[] data) {
-        if (!(target instanceof ClientSyncTarget access) || !access.mayReceiveClientSync(player)) return;
-        if (data.length > BlockEntitySyncPacket.MAX_BYTES) return;
-        var request = access.createClientSyncRequest(player);
-        if (request == null || request == target) {
-            throw new IllegalStateException("C2S requires a detached request holder");
-        }
-        request.getFieldDataManager().readFromNetworkBuffer(LogicalSide.SERVER, syncContext, data);
-        access.applyClientSyncRequest(player, request);
     }
 
     /**

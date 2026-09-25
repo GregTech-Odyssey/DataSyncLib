@@ -553,7 +553,7 @@ li { margin: 4px 0; }
     </tbody>
 </table>
 <div class="note"><strong>Async mechanism:</strong> after detecting changes and serializing data, the methods dispatch the actual payload send to the main thread via <code>level.getServer().execute()</code> (server) or <code>Minecraft.getInstance().execute()</code> (client), so they can be called from any thread; the dirty-flag update and the serialization are scheduled onto the owning thread as well, so a mutable holder is only ever touched by its own game thread.</div>
-<div class="note warn"><strong>C2S is handled as a request:</strong> the server never decodes a client payload straight into authoritative state. The target must implement <code>ClientSyncTarget</code> (deciding whether that player may send), provide a <strong>detached request holder</strong>, and validate the decoded values before merging. Decoding into the live holder is rejected by the framework.</div>
+<div class="note warn"><strong>C2S applies straight to the target:</strong> a serverbound payload is dimension/type/distance validated and then decoded into the addressed holder with <code>LogicalSide.SERVER</code> — the same behaviour as the 1.20.1 line. The field declarations are the gate: <code>readFromNetworkBuffer(LogicalSide.SERVER, ...)</code> only consumes fields annotated <code>@SyncToServer</code>, so a client cannot write anything else and no extra opt-in interface is needed.</div>
 
 <!-- ===== DataSyncCodec ===== -->
 <h2 id="codec">DataSyncCodec System</h2>

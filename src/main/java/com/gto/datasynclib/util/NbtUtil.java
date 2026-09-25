@@ -61,9 +61,9 @@ public class NbtUtil {
      * Used with {@link com.gto.datasynclib.annotations.Conversion @Conversion} to
      * manage a {@code CompoundTag} field as a {@code Map<String, Tag>} for sync/persistence.
      *
-     * <p>1.21 has no access transformer, so this is a live view built on {@link TagMapView} over the
-     * tag's public API ({@code getAllKeys()}/{@code get}/{@code put}/{@code remove}) rather than a
-     * reference to the private backing map. Reads and writes still go straight to the tag.</p>
+     * <p>This is the tag's own backing map, made reachable by the access transformer in
+     * {@code META-INF/accesstransformer.cfg} ({@code public net.minecraft.nbt.CompoundTag tags}).
+     * Reads and writes therefore go straight to the tag with no wrapper and no per-access lookup.</p>
      *
      * <p>Usage:
      * <pre>{@code
@@ -71,7 +71,7 @@ public class NbtUtil {
      * private final CompoundTag data = new CompoundTag();
      * }</pre>
      */
-    public final Function<CompoundTag, Map<String, Tag>> COMPOUND_TAG_MAP = TagMapView::new;
+    public final Function<CompoundTag, Map<String, Tag>> COMPOUND_TAG_MAP = t -> t.tags;
 
     /**
      * Wraps any {@link Tag} with a 1-byte type-ID prefix for run-time dispatch.
@@ -177,16 +177,9 @@ public class NbtUtil {
                 if (size == 0) yield new ListTag();
                 var tagList = new ObjectArrayList<Tag>(size);
                 dataList.forEach(d -> tagList.add(convertToTag(d)));
-                // 1.21's ListTag no longer exposes a public typed constructor, so the list is
-                // rebuilt element by element; NBT requires every element to share one non-end type.
-                var list = new ListTag();
-                for (var tag : tagList) {
-                    if (tag.getId() == Tag.TAG_END
-                            || (!list.isEmpty() && list.getElementType() != tag.getId()))
-                        throw new IllegalArgumentException("NBT lists require one non-null element type");
-                    list.add(tag);
-                }
-                yield list;
+                // The typed constructor is package-private in 1.21 (widened with the access
+                // transformer), so the list is handed over as-is instead of re-adding every element.
+                yield new ListTag(tagList, tagList.getFirst().getId());
             }
             case Data.STRING_MAP -> {
                 var tagMap = new CompoundTag();
@@ -246,10 +239,8 @@ public class NbtUtil {
             }
             case Tag.TAG_COMPOUND -> {
                 var compoundTag = (CompoundTag) tag;
-                var dataMap = new HashMap<String, Data>(compoundTag.size());
-                for (var key : compoundTag.getAllKeys()) {
-                    dataMap.put(key, convertToData(compoundTag.get(key)));
-                }
+                var dataMap = new HashMap<String, Data>(compoundTag.tags.size());
+                compoundTag.tags.forEach((key, t) -> dataMap.put(key, convertToData(t)));
                 yield new StringMapData(dataMap);
             }
             case Tag.TAG_BYTE_ARRAY -> ByteArrayData.valueOf(((ByteArrayTag) tag).getAsByteArray());

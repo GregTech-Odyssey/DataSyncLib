@@ -7,7 +7,8 @@ publishing its own `26.9.x` versions, so the two lines share the annotation API 
 
 ### Breaking Changes
 - **Loader and build**: ForgeGradle → **ModDevGradle 2.0.141**, Forge 47 → **NeoForge 21.1.234**,
-  official (Mojang) mappings, no reobfuscation step and no access transformer; the mod metadata moved
+  official (Mojang) mappings, no reobfuscation step, and the access transformer re-expressed in official
+  names (ModDevGradle picks up `META-INF/accesstransformer.cfg` by convention); the mod metadata moved
   from `META-INF/mods.toml` to `META-INF/neoforge.mods.toml`, and the mod entry now receives an
   `IEventBus` instead of a `FMLJavaModLoadingContext`.
 - **Networking**: the Forge `SimpleChannel` layer is gone. Sync packets are NeoForge payload types
@@ -29,18 +30,24 @@ publishing its own `26.9.x` versions, so the two lines share the annotation API 
 - **NBT/serialization**: `INBTSerializable` moved to `net.neoforged.neoforge.common.util`;
   `FieldDataHolderBlockEntity` implements the 1.21 `saveAdditional(CompoundTag, HolderLookup.Provider)` /
   `loadAdditional(CompoundTag, HolderLookup.Provider)` / `getUpdateTag(HolderLookup.Provider)` signatures.
+  The access transformer is back, re-expressed in official names
+  (`public net.minecraft.nbt.CompoundTag tags`, `public net.minecraft.nbt.ListTag <init>(Ljava/util/List;B)V`),
+  so `NbtUtil` keeps reading the tag's backing map and handing converted lists over through the typed
+  constructor instead of wrapping or copying them.
+- **C2S**: a serverbound payload is dimension/block-entity-or-entity-identity/distance validated and then
+  decoded straight into the addressed holder with `LogicalSide.SERVER` (the 1.20.1 behaviour). The gate is
+  the field declaration — only `@SyncToServer` fields are read — so no extra opt-in interface is required.
 
 ### New Features
-- `ClientSyncTarget`: client→server updates are applied to a detached request holder that the target
-  validates and merges, instead of decoding straight into live state.
-- `RegistryContext`, `TagMapView` and the `util/cache` helpers, used by the 1.21 codec paths.
+- `RegistryContext` and the `util/cache` helpers, used by the 1.21 codec paths.
 
 ### Notes
 - The 1.21 adaptations follow [MachineLib](https://github.com/GregTech-Odyssey/MachineLib)'s
   `com.moakiee.machinelib.sync` package, which is itself derived from DataSyncLib 26.9.4 and carries the
   same API names. Its `DecodeLimits` payload caps, `SnapshotScope`/`writeSnapshot` (non-consuming
-  snapshot) machinery were deliberately **not** taken: this library favours raw throughput, and the
-  framework already offers forced full sync.
+  snapshot) machinery and the `ClientSyncTarget` C2S request-holder gate were deliberately **not** taken:
+  this library favours raw throughput, the framework already offers forced full sync, and
+  `@SyncToServer` already limits what a client payload can write.
 
 ---
 

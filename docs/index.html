@@ -554,7 +554,7 @@ li { margin: 4px 0; }
     </tbody>
 </table>
 <div class="note"><strong>异步原理：</strong>方法内部检测变化并序列化数据后，通过 <code>level.getServer().execute()</code>（服务端）或 <code>Minecraft.getInstance().execute()</code>（客户端）将 payload 发送调度到主线程，因此本身可在任意线程调用；脏标记更新与序列化也一并调度到所属线程，所以可变 holder 只会被它自己的游戏线程访问。</div>
-<div class="note warn"><strong>C2S 默认按请求处理：</strong>服务端不会把客户端 payload 直接解码进权威对象。目标需要实现 <code>ClientSyncTarget</code>（是否允许该玩家发送），提供一个<strong>独立的请求 holder</strong>，并在合并前自行校验数值。解码进活对象会被框架直接拒绝。</div>
+<div class="note warn"><strong>C2S 直接解码进目标：</strong>客户端发来的 payload 先按维度/类型/距离校验，然后用 <code>LogicalSide.SERVER</code> 解码进被寻址的 holder——与 1.20.1 行为一致。真正的门禁是字段声明：<code>readFromNetworkBuffer(LogicalSide.SERVER, ...)</code> 只会读取标注了 <code>@SyncToServer</code> 的字段，客户端写不了别的，因此不需要额外的 opt-in 接口。</div>
 
 <!-- ===== DataSyncCodec ===== -->
 <h2 id="codec">DataSyncCodec 编解码系统</h2>
