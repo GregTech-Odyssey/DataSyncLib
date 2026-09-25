@@ -39,9 +39,6 @@ public @interface Access {
      * always exists. Required when the field may be {@code null} at any point and needs
      * to be serialized/deserialized as a whole.
      *
-     * <p>This also enables a legacy data version ({@code dataVersion == -1}) migration path
-     * in {@link com.gto.datasynclib.field.access.AbstractFieldAccess#readFromData}.</p>
-     *
      * @return {@code true} if the instance itself should be persisted and restored,
      * {@code false} (default) if the instance always exists and only its
      * contents need serialization

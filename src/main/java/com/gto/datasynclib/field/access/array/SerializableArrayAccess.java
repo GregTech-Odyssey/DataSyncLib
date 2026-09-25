@@ -7,19 +7,15 @@ import com.gto.datasynclib.SyncContext;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.ListData;
 import com.gto.datasynclib.datastream.data.NullData;
-import com.gto.datasynclib.datastream.data.StringMapData;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import com.gto.datasynclib.util.HashUtil;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.Map;
-
 /**
  * Synchronizes an array of IDataSerializable instances.
  * Uses identity-based hash with per-element detectChange() propagation.
- * Supports legacy data version migration.
  */
 public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSerializable[]> {
 
@@ -111,20 +107,11 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
     protected void doReadData(IDataSerializable @NotNull [] instance, @NotNull Data data, int dataVersion) {
         var list = data.getList();
         var length = Math.min(list.size(), instance.length);
-        if (dataVersion == -1) {
-            for (int i = 0; i < length; i++) {
-                if (list.get(i) instanceof StringMapData(Map<String, Data> map) && !map.isEmpty()) {
-                    var element = instance[i];
-                    if (element != null) element.readData(map.get("p"), dataVersion);
-                }
-            }
-        } else {
-            for (int i = 0; i < length; i++) {
-                var d = list.get(i);
-                if (d != NullData.INSTANCE) {
-                    var element = instance[i];
-                    if (element != null) element.readData(d, dataVersion);
-                }
+        for (int i = 0; i < length; i++) {
+            var d = list.get(i);
+            if (d != NullData.INSTANCE) {
+                var element = instance[i];
+                if (element != null) element.readData(d, dataVersion);
             }
         }
     }

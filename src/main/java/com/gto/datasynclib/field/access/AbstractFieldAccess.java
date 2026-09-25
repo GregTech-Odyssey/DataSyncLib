@@ -6,7 +6,6 @@ import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.ListData;
 import com.gto.datasynclib.datastream.data.NullData;
-import com.gto.datasynclib.datastream.data.StringMapData;
 import lombok.Getter;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
@@ -41,8 +40,7 @@ import org.jetbrains.annotations.Nullable;
  *   <li><strong>{@code instanceAsValue} mode:</strong> When the field's definition has
  *       {@link com.gto.datasynclib.DataFieldDefinition#instanceAsValue} = {@code true},
  *       the container itself (not just its contents) is serialized. This handles fields
- *       that may be {@code null} and need full instance replacement on deserialization.
- *       Also supports a legacy data version ({@code dataVersion == -1}) migration path.</li>
+ *       that may be {@code null} and need full instance replacement on deserialization.</li>
  *   <li><strong>Dirty flag:</strong> {@link #detectChange} never clears the flag itself;
  *       {@link com.gto.datasynclib.FieldDataManager#writeToNetworkBuffer} clears it via
  *       {@code clearChanged(source)} only for fields it actually serialized.</li>
@@ -172,21 +170,12 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
     public final void readFromData(@NotNull Object source, @NotNull Data data, int dataVersion) {
         T value = null;
         if (definition.instanceAsValue) {
-            if (dataVersion == -1) {
-                if (data instanceof StringMapData mapData && !mapData.isEmpty()) {
-                    var uid = mapData.get("uid");
-                    value = definition.decode(source, uid, dataVersion);
-                    doReadData(value, mapData.get("payload").getStringMap().get("d"), dataVersion);
-                    definition.set(source, value);
-                }
-            } else {
-                if (data != NullData.INSTANCE) {
-                    var list = data.getList();
-                    value = definition.decode(source, list.getFirst(), dataVersion);
-                    if (value != null) doReadData(value, list.get(1), dataVersion);
-                }
-                definition.set(source, value);
+            if (data != NullData.INSTANCE) {
+                var list = data.getList();
+                value = definition.decode(source, list.getFirst(), dataVersion);
+                if (value != null) doReadData(value, list.get(1), dataVersion);
             }
+            definition.set(source, value);
         } else {
             value = getInstance(source);
             if (value != null) doReadData(value, data, dataVersion);
