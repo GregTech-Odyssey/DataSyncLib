@@ -4,14 +4,15 @@ import com.gto.datasynclib.*;
 import com.gto.datasynclib.datastream.codec.*;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.StringMapData;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.*;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.function.Supplier;
 
 /**
  * A composite codec that bridges {@link com.gto.datasynclib.FieldDataManager} with
- * the {@link com.gto.datasynclib.datastream.codec.ByteStreamCodec} and
+ * the {@link net.minecraft.network.codec.StreamCodec} and
  * {@link com.gto.datasynclib.datastream.codec.DataCodec} interfaces.
  *
  * <p>This class wraps an annotated POJO class, using its own internal
@@ -51,13 +52,13 @@ public class FieldDataCodec<T> implements CombinedCodec<T>, IFieldDataHolder {
     private final Supplier<T> constructor;
     private final LazyFieldDataManager fieldDataManager;
 
-    private final ByteStreamEncoder<? super T> streamWriter;
-    private final ByteStreamDecoder<? extends T> streamReader;
+    private final StreamEncoder<? super RegistryFriendlyByteBuf, ? super T> streamWriter;
+    private final StreamDecoder<? super RegistryFriendlyByteBuf, ? extends T> streamReader;
     private final DataEncoder<? super T> dataWriter;
     private final DataDecoder<? extends T> dataReader;
     private final ThreadLocal<T> currentInstance = new ThreadLocal<>();
 
-    public FieldDataCodec(Class<T> objClass, Supplier<T> constructor, ByteStreamEncoder<? super T> extraStreamWriter, ByteStreamDecoder<? extends T> extraStreamReader, DataEncoder<? super T> extraDataWriter, DataDecoder<? extends T> extraDataReader) {
+    public FieldDataCodec(Class<T> objClass, Supplier<T> constructor, StreamEncoder<? super RegistryFriendlyByteBuf, ? super T> extraStreamWriter, StreamDecoder<? super RegistryFriendlyByteBuf, ? extends T> extraStreamReader, DataEncoder<? super T> extraDataWriter, DataDecoder<? extends T> extraDataReader) {
         this.constructor = constructor;
         this.fieldDataManager = new LazyFieldDataManager(this, objClass);
         this.streamWriter = extraStreamWriter;
@@ -81,12 +82,12 @@ public class FieldDataCodec<T> implements CombinedCodec<T>, IFieldDataHolder {
     }
 
     @Override
-    public void writeCustomSyncData(FriendlyByteBuf buf, boolean writeAll) {
+    public void writeCustomSyncData(RegistryFriendlyByteBuf buf, boolean writeAll) {
         if (streamWriter != null) streamWriter.encode(buf, currentInstance.get());
     }
 
     @Override
-    public void readCustomSyncData(FriendlyByteBuf buf) {
+    public void readCustomSyncData(RegistryFriendlyByteBuf buf) {
         if (streamReader != null) streamReader.decode(buf);
     }
 
@@ -101,11 +102,11 @@ public class FieldDataCodec<T> implements CombinedCodec<T>, IFieldDataHolder {
     }
 
     @Override
-    public T decode(FriendlyByteBuf buf) {
+    public T decode(RegistryFriendlyByteBuf buf) {
         var obj = constructor.get();
         currentInstance.set(obj);
         try {
-            fieldDataManager.get().readFromNetworkBuffer(LogicalSide.BOTH, buf.readByteArray());
+            fieldDataManager.get().readFromNetworkBuffer(LogicalSide.BOTH, SyncContext.of(buf), buf.readByteArray());
         } finally {
             currentInstance.remove();
         }
@@ -113,10 +114,10 @@ public class FieldDataCodec<T> implements CombinedCodec<T>, IFieldDataHolder {
     }
 
     @Override
-    public void encode(FriendlyByteBuf buf, T obj) {
+    public void encode(RegistryFriendlyByteBuf buf, T obj) {
         currentInstance.set(obj);
         try {
-            buf.writeByteArray(fieldDataManager.get().writeToNetworkBuffer(LogicalSide.BOTH, true));
+            buf.writeByteArray(fieldDataManager.get().writeToNetworkBuffer(LogicalSide.BOTH, SyncContext.of(buf), true));
         } finally {
             currentInstance.remove();
         }

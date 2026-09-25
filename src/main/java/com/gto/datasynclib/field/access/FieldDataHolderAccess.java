@@ -3,8 +3,9 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.SyncContext;
 import com.gto.datasynclib.datastream.data.Data;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -52,13 +53,13 @@ public final class FieldDataHolderAccess extends AbstractFieldAccess<IFieldDataH
     }
 
     @Override
-    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull IFieldDataHolder instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
-        data.writeByteArray(instance.getFieldDataManager().writeToNetworkBuffer(side, writeAll));
+    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull IFieldDataHolder instance, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
+        data.writeByteArray(instance.getFieldDataManager().writeToNetworkBuffer(side, SyncContext.of(data), writeAll));
     }
 
     @Override
-    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull IFieldDataHolder instance, @NotNull FriendlyByteBuf data) {
-        instance.getFieldDataManager().readFromNetworkBuffer(side, data.readByteArray());
+    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull IFieldDataHolder instance, @NotNull RegistryFriendlyByteBuf data) {
+        instance.getFieldDataManager().readFromNetworkBuffer(side, SyncContext.of(data), data.readByteArray());
     }
 
     @Override

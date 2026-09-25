@@ -3,13 +3,16 @@ package com.gto.datasynclib.field.access.array;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.SnapshotScope;
+import com.gto.datasynclib.SyncContext;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.ListData;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.datastream.data.StringMapData;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import com.gto.datasynclib.util.HashUtil;
-import net.minecraft.network.FriendlyByteBuf;
+import io.netty.buffer.Unpooled;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Map;
@@ -48,22 +51,42 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
     }
 
     @Override
-    protected void doWriteBuffer(@NotNull LogicalSide side, IDataSerializable @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, IDataSerializable @NotNull [] instance, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         for (var element : instance) {
-            if (element == null || !element.isChanged()) {
+            if (element == null || (!writeAll && !element.isChanged())) {
                 data.writeBoolean(false);
             } else {
                 data.writeBoolean(true);
-                element.writeBuffer(side, data);
+                // Each element gets its own RegistryFriendlyByteBuf slice so its own
+                // FieldDataManager/addressing protocol sees an independent reader index; the
+                // framed payload keeps the outer array self-describing.
+                var payload = SyncContext.of(data).buffer(Unpooled.buffer());
+                try {
+                    element.writeBuffer(side, payload);
+                    byte[] bytes = new byte[payload.readableBytes()];
+                    payload.readBytes(bytes);
+                    data.writeByteArray(bytes);
+                    if (!SnapshotScope.active()) element.clearChanged();
+                } finally {
+                    payload.release();
+                }
             }
         }
     }
 
     @Override
-    protected void doReadBuffer(@NotNull LogicalSide side, IDataSerializable @NotNull [] instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, IDataSerializable @NotNull [] instance, @NotNull RegistryFriendlyByteBuf data) {
         for (var element : instance) {
             if (data.readBoolean()) {
-                if (element != null) element.readBuffer(side, data);
+                var bytes = data.readByteArray();
+                if (element != null) {
+                    var payload = SyncContext.of(data).buffer(Unpooled.wrappedBuffer(bytes));
+                    try {
+                        element.readBuffer(side, payload);
+                    } finally {
+                        payload.release();
+                    }
+                }
             }
         }
     }

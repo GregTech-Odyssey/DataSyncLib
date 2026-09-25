@@ -1,7 +1,5 @@
 package com.gto.datasynclib;
 
-import com.gto.datasynclib.datastream.codec.ByteStreamDecoder;
-import com.gto.datasynclib.datastream.codec.ByteStreamEncoder;
 import com.gto.datasynclib.datastream.codec.DataDecoder;
 import com.gto.datasynclib.datastream.codec.DataEncoder;
 import com.gto.datasynclib.datastream.data.Data;
@@ -12,7 +10,8 @@ import com.gto.datasynclib.util.ReflectUtil;
 import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import lombok.Getter;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.*;
 import org.apache.commons.lang3.ArrayUtils;
 import org.jetbrains.annotations.NotNull;
 
@@ -32,8 +31,9 @@ import java.util.function.Supplier;
  *       implementation for each managed field</li>
  *   <li><strong>Detects changes</strong> — via {@link #updateFieldDirtyFlags(LogicalSide, boolean)},
  *       which iterates sync fields and calls {@link DataField#detectChange} on each</li>
- *   <li><strong>Serializes for network</strong> — via {@link #writeToNetworkBuffer(LogicalSide, boolean)}
- *       and {@link #readFromNetworkBuffer(LogicalSide, byte[])}, using an index-addressing protocol
+ *   <li><strong>Serializes for network</strong> — via {@link #writeSnapshot(LogicalSide, SyncContext)}
+ *       (non-consuming full state for a new observer), {@link #writeToNetworkBuffer(LogicalSide, SyncContext, boolean)}
+ *       and {@link #readFromNetworkBuffer(LogicalSide, SyncContext, byte[])}, using an index-addressing protocol
  *       where only changed fields are written (each prefixed by a VarInt field index)</li>
  *   <li><strong>Serializes for disk</strong> — via {@link #writeToData()} and
  *       {@link #readFromData(com.gto.datasynclib.datastream.data.Data, int)} using {@link com.gto.datasynclib.datastream.data.StringMapData}</li>
@@ -57,7 +57,7 @@ public class FieldDataManager {
         return new FieldDataCodec<>(objClass, constructor);
     }
 
-    public static <T> FieldDataCodec<T> createCodec(Class<T> objClass, Supplier<T> constructor, ByteStreamEncoder<? super T> extraStreamWriter, ByteStreamDecoder<? extends T> extraStreamReader, DataEncoder<? super T> extraDataWriter, DataDecoder<? extends T> extraDataReader) {
+    public static <T> FieldDataCodec<T> createCodec(Class<T> objClass, Supplier<T> constructor, StreamEncoder<? super RegistryFriendlyByteBuf, ? super T> extraStreamWriter, StreamDecoder<? super RegistryFriendlyByteBuf, ? extends T> extraStreamReader, DataEncoder<? super T> extraDataWriter, DataDecoder<? extends T> extraDataReader) {
         return new FieldDataCodec<>(objClass, constructor, extraStreamWriter, extraStreamReader, extraDataWriter, extraDataReader);
     }
 
@@ -225,19 +225,40 @@ public class FieldDataManager {
     }
 
     /**
+     * Writes a full, non-consuming snapshot of the managed field data for a new observer.
+     *
+     * <p>Unlike {@link #writeToNetworkBuffer(LogicalSide, SyncContext, boolean)}, the dirty flags of
+     * the managed fields and the manager-level {@code changed} flag are left untouched, so pending
+     * deltas meant for existing observers are not swallowed by the snapshot. Custom writers hooked
+     * through {@link IFieldDataHolder#writeCustomSyncData} must likewise not clear dirty state while
+     * a snapshot is being taken.</p>
+     *
+     * @param side    the logical side determining which fields to serialize
+     * @param context the registry/connection context used to build the network buffer
+     * @return byte array containing the serialized snapshot
+     */
+    public byte[] writeSnapshot(LogicalSide side, SyncContext context) {
+        try (var ignored = new SnapshotScope()) {
+            return writeToNetworkBuffer(side, context, true);
+        }
+    }
+
+    /**
      * Writes field data to network buffer.
      *
      * @param side     the logical side determining which fields to serialize
+     * @param context  the registry/connection context used to build the network buffer
      * @param writeAll if {@code true}, all managed fields are written regardless of
      *                 dirty state (full sync); if {@code false}, only changed fields
      *                 that have been marked dirty are written (incremental sync)
      * @return byte array containing the serialized data, empty if re-entrant call
      */
-    public byte @NotNull [] writeToNetworkBuffer(LogicalSide side, boolean writeAll) {
+    public byte @NotNull [] writeToNetworkBuffer(LogicalSide side, SyncContext context, boolean writeAll) {
+        java.util.Objects.requireNonNull(context);
         if (writing) return ArrayUtils.EMPTY_BYTE_ARRAY;
         writing = true;
         var buf = Unpooled.buffer();
-        var wrapper = new FriendlyByteBuf(buf);
+        var wrapper = context.buffer(buf);
         try {
             final var fields = side.isBoth() ? allFields : side.isServer() ? syncToClientFields : syncToServerFields;
             holder.writeCustomSyncData(wrapper, writeAll);
@@ -248,13 +269,13 @@ public class FieldDataManager {
                 if (writeAll || field.isChanged(source)) {
                     wrapper.writeVarInt(i);
                     field.writeToBuffer(side, source, wrapper, writeAll);
-                    field.clearChanged(source);
+                    if (!SnapshotScope.active()) field.clearChanged(source);
                 }
             }
             buf.readerIndex(0);
             byte[] data = new byte[buf.readableBytes()];
             buf.readBytes(data);
-            changed = false; // Only clear after successful serialization
+            if (!SnapshotScope.active()) changed = false; // Only clear after successful serialization
             return data;
         } finally {
             buf.release();
@@ -265,14 +286,21 @@ public class FieldDataManager {
     /**
      * Reads field data from network buffer
      *
-     * @param side the logical side
-     * @param data the byte array to read from
+     * <p>Decoding runs inside {@link DecodeLimits}, which bounds the nesting depth (64 levels) and
+     * the element count of decoded containers, so a malformed or hostile payload cannot make the
+     * bundled codecs allocate unbounded memory. Custom codecs remain responsible for validating
+     * their own allocations.</p>
+     *
+     * @param side    the logical side
+     * @param context the registry/connection context used to build the network buffer
+     * @param data    the byte array to read from
      */
-    public void readFromNetworkBuffer(LogicalSide side, byte @NotNull [] data) {
+    public void readFromNetworkBuffer(LogicalSide side, SyncContext context, byte @NotNull [] data) {
+        java.util.Objects.requireNonNull(context);
         if (data.length > 0) {
             var buf = Unpooled.wrappedBuffer(data);
-            var wrapper = new FriendlyByteBuf(buf);
-            try {
+            var wrapper = context.buffer(buf);
+            try (var ignored = DecodeLimits.enter()) {
                 final var fields = side.isBoth() ? allFields : side.isClient() ? syncToClientFields : syncToServerFields;
                 holder.readCustomSyncData(wrapper);
                 boolean update = false;

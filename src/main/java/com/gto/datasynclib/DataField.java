@@ -1,7 +1,7 @@
 package com.gto.datasynclib;
 
 import com.gto.datasynclib.datastream.data.Data;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Comparator;
@@ -95,7 +95,7 @@ public interface DataField<T> {
      * @param writeAll {@code true} to write regardless of dirty state (full sync);
      *                 {@code false} for incremental sync
      */
-    void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean writeAll);
+    void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull RegistryFriendlyByteBuf data, boolean writeAll);
 
     /**
      * Reads the field's value from a network buffer and applies it to the source object.
@@ -105,7 +105,7 @@ public interface DataField<T> {
      * @param source the owning object
      * @param data   the network buffer to read from
      */
-    void readFromBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data);
+    void readFromBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull RegistryFriendlyByteBuf data);
 
     /**
      * Serializes the field's current value to a {@link com.gto.datasynclib.datastream.data.Data}

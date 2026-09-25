@@ -232,7 +232,7 @@ public final class FieldDefinitionStorage {
      * <p>Without a registration the framework falls back to
      * {@link DataFieldDefinition#OBJECT_STRATEGY} (ordinary {@code equals}/{@code hashCode}).
      * The library pre-registers strategies for {@link net.minecraft.world.item.ItemStack} and
-     * {@link net.minecraftforge.fluids.FluidStack}, and for the array types {@code ItemStack[]} and
+     * {@link net.neoforged.neoforge.fluids.FluidStack}, and for the array types {@code ItemStack[]} and
      * {@code FluidStack[]} (an array field looks up its own exact type, so it does not inherit the
      * element's strategy). For an array of another element type, derive its strategy from the
      * element's with {@link com.gto.datasynclib.util.HashUtil#arrayStrategy(Hash.Strategy)} instead of

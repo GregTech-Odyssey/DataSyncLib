@@ -2,7 +2,7 @@ package com.gto.datasynclib.field.object;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.datastream.data.Data;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -16,12 +16,12 @@ public class ObjCodecField<T> extends ObjField<T> {
     }
 
     @Override
-    protected final void write(@NotNull Object source, @NotNull FriendlyByteBuf data, @NotNull T value) {
+    protected final void write(@NotNull Object source, @NotNull RegistryFriendlyByteBuf data, @NotNull T value) {
         definition.encode(source, value, data);
     }
 
     @Override
-    protected final @NotNull T read(@NotNull Object source, @NotNull FriendlyByteBuf data) {
+    protected final @NotNull T read(@NotNull Object source, @NotNull RegistryFriendlyByteBuf data) {
         return definition.decode(source, data);
     }
 

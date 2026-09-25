@@ -1,7 +1,6 @@
 package com.gto.datasynclib.util;
 
 import com.gto.datasynclib.DataSyncCodec;
-import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.util.holder.IntObjectHolder;
 import com.mojang.serialization.Codec;
@@ -9,6 +8,8 @@ import it.unimi.dsi.fastutil.HashCommon;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ReferenceArrayList;
 import lombok.Getter;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.StreamCodec;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -55,7 +56,7 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
     protected final LinkedHashMap<K, V> keyValues = new LinkedHashMap<>();
     protected final IdMap<V, K> valueKeys = new IdMap<>();
     protected final ReferenceArrayList<V> idValues = new ReferenceArrayList<>();
-    protected final ByteStreamCodec<V> streamCodec = ByteStreamCodec.of((buf, obj) -> buf.writeVarInt(valueKeys.get(obj).priority), buf -> idValues.get(buf.readVarInt()));
+    protected final StreamCodec<RegistryFriendlyByteBuf, V> streamCodec = StreamCodec.of((buf, obj) -> buf.writeVarInt(valueKeys.get(obj).priority), buf -> idValues.get(buf.readVarInt()));
 
     @Getter
     protected volatile boolean frozen = true;
@@ -316,13 +317,13 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
      * @return the cached network codec: values are written as their stable VarInt id, so this
      * form is compact but only valid between peers whose registries match
      */
-    public final ByteStreamCodec<V> streamCodec() {
+    public final StreamCodec<RegistryFriendlyByteBuf, V> streamCodec() {
         return streamCodec;
     }
 
     /**
      * @return the combined (stream + data) codec, created once at construction time; equals
-     * {@link DataSyncCodec#of(ByteStreamCodec, DataCodec)} of {@link #streamCodec()} and
+     * {@link DataSyncCodec#of(StreamCodec, DataCodec)} of {@link #streamCodec()} and
      * {@link #dataCodec()}
      */
     public final DataSyncCodec<V> combinedCodec() {

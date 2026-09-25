@@ -3,12 +3,13 @@ package com.gto.datasynclib.field.access.array;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.SyncContext;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.ListData;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import com.gto.datasynclib.util.HashUtil;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -53,22 +54,23 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
     }
 
     @Override
-    protected void doWriteBuffer(@NotNull LogicalSide side, IFieldDataHolder @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, IFieldDataHolder @NotNull [] instance, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         for (var element : instance) {
-            if (element == null || !element.getFieldDataManager().isChanged()) {
+            if (element == null || (!writeAll && !element.getFieldDataManager().isChanged())) {
                 data.writeBoolean(false);
             } else {
                 data.writeBoolean(true);
-                data.writeByteArray(element.getFieldDataManager().writeToNetworkBuffer(side, writeAll));
+                data.writeByteArray(element.getFieldDataManager().writeToNetworkBuffer(side, SyncContext.of(data), writeAll));
             }
         }
     }
 
     @Override
-    protected void doReadBuffer(@NotNull LogicalSide side, IFieldDataHolder @NotNull [] instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, IFieldDataHolder @NotNull [] instance, @NotNull RegistryFriendlyByteBuf data) {
         for (var element : instance) {
             if (data.readBoolean()) {
-                if (element != null) element.getFieldDataManager().readFromNetworkBuffer(side, data.readByteArray());
+                var bytes = data.readByteArray();
+                if (element != null) element.getFieldDataManager().readFromNetworkBuffer(side, SyncContext.of(data), bytes);
             }
         }
     }

@@ -7,7 +7,6 @@ import com.mojang.serialization.DataResult;
 import com.mojang.serialization.DynamicOps;
 import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
-import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 import java.lang.reflect.Array;
@@ -31,7 +30,7 @@ import java.util.function.IntFunction;
  * initialization; that table is currently write-only ({@code DataCodec.getCodec} has no callers),
  * so runtime type lookup goes through {@link com.gto.datasynclib.DataSyncCodec#get(Class)}.</p>
  *
- * <p>Factory methods {@link #of} adapt from {@link ByteStreamCodec}, Mojang {@link com.mojang.serialization.Codec},
+ * <p>Factory methods {@link #of} adapt from Mojang {@link com.mojang.serialization.Codec},
  * or custom encoder/decoder pairs. {@link #convert} adapts an existing codec with converter
  * functions, while {@link #map} / {@link #collection} / {@link #array} build container codecs.</p>
  *
@@ -45,8 +44,7 @@ import java.util.function.IntFunction;
  * {@code Data} types directly, the way {@link com.gto.datasynclib.util.DataCodecs#VEC3I_CODEC}
  * does. Primitive <em>arrays</em> are already covered by primitive-backed codecs
  * ({@code BOOLEANS_CODEC}, {@code INTS_CODEC}, {@code LONGS_CODEC}, …), so {@link #array} is only
- * needed for object arrays. {@link #of(ByteStreamCodec)} additionally round-trips through an
- * intermediate buffer, which is convenient but not free either.</p>
+ * needed for object arrays. Persistent codecs remain independent of network registry IDs.</p>
  *
  * @param <T> the type this codec can encode and decode
  */
@@ -71,42 +69,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
             @Override
             public <T1> DataResult<Pair<T, T1>> decode(DynamicOps<T1> ops, T1 input) {
                 return DataResult.success(Pair.of(codec.decode(Data.readData(Unpooled.copiedBuffer(ops.getByteBuffer(input).result().orElseThrow())), dataVersion), ops.empty()));
-            }
-        };
-    }
-
-    /**
-     * Adapts a network codec: the stream bytes are carried inside a
-     * {@link com.gto.datasynclib.datastream.data.ByteArrayData}, so the disk form mirrors the
-     * wire form at the cost of an extra buffer round-trip.
-     */
-    static <T> DataCodec<T> of(ByteStreamCodec<T> codec) {
-        return new DataCodec<>() {
-
-            @Override
-            public T decode(@NotNull Data data, int dataVersion) {
-                var buf = Unpooled.wrappedBuffer(data.getByteArray());
-                var wrapper = new FriendlyByteBuf(buf);
-                try {
-                    return codec.decode(wrapper);
-                } finally {
-                    buf.release();
-                }
-            }
-
-            @Override
-            public @NotNull Data encode(T obj) {
-                var buf = Unpooled.buffer();
-                var wrapper = new FriendlyByteBuf(buf);
-                try {
-                    codec.encode(wrapper, obj);
-                    buf.readerIndex(0);
-                    byte[] data = new byte[buf.readableBytes()];
-                    buf.readBytes(data);
-                    return new ByteArrayData(data);
-                } finally {
-                    buf.release();
-                }
             }
         };
     }

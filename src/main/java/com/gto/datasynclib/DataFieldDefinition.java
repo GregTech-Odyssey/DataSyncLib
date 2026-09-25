@@ -3,7 +3,7 @@ package com.gto.datasynclib;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.util.ReflectUtil;
 import it.unimi.dsi.fastutil.Hash;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.invoke.MethodHandle;
@@ -22,7 +22,7 @@ import java.util.function.Function;
  * <p>Provides typed getters/setters for all primitive types plus Object, change-detection
  * strategies, the skip-sync/save predicates ({@code skipWhen} on {@code @SaveToDisk} and
  * {@code @SyncTo*}), and encoding/decoding via both network buffers
- * ({@link FriendlyByteBuf}) and persistent {@link Data} objects.</p>
+ * ({@link RegistryFriendlyByteBuf}) and persistent {@link Data} objects.</p>
  *
  * @param <T> the declared type of the underlying field
  */
@@ -662,7 +662,7 @@ public final class DataFieldDefinition<T> {
         }
     }
 
-    public void encode(Object source, T obj, FriendlyByteBuf data) {
+    public void encode(Object source, T obj, RegistryFriendlyByteBuf data) {
         if (writeToBuffer != null) {
             try {
                 writeToBuffer.invokeExact(source, (Object) data, obj);
@@ -674,7 +674,7 @@ public final class DataFieldDefinition<T> {
         }
     }
 
-    public T decode(Object source, FriendlyByteBuf data) {
+    public T decode(Object source, RegistryFriendlyByteBuf data) {
         if (readFromBuffer != null) {
             try {
                 return (T) readFromBuffer.invokeExact(source, (Object) data);

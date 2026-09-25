@@ -4,6 +4,7 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+import net.minecraft.network.codec.*;
 
 /**
  * Specifies custom serialization for this field, overriding the default codec lookup.
@@ -12,7 +13,7 @@ import java.lang.annotation.Target;
  *
  * <h3>Mode 1: Static Codec Fields (recommended)</h3>
  * <p>Reference static fields of type {@link com.gto.datasynclib.datastream.codec.DataCodec}
- * and {@link com.gto.datasynclib.datastream.codec.ByteStreamCodec} declared in the same
+ * and {@link net.minecraft.network.codec.StreamCodec} declared in the same
  * class (or accessible from it). Use {@link #saveCodec()} for the persistence codec and
  * {@link #syncCodec()} for the network codec. If only {@code saveCodec} is specified,
  * the sync codec is automatically derived from it.</p>
@@ -23,7 +24,7 @@ import java.lang.annotation.Target;
  * <ul>
  *   <li>{@link #writeToData()} / {@link #readFromData()} — for persistence (T → Data / Data → T)</li>
  *   <li>{@link #writeToBuffer()} / {@link #readFromBuffer()} — for network sync
- *       ((FriendlyByteBuf, T) → void / FriendlyByteBuf → T)</li>
+ *       ((RegistryFriendlyByteBuf, T) → void / RegistryFriendlyByteBuf → T)</li>
  * </ul>
  *
  * <h3>Example:</h3>
@@ -53,10 +54,10 @@ public @interface Codec {
     String saveCodec() default "";
 
     /**
-     * Static field name from ByteStreamCodec class used for network synchronization.
+     * Static field name from StreamCodec class used for network synchronization.
      * Specifies the codec for syncing data over the network.
      *
-     * @return the ByteStreamCodec static field name
+     * @return the StreamCodec static field name
      */
     String syncCodec() default "";
 
@@ -77,16 +78,16 @@ public @interface Codec {
     String readFromData() default "";
 
     /**
-     * Instance method name for writing the field value to a FriendlyByteBuf.
-     * Method signature: (FriendlyByteBuf, T) -> void
+     * Instance method name for writing the field value to a RegistryFriendlyByteBuf.
+     * Method signature: (RegistryFriendlyByteBuf, T) -> void
      *
      * @return the method name for writing to buffer
      */
     String writeToBuffer() default "";
 
     /**
-     * Instance method name for reading the field value from a FriendlyByteBuf.
-     * Method signature: FriendlyByteBuf -> T
+     * Instance method name for reading the field value from a RegistryFriendlyByteBuf.
+     * Method signature: RegistryFriendlyByteBuf -> T
      *
      * @return the method name for reading from buffer
      */

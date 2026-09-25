@@ -2,7 +2,7 @@ package com.gto.datasynclib.util;
 
 import it.unimi.dsi.fastutil.Hash;
 import net.minecraft.world.level.material.Fluids;
-import net.minecraftforge.fluids.FluidStack;
+import net.neoforged.neoforge.fluids.FluidStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
@@ -21,7 +21,8 @@ import java.util.Objects;
 public interface FluidStackHashStrategy extends Hash.Strategy<FluidStack> {
 
     /**
-     * Fluid, amount and NBT must all match. Registered by default for {@code FluidStack} fields.
+     * Fluid, amount and components must all match. Registered by default for {@code FluidStack}
+     * fields.
      */
     FluidStackHashStrategy ALL = new FluidStackHashStrategy() {
 
@@ -30,7 +31,8 @@ public interface FluidStackHashStrategy extends Hash.Strategy<FluidStack> {
             if (o == null) return 0;
             var fluid = o.getFluid();
             if (fluid == Fluids.EMPTY) return 0;
-            return Objects.hash(fluid, o.getAmount(), o.getTag());
+            // 1.21 replaced the stack's raw NBT tag with its data components.
+            return 31 * (31 * fluid.hashCode() + o.getAmount()) + o.getComponents().hashCode();
         }
 
         @Override
@@ -40,12 +42,12 @@ public interface FluidStackHashStrategy extends Hash.Strategy<FluidStack> {
             if (b == null) return a.isEmpty();
             if (a.getAmount() != b.getAmount()) return false;
             if (a.getFluid() != b.getFluid()) return false;
-            return Objects.equals(a.getTag(), b.getTag());
+            return Objects.equals(a.getComponents(), b.getComponents());
         }
     };
 
     /**
-     * Fluid and NBT must match; the amount is ignored.
+     * Fluid and components must match; the amount is ignored.
      */
     FluidStackHashStrategy FLUID_AND_TAG = new FluidStackHashStrategy() {
 
@@ -54,7 +56,7 @@ public interface FluidStackHashStrategy extends Hash.Strategy<FluidStack> {
             if (o == null) return 0;
             var item = o.getFluid();
             if (item == Fluids.EMPTY) return 0;
-            return Objects.hash(item, o.getTag());
+            return 31 * item.hashCode() + o.getComponents().hashCode();
         }
 
         @Override
@@ -63,12 +65,12 @@ public interface FluidStackHashStrategy extends Hash.Strategy<FluidStack> {
             if (a == null) return b.isEmpty();
             if (b == null) return a.isEmpty();
             if (a.getFluid() != b.getFluid()) return false;
-            return Objects.equals(a.getTag(), b.getTag());
+            return Objects.equals(a.getComponents(), b.getComponents());
         }
     };
 
     /**
-     * Only the fluid type must match; amount and NBT are ignored.
+     * Only the fluid type must match; amount and components are ignored.
      */
     FluidStackHashStrategy FLUID = new FluidStackHashStrategy() {
 

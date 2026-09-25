@@ -4,9 +4,10 @@ import com.gto.datasynclib.ChildFieldDataHolder;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.SyncContext;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.NullData;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -107,17 +108,17 @@ public final class ChildManagerAccess<T> extends AbstractFieldAccess<T> {
     }
 
     @Override
-    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         var holder = asHolder(instance);
         if (holder == null) return;
-        data.writeByteArray(holder.getFieldDataManager().writeToNetworkBuffer(side, writeAll));
+        data.writeByteArray(holder.getFieldDataManager().writeToNetworkBuffer(side, SyncContext.of(data), writeAll));
     }
 
     @Override
-    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull RegistryFriendlyByteBuf data) {
         var holder = asHolder(instance);
         if (holder == null) return;
-        holder.getFieldDataManager().readFromNetworkBuffer(side, data.readByteArray());
+        holder.getFieldDataManager().readFromNetworkBuffer(side, SyncContext.of(data), data.readByteArray());
     }
 
     @Override

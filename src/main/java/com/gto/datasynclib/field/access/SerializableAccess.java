@@ -4,7 +4,7 @@ import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.datastream.data.Data;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -46,12 +46,12 @@ public final class SerializableAccess extends AbstractFieldAccess<IDataSerializa
     }
 
     @Override
-    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull IDataSerializable instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull IDataSerializable instance, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         instance.writeBuffer(side, data);
     }
 
     @Override
-    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull IDataSerializable instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull IDataSerializable instance, @NotNull RegistryFriendlyByteBuf data) {
         instance.readBuffer(side, data);
     }
 

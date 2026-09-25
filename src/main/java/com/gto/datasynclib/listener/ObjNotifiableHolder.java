@@ -2,9 +2,10 @@ package com.gto.datasynclib.listener;
 
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.SnapshotScope;
 import lombok.Setter;
 import lombok.experimental.Accessors;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 @Setter
@@ -36,7 +37,7 @@ public final class ObjNotifiableHolder<T> extends ObjSerializableHolder<T> imple
     }
 
     @Override
-    public void writeBuffer(LogicalSide side, @NotNull FriendlyByteBuf data) {
+    public void writeBuffer(LogicalSide side, @NotNull RegistryFriendlyByteBuf data) {
         if (value == null) {
             data.writeBoolean(false);
         } else {
@@ -44,11 +45,11 @@ public final class ObjNotifiableHolder<T> extends ObjSerializableHolder<T> imple
             codec.streamWriter.encode(data, value);
         }
         senderListener.onSync(side, lastValue, value);
-        lastValue = value;
+        if (!SnapshotScope.active()) lastValue = value;
     }
 
     @Override
-    public void readBuffer(LogicalSide side, @NotNull FriendlyByteBuf data) {
+    public void readBuffer(LogicalSide side, @NotNull RegistryFriendlyByteBuf data) {
         var oldValue = value;
         if (data.readBoolean()) {
             value = codec.streamReader.decode(data);

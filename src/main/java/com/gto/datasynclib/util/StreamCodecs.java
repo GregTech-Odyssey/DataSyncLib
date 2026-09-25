@@ -1,6 +1,12 @@
 package com.gto.datasynclib.util;
 
-import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
+import com.gto.datasynclib.DecodeLimits;
+import com.gto.datasynclib.RegistryContext;
+import com.gto.datasynclib.datastream.codec.DataCodec;
+import com.gto.datasynclib.datastream.data.Data;
+import java.lang.reflect.Array;
+import java.math.BigInteger;
+import java.util.UUID;
 import lombok.experimental.UtilityClass;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Registry;
@@ -9,98 +15,86 @@ import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.ComponentSerialization;
+import net.minecraft.network.codec.*;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.fluids.FluidStack;
+import net.neoforged.neoforge.fluids.FluidStack;
 
 /**
- * Pre-registered {@link ByteStreamCodec} instances for Minecraft types: ResourceLocation,
+ * Pre-registered {@link StreamCodec} instances for Minecraft types: ResourceLocation,
  * BlockPos, ChunkPos, Vec3i, SectionPos, Vec2, Vec3, AABB, Tag, CompoundTag, ListTag, ItemStack,
  * FluidStack and Component, plus {@link #of(net.minecraft.core.Registry)} for registry entries
- * (encoded as a VarInt id). Each constant registers itself in the interface-level codec table.
+ * (encoded as a VarInt id) and the primitive-array codecs the {@link DataSyncCodec} table needs.
  *
  * <p>These are hand-written on purpose: they read and write primitives straight on the buffer
  * instead of going through the boxed components of {@link com.gto.datasynclib.datastream.codec.CombinedCodec#composite}.
  * See that method's documentation for the trade-off.</p>
+ *
+ * <p>Where Minecraft already ships a matching codec ({@code ResourceLocation.STREAM_CODEC},
+ * {@code ItemStack.OPTIONAL_STREAM_CODEC}, {@code ComponentSerialization.STREAM_CODEC}, ...) the
+ * constant simply re-exposes it. The array codecs bound their allocation through
+ * {@link DecodeLimits} so a hostile length prefix cannot exhaust memory.</p>
  */
 @UtilityClass
 public class StreamCodecs {
 
-    public final ByteStreamCodec<ResourceLocation> RESOURCE_LOCATION_CODEC = ByteStreamCodec.of((stream, obj) -> {
-        stream.writeUtf(obj.getNamespace());
-        stream.writeUtf(obj.getPath());
-    }, stream -> ResourceLocation.fromNamespaceAndPath(stream.readUtf(), stream.readUtf()));
+    public static final StreamCodec<? super RegistryFriendlyByteBuf, ResourceLocation> RESOURCE_LOCATION_CODEC = ResourceLocation.STREAM_CODEC;
 
-    public static final ByteStreamCodec<BlockPos> BLOCK_POS_CODEC = ByteStreamCodec.of((stream, obj) -> {
-        stream.writeLong(obj.asLong());
-    }, stream -> BlockPos.of(stream.readLong()));
+    public static final StreamCodec<? super RegistryFriendlyByteBuf, BlockPos> BLOCK_POS_CODEC = BlockPos.STREAM_CODEC;
 
-    public static final ByteStreamCodec<ChunkPos> CHUNK_POS_CODEC = ByteStreamCodec.of((stream, obj) -> {
+    public static final StreamCodec<RegistryFriendlyByteBuf, ChunkPos> CHUNK_POS_CODEC = StreamCodec.of((stream, obj) -> {
         stream.writeLong(obj.toLong());
     }, stream -> new ChunkPos(stream.readLong()));
-
-    static {
-        ByteStreamCodec.registerCodec(ResourceLocation.class, RESOURCE_LOCATION_CODEC);
-        ByteStreamCodec.registerCodec(BlockPos.class, BLOCK_POS_CODEC);
-        ByteStreamCodec.registerCodec(ChunkPos.class, CHUNK_POS_CODEC);
-    }
 
     /**
      * Integer triple, three VarInts. {@link BlockPos} keeps its own packed-long codec, and an
      * exact registration always wins over this one.
      */
-    public static final ByteStreamCodec<Vec3i> VEC3I_CODEC = new ByteStreamCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, Vec3i> VEC3I_CODEC = new StreamCodec<>() {
 
         @Override
-        public void encode(FriendlyByteBuf stream, Vec3i obj) {
+        public void encode(RegistryFriendlyByteBuf stream, Vec3i obj) {
             stream.writeVarInt(obj.getX());
             stream.writeVarInt(obj.getY());
             stream.writeVarInt(obj.getZ());
         }
 
         @Override
-        public Vec3i decode(FriendlyByteBuf stream) {
+        public Vec3i decode(RegistryFriendlyByteBuf stream) {
             return new Vec3i(stream.readVarInt(), stream.readVarInt(), stream.readVarInt());
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(Vec3i.class, VEC3I_CODEC);
         }
     };
 
     /**
      * Section (16³) position, as its packed long.
      */
-    public static final ByteStreamCodec<SectionPos> SECTION_POS_CODEC = new ByteStreamCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, SectionPos> SECTION_POS_CODEC = new StreamCodec<>() {
 
         @Override
-        public void encode(FriendlyByteBuf stream, SectionPos obj) {
+        public void encode(RegistryFriendlyByteBuf stream, SectionPos obj) {
             stream.writeLong(obj.asLong());
         }
 
         @Override
-        public SectionPos decode(FriendlyByteBuf stream) {
+        public SectionPos decode(RegistryFriendlyByteBuf stream) {
             return SectionPos.of(stream.readLong());
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(SectionPos.class, SECTION_POS_CODEC);
         }
     };
 
     /**
      * Six raw doubles: minX, minY, minZ, maxX, maxY, maxZ.
      */
-    public static final ByteStreamCodec<AABB> AABB_CODEC = new ByteStreamCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, AABB> AABB_CODEC = new StreamCodec<>() {
 
         @Override
-        public void encode(FriendlyByteBuf stream, AABB obj) {
+        public void encode(RegistryFriendlyByteBuf stream, AABB obj) {
             stream.writeDouble(obj.minX);
             stream.writeDouble(obj.minY);
             stream.writeDouble(obj.minZ);
@@ -110,157 +104,88 @@ public class StreamCodecs {
         }
 
         @Override
-        public AABB decode(FriendlyByteBuf stream) {
+        public AABB decode(RegistryFriendlyByteBuf stream) {
             return new AABB(stream.readDouble(), stream.readDouble(), stream.readDouble(),
                     stream.readDouble(), stream.readDouble(), stream.readDouble());
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(AABB.class, AABB_CODEC);
         }
     };
 
 
-    public static final ByteStreamCodec<Vec2> VEC2_CODEC = new ByteStreamCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, Vec2> VEC2_CODEC = new StreamCodec<>() {
 
         @Override
-        public void encode(FriendlyByteBuf stream, Vec2 obj) {
+        public void encode(RegistryFriendlyByteBuf stream, Vec2 obj) {
             stream.writeFloat(obj.x);
             stream.writeFloat(obj.y);
         }
 
         @Override
-        public Vec2 decode(FriendlyByteBuf stream) {
+        public Vec2 decode(RegistryFriendlyByteBuf stream) {
             return new Vec2(stream.readFloat(), stream.readFloat());
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(Vec2.class, VEC2_CODEC);
         }
     };
 
-    public static final ByteStreamCodec<Vec3> VEC3_CODEC = new ByteStreamCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, Vec3> VEC3_CODEC = new StreamCodec<>() {
 
         @Override
-        public void encode(FriendlyByteBuf stream, Vec3 obj) {
+        public void encode(RegistryFriendlyByteBuf stream, Vec3 obj) {
             stream.writeDouble(obj.x);
             stream.writeDouble(obj.y);
             stream.writeDouble(obj.z);
         }
 
         @Override
-        public Vec3 decode(FriendlyByteBuf stream) {
+        public Vec3 decode(RegistryFriendlyByteBuf stream) {
             return new Vec3(stream.readDouble(), stream.readDouble(), stream.readDouble());
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(Vec3.class, VEC3_CODEC);
         }
     };
 
 
-    public static final ByteStreamCodec<Tag> TAG_CODEC = new ByteStreamCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, Tag> TAG_CODEC = new StreamCodec<>() {
 
         @Override
-        public void encode(FriendlyByteBuf stream, Tag obj) {
+        public void encode(RegistryFriendlyByteBuf stream, Tag obj) {
             stream.writeByte(obj.getId());
             NbtUtil.write(obj, stream);
         }
 
         @Override
-        public Tag decode(FriendlyByteBuf stream) {
+        public Tag decode(RegistryFriendlyByteBuf stream) {
             return NbtUtil.read(stream.readByte(), stream);
         }
-
-        static {
-            ByteStreamCodec.registerCodec(Tag.class, TAG_CODEC);
-        }
     };
 
-    public static final ByteStreamCodec<CompoundTag> COMPOUND_TAG_CODEC = new ByteStreamCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, CompoundTag> COMPOUND_TAG_CODEC = new StreamCodec<>() {
 
         @Override
-        public void encode(FriendlyByteBuf stream, CompoundTag obj) {
+        public void encode(RegistryFriendlyByteBuf stream, CompoundTag obj) {
             NbtUtil.write(obj, stream);
         }
 
         @Override
-        public CompoundTag decode(FriendlyByteBuf stream) {
+        public CompoundTag decode(RegistryFriendlyByteBuf stream) {
             return (CompoundTag) NbtUtil.read(Tag.TAG_COMPOUND, stream);
         }
-
-        static {
-            ByteStreamCodec.registerCodec(CompoundTag.class, COMPOUND_TAG_CODEC);
-        }
     };
 
-    public static final ByteStreamCodec<ListTag> LIST_TAG_CODEC = new ByteStreamCodec<>() {
+    public static final StreamCodec<RegistryFriendlyByteBuf, ListTag> LIST_TAG_CODEC = new StreamCodec<>() {
 
         @Override
-        public void encode(FriendlyByteBuf stream, ListTag obj) {
+        public void encode(RegistryFriendlyByteBuf stream, ListTag obj) {
             NbtUtil.write(obj, stream);
         }
 
         @Override
-        public ListTag decode(FriendlyByteBuf stream) {
+        public ListTag decode(RegistryFriendlyByteBuf stream) {
             return (ListTag) NbtUtil.read(Tag.TAG_LIST, stream);
         }
-
-        static {
-            ByteStreamCodec.registerCodec(ListTag.class, LIST_TAG_CODEC);
-        }
     };
 
-    public static final ByteStreamCodec<ItemStack> ITEM_STACK_CODEC = new ByteStreamCodec<>() {
+    public static final StreamCodec<? super RegistryFriendlyByteBuf, ItemStack> ITEM_STACK_CODEC = ItemStack.OPTIONAL_STREAM_CODEC;
 
-        @Override
-        public void encode(FriendlyByteBuf stream, ItemStack obj) {
-            stream.writeItem(obj);
-        }
+    public static final StreamCodec<? super RegistryFriendlyByteBuf, FluidStack> FLUID_STACK_CODEC = FluidStack.OPTIONAL_STREAM_CODEC;
 
-        @Override
-        public ItemStack decode(FriendlyByteBuf stream) {
-            return stream.readItem();
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(ItemStack.class, ITEM_STACK_CODEC);
-        }
-    };
-
-    public static final ByteStreamCodec<FluidStack> FLUID_STACK_CODEC = new ByteStreamCodec<>() {
-
-        @Override
-        public void encode(FriendlyByteBuf stream, FluidStack obj) {
-            obj.writeToPacket(stream);
-        }
-
-        @Override
-        public FluidStack decode(FriendlyByteBuf stream) {
-            return FluidStack.readFromPacket(stream);
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(FluidStack.class, FLUID_STACK_CODEC);
-        }
-    };
-
-    public static final ByteStreamCodec<Component> COMPONENT_CODEC = new ByteStreamCodec<>() {
-
-        @Override
-        public void encode(FriendlyByteBuf buf, Component obj) {
-            buf.writeComponent(obj);
-        }
-
-        @Override
-        public Component decode(FriendlyByteBuf buf) {
-            return buf.readComponent();
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(Component.class, COMPONENT_CODEC);
-        }
-    };
+    public static final StreamCodec<? super RegistryFriendlyByteBuf, Component> COMPONENT_CODEC = ComponentSerialization.STREAM_CODEC;
 
     /**
      * Builds a codec for entries of a Minecraft {@link Registry}: values are written as a VarInt
@@ -268,7 +193,208 @@ public class StreamCodecs {
      *
      * @param registry the registry the values belong to
      */
-    public static <T> ByteStreamCodec<T> of(Registry<T> registry) {
-        return ByteStreamCodec.of((stream, obj) -> stream.writeVarInt(registry.getId(obj)), stream -> registry.byId(stream.readVarInt()));
+    public static <T> StreamCodec<RegistryFriendlyByteBuf, T> of(Registry<T> registry) {
+        return StreamCodec.of((stream, obj) -> stream.writeVarInt(registry.getId(obj)), stream -> registry.byId(stream.readVarInt()));
+    }
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, boolean[]> BOOLEANS_CODEC = new StreamCodec<>() {
+
+        @Override
+        public void encode(RegistryFriendlyByteBuf buf, boolean[] obj) {
+            buf.writeVarInt(obj.length);
+            for (var b : obj) {
+                buf.writeBoolean(b);
+            }
+        }
+
+        @Override
+        public boolean[] decode(RegistryFriendlyByteBuf buf) {
+            var length = DecodeLimits.size(buf.readVarInt(), buf, 1);
+            var booleans = new boolean[length];
+            for (int i = 0; i < length; i++) {
+                booleans[i] = buf.readBoolean();
+            }
+            return booleans;
+        }
+    };
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, byte[]> BYTES_CODEC = new StreamCodec<>() {
+
+        @Override
+        public void encode(RegistryFriendlyByteBuf buf, byte[] obj) {
+            buf.writeByteArray(obj);
+        }
+
+        @Override
+        public byte[] decode(RegistryFriendlyByteBuf buf) {
+            return buf.readByteArray(DecodeLimits.MAX_ELEMENTS);
+        }
+    };
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, int[]> INTS_CODEC = new StreamCodec<>() {
+
+        @Override
+        public void encode(RegistryFriendlyByteBuf buf, int[] obj) {
+            buf.writeVarInt(obj.length);
+            for (var i : obj) {
+                buf.writeVarInt(i);
+            }
+        }
+
+        @Override
+        public int[] decode(RegistryFriendlyByteBuf buf) {
+            var length = DecodeLimits.size(buf.readVarInt(), buf, 1);
+            var ints = new int[length];
+            for (int i = 0; i < length; i++) {
+                ints[i] = buf.readVarInt();
+            }
+            return ints;
+        }
+    };
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, long[]> LONGS_CODEC = new StreamCodec<>() {
+
+        @Override
+        public void encode(RegistryFriendlyByteBuf buf, long[] obj) {
+            buf.writeLongArray(obj);
+        }
+
+        @Override
+        public long[] decode(RegistryFriendlyByteBuf buf) {
+            int length = DecodeLimits.size(buf.readVarInt(), buf, Long.BYTES);
+            long[] values = new long[length];
+            for (int i = 0; i < length; i++) values[i] = buf.readLong();
+            return values;
+        }
+    };
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, short[]> SHORTS_CODEC = new StreamCodec<>() {
+
+        @Override
+        public void encode(RegistryFriendlyByteBuf buf, short[] obj) {
+            buf.writeVarInt(obj.length);
+            for (var i : obj) {
+                buf.writeShort(i);
+            }
+        }
+
+        @Override
+        public short[] decode(RegistryFriendlyByteBuf buf) {
+            var length = DecodeLimits.size(buf.readVarInt(), buf, 2);
+            var shorts = new short[length];
+            for (int i = 0; i < length; i++) {
+                shorts[i] = buf.readShort();
+            }
+            return shorts;
+        }
+    };
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, char[]> CHARS_CODEC = new StreamCodec<>() {
+
+        @Override
+        public void encode(RegistryFriendlyByteBuf buf, char[] obj) {
+            buf.writeVarInt(obj.length);
+            for (var i : obj) {
+                buf.writeChar(i);
+            }
+        }
+
+        @Override
+        public char[] decode(RegistryFriendlyByteBuf buf) {
+            var length = DecodeLimits.size(buf.readVarInt(), buf, 2);
+            var chars = new char[length];
+            for (int i = 0; i < length; i++) {
+                chars[i] = buf.readChar();
+            }
+            return chars;
+        }
+    };
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, float[]> FLOATS_CODEC = new StreamCodec<>() {
+
+        @Override
+        public void encode(RegistryFriendlyByteBuf buf, float[] obj) {
+            buf.writeVarInt(obj.length);
+            for (var i : obj) {
+                buf.writeFloat(i);
+            }
+        }
+
+        @Override
+        public float[] decode(RegistryFriendlyByteBuf buf) {
+            var length = DecodeLimits.size(buf.readVarInt(), buf, 4);
+            var floats = new float[length];
+            for (int i = 0; i < length; i++) {
+                floats[i] = buf.readFloat();
+            }
+            return floats;
+        }
+    };
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, double[]> DOUBLES_CODEC = new StreamCodec<>() {
+
+        @Override
+        public void encode(RegistryFriendlyByteBuf buf, double[] obj) {
+            buf.writeVarInt(obj.length);
+            for (var i : obj) {
+                buf.writeDouble(i);
+            }
+        }
+
+        @Override
+        public double[] decode(RegistryFriendlyByteBuf buf) {
+            var length = DecodeLimits.size(buf.readVarInt(), buf, 8);
+            var doubles = new double[length];
+            for (int i = 0; i < length; i++) {
+                doubles[i] = buf.readDouble();
+            }
+            return doubles;
+        }
+    };
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, Long> LONG_CODEC = StreamCodec.of((buf, value) -> buf.writeLong(value), buf -> buf.readLong());
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, Character> CHAR_CODEC = StreamCodec.of((buf, value) -> buf.writeChar(value), buf -> buf.readChar());
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, UUID> UUID_CODEC = StreamCodec.of((buf, value) -> buf.writeUUID(value), buf -> buf.readUUID());
+
+    public static final StreamCodec<RegistryFriendlyByteBuf, BigInteger> BIG_INTEGER_CODEC = StreamCodec.of((buf, value) -> buf.writeByteArray(value.toByteArray()), buf -> new BigInteger(buf.readByteArray(DecodeLimits.MAX_ELEMENTS)));
+
+    /**
+     * Bridge persistent {@link Data} into a stream: the payload keeps the disk layout, so the
+     * receiving side needs the same registry context. Only this boundary has to establish a
+     * {@link RegistryContext} — the buffer carries the registry access on the network.
+     */
+    public static <T> StreamCodec<RegistryFriendlyByteBuf, T> fromData(DataCodec<T> codec) {
+        return StreamCodec.of((buf, value) -> {
+            try (var ignored = RegistryContext.use(buf.registryAccess())) {
+                Data.writeData(buf, codec.encode(value));
+            }
+        }, buf -> {
+            try (var ignored = RegistryContext.use(buf.registryAccess())) {
+                return codec.decode(Data.readData(buf));
+            }
+        });
+    }
+
+    /**
+     * Object array codec: a VarInt length followed by that many elements. The length is bounded by
+     * {@link DecodeLimits} before the array is allocated.
+     */
+    public static <T> StreamCodec<RegistryFriendlyByteBuf, T[]> array(Class<T> type, StreamCodec<? super RegistryFriendlyByteBuf, T> codec) {
+        return StreamCodec.of((buf, values) -> {
+            buf.writeVarInt(values.length);
+            for (T value : values) {
+                codec.encode(buf, value);
+            }
+        }, buf -> {
+            int size = DecodeLimits.size(buf.readVarInt(), buf, 0);
+            @SuppressWarnings("unchecked")
+            T[] result = (T[]) Array.newInstance(type, size);
+            for (int i = 0; i < size; i++) {
+                result[i] = codec.decode(buf);
+            }
+            return result;
+        });
     }
 }

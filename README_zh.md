@@ -22,7 +22,7 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 | **FieldDefinitionStorage** | 全局缓存 — 扫描类层级中的注解字段，生成 `DataFieldDefinition[]` |
 | **FieldDataManager** | 每实例管理器 — 字段发现 → 变更检测 → 网络序列化 → 磁盘序列化 |
 | **DataField 体系** | `AbstractField`（值类型：原始/对象）、`AbstractFieldAccess`（容器类型：集合/Map/数组） |
-| **DataSyncCodec** | 统一编解码注册表，配对 `ByteStreamCodec`（网络）+ `DataCodec`（持久化） |
+| **DataSyncCodec** | 统一编解码注册表，配对原生 `StreamCodec<RegistryFriendlyByteBuf, T>`（网络）+ `DataCodec`（持久化） |
 | **Data 类型系统** | 19 种密封二进制类型，比 NBT Tag 更紧凑，支持 VarInt 变长编码 |
 
 ## 核心特性
@@ -174,6 +174,7 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 > - `autoDetect = false` 的字段需要手动调用 `markFieldsForSync()` 才会同步
 > - 磁盘持久化需要手动调用 BlockEntity 的 `setChanged()`
 > - `syncBlockEntityToClient(be, false, true)` 中：`false`=增量同步（仅变更字段），`true`=仅检查 `autoDetect=true` 的字段
+> - 每次网络读写都要显式传入 `SyncContext`（注册表 + 连接类型）—— `RegistryFriendlyByteBuf` 只能由 `RegistryAccess` 构造
 > - 完整示例参考 `TestBlockEntity`
 
 ### 高级用法：Registry 全局 codec 自动注册
@@ -232,15 +233,14 @@ Class<?>[] args = ReflectUtil.getResolvedGenericArguments(fieldType, HashMap.cla
   │     ├── FieldDataManager.updateFieldDirtyFlags(SERVER, auto)
   │     │     └── 遍历 syncToClientFields → detectChange()
   │     │           比较当前值与上次快照 → 标记 changed
-  │     ├── FieldDataManager.writeToNetworkBuffer(SERVER, writeAll)
+  │     ├── FieldDataManager.writeToNetworkBuffer(SERVER, sync, writeAll)
   │     │     ├── writeCustomSyncData()         → 自定义数据
   │     │     └── 遍历: writeVarInt(索引) + 字段值 → byte[]
-  │     └── CHANNEL.send(TRACKING_CHUNK, packet)
+  │     └── PacketDistributor.sendToPlayersTrackingChunk(level, chunk, packet)
   │
 客户端接收
-  ├── handleBlockEntity()       （单一处理器，方向由 getOriginationSide() 判定）
-        ├── applyBlockEntitySyncData(level, pos, data, CLIENT)
-        │     └── FieldDataManager.readFromNetworkBuffer(CLIENT, data)
+  ├── receiveBlock()            （单一处理器，方向由 IPayloadContext.flow() 判定）
+        ├── readFromNetworkBuffer(CLIENT, sync, data)
         │           ├── readCustomSyncData()
         │           ├── while buf: readVarInt(索引) → field.readFromBuffer()
         │           └── scheduleUpdate=true → scheduleUpdate()
@@ -249,19 +249,22 @@ Class<?>[] args = ReflectUtil.getResolvedGenericArguments(fieldType, HashMap.cla
 ### 持久化流程
 
 ```
-BlockEntity.saveAdditional(tag)
+BlockEntity.saveAdditional(tag, lookup)
   └── tag.putByteArray("field_save", writeToData().writeToBytes())
-        └── FieldDataManager.writeToData()
+        └── FieldDataManager.writeToData()        （在 RegistryContext.use(lookup) 作用域内）
               ├── writeCustomSaveData()
               └── 遍历 saveFields → field.writeToData()
                     └── 生成 StringMapData(key → Data)
 
-BlockEntity.load(tag)
-  ├── 优先检查 "field_sync"（区块加载同步数据）
-  └── 否则读取 "field_save"（磁盘持久化数据）
-        └── FieldDataManager.readFromData(data, VERSION)
+BlockEntity.loadAdditional(tag, lookup)
+  └── "field_save"（磁盘持久化数据）
+        └── FieldDataManager.readFromData(data, dataVersion())
               ├── readCustomSaveData()
               └── 遍历 saveFields → field.readFromData()
+
+BlockEntity.handleUpdateTag(tag, lookup)
+  └── "field_sync"（区块加载 / 方块实体数据包）
+        └── FieldDataManager.readFromNetworkBuffer(CLIENT, sync, data)
 ```
 
 ## 文档
@@ -285,10 +288,10 @@ BlockEntity.load(tag)
 
 | 组件 | 版本 |
 |------|------|
-| Minecraft | 1.20.1 |
-| Forge | 47.4.21 |
+| Minecraft | 1.21.1 |
+| NeoForge | 21.1.234 |
 | Java | 21 |
-| FastUtil | (Forge 内置) |
+| FastUtil | (NeoForge 内置) |
 | Lombok | (编译期) |
 
 ## 许可证

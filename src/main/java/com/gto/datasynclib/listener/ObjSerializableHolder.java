@@ -3,10 +3,11 @@ package com.gto.datasynclib.listener;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.SnapshotScope;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.util.holder.ObjHolder;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Objects;
@@ -67,18 +68,18 @@ public class ObjSerializableHolder<T> extends ObjHolder<T> implements IDataSeria
     }
 
     @Override
-    public void writeBuffer(LogicalSide side, @NotNull FriendlyByteBuf data) {
+    public void writeBuffer(LogicalSide side, @NotNull RegistryFriendlyByteBuf data) {
         if (value == null) {
             data.writeBoolean(false);
         } else {
             data.writeBoolean(true);
             codec.streamWriter.encode(data, value);
         }
-        lastValue = value;
+        if (!SnapshotScope.active()) lastValue = value;
     }
 
     @Override
-    public void readBuffer(LogicalSide side, @NotNull FriendlyByteBuf data) {
+    public void readBuffer(LogicalSide side, @NotNull RegistryFriendlyByteBuf data) {
         if (data.readBoolean()) {
             value = codec.streamReader.decode(data);
         } else {

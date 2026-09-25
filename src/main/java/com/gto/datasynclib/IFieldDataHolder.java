@@ -1,7 +1,7 @@
 package com.gto.datasynclib;
 
 import com.gto.datasynclib.datastream.data.StringMapData;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 
 /**
  * Interface for objects whose annotated fields are managed by a {@link FieldDataManager}.
@@ -91,7 +91,7 @@ public interface IFieldDataHolder {
      * @param buf      the network data buffer
      * @param writeAll whether to force writing all data (ignoring dirty flags)
      */
-    default void writeCustomSyncData(FriendlyByteBuf buf, boolean writeAll) {
+    default void writeCustomSyncData(RegistryFriendlyByteBuf buf, boolean writeAll) {
     }
 
     /**
@@ -103,7 +103,7 @@ public interface IFieldDataHolder {
      *
      * @param buf the network data buffer
      */
-    default void readCustomSyncData(FriendlyByteBuf buf) {
+    default void readCustomSyncData(RegistryFriendlyByteBuf buf) {
     }
 
     /**

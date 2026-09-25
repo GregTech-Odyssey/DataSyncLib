@@ -6,6 +6,8 @@ import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.FieldDefinitionStorage;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.RegistryContext;
+import com.gto.datasynclib.SyncContext;
 import com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.datastream.data.Data;
@@ -21,8 +23,11 @@ import it.unimi.dsi.fastutil.Hash;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.GlobalPos;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.Vec3i;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.ByteArrayTag;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -35,8 +40,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.phys.AABB;
-import net.minecraftforge.fluids.FluidStack;
-import net.minecraftforge.items.ItemStackHandler;
+import net.neoforged.neoforge.fluids.FluidStack;
+import net.neoforged.neoforge.items.ItemStackHandler;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -47,10 +52,11 @@ import java.util.Objects;
 /**
  * Development-only test suite for {@link TestBlockEntity}, covering the public API surface of the
  * framework end to end: definition scanning and lookup, codec resolution, disk and network
- * round-trips (full and incremental), the block-entity NBT paths ({@code saveAdditional}/{@code load}
- * and the chunk-load {@code field_sync} tag), listeners (including {@code @SaveToDisk(listener)}),
+ * round-trips (full and incremental), the block-entity NBT paths
+ * ({@code saveAdditional}/{@code loadAdditional} and the chunk-load {@code field_sync} tag applied by
+ * {@code handleUpdateTag}), listeners (including {@code @SaveToDisk(listener)}),
  * dirty-flag/marking APIs, single-field helpers, skip predicates, default-value skipping, child managers,
- * {@code @Conversion}, Forge {@code INBTSerializable} (scalar and array), the built-in
+ * {@code @Conversion}, NeoForge {@code INBTSerializable} (scalar and array), the built-in
  * registry/enum helpers, and the registered change-detection strategies for {@code ItemStack}/
  * {@code FluidStack} (scalar and array).
  *
@@ -59,6 +65,12 @@ import java.util.Objects;
  * server where the registries are live. It never touches a {@code Level}: the block entity is built
  * directly and only level-free APIs are exercised ({@code setChanged()} and the network send helpers
  * are no-ops without a level, which is asserted as well).</p>
+ *
+ * <p><b>1.21:</b> the registry access is no longer implicit. The suite receives it as a
+ * {@link SyncContext} and publishes the same lookup through {@link RegistryContext#use} for the disk
+ * path, which is what the level-free signature of the block-entity save/load hooks cannot carry by
+ * itself. Without it, every registry-dependent value ({@code ItemStack}, {@code FluidStack},
+ * {@code Component}, {@code ItemStackHandler}) would be encoded against an empty registry.</p>
  */
 public final class TestBlockEntityTests {
 
@@ -68,26 +80,41 @@ public final class TestBlockEntityTests {
     private final List<String> failures = new ArrayList<>();
     private int checks;
 
-    public static void runAll() {
-        new TestBlockEntityTests().run();
+    /** Registry/connection context of the side running the suite (the ticking level's registries). */
+    private final SyncContext context;
+
+    /** The same lookup in the form the 1.21 NBT entry points take. */
+    private final RegistryAccess registries;
+
+    private TestBlockEntityTests(SyncContext context) {
+        this.context = context;
+        this.registries = context.registries();
+    }
+
+    public static void runAll(SyncContext context) {
+        new TestBlockEntityTests(context).run();
     }
 
     private void run() {
-        section("definitions", this::definitions);
-        section("codecs", this::codecs);
-        section("codecLookupPolicy", this::codecLookupPolicy);
-        section("diskRoundTrip", this::diskRoundTrip);
-        section("nbtRoundTrip", this::nbtRoundTrip);
-        section("chunkLoadSync", this::chunkLoadSync);
-        section("networkFull", this::networkFull);
-        section("networkIncremental", this::networkIncremental);
-        section("listeners", this::listeners);
-        section("dirtyFlags", this::dirtyFlags);
-        section("skipPredicatesAndDefaults", this::skipPredicatesAndDefaults);
-        section("singleFieldApi", this::singleFieldApi);
-        section("childManagerAndConversion", this::childManagerAndConversion);
-        section("registryEnumAndStrategy", this::registryEnumAndStrategy);
-        section("levelFreeNoThrow", this::levelFreeNoThrow);
+        // 1.21: the disk codecs read the lookup from RegistryContext instead of a Level, so the suite
+        // publishes it for the whole run; the network codecs get it through the SyncContext.
+        try (var ignored = RegistryContext.use(registries)) {
+            section("definitions", this::definitions);
+            section("codecs", this::codecs);
+            section("codecLookupPolicy", this::codecLookupPolicy);
+            section("diskRoundTrip", this::diskRoundTrip);
+            section("nbtRoundTrip", this::nbtRoundTrip);
+            section("chunkLoadSync", this::chunkLoadSync);
+            section("networkFull", this::networkFull);
+            section("networkIncremental", this::networkIncremental);
+            section("listeners", this::listeners);
+            section("dirtyFlags", this::dirtyFlags);
+            section("skipPredicatesAndDefaults", this::skipPredicatesAndDefaults);
+            section("singleFieldApi", this::singleFieldApi);
+            section("childManagerAndConversion", this::childManagerAndConversion);
+            section("registryEnumAndStrategy", this::registryEnumAndStrategy);
+            section("levelFreeNoThrow", this::levelFreeNoThrow);
+        }
         report();
     }
 
@@ -245,14 +272,17 @@ public final class TestBlockEntityTests {
     /**
      * The block-entity NBT path around {@link FieldDataHolderBlockEntity}.
      *
-     * <p><b>Usage:</b> {@code saveAdditional(tag)} stores the serialized state as one byte array under
-     * {@code field_save} plus the current {@code field_data_dataVersion}, and {@code load(tag)} reads it
-     * back and hands that version to every codec so data can be migrated. The suite reaches these through
-     * the {@code saveToTag()}/{@code loadFromTag()} hooks because they are {@code protected}.</p>
+     * <p><b>Usage:</b> {@code saveAdditional(tag, lookup)} stores the serialized state as one byte
+     * array under {@code field_save} plus the current {@code field_data_dataVersion}, and
+     * {@code loadAdditional(tag, lookup)} reads it back and hands that version to every codec so data
+     * can be migrated. 1.21 passes the registry lookup alongside the tag (here the suite's
+     * {@code RegistryAccess}), which is also why the hooks below take it as a parameter. The suite
+     * reaches these through the {@code saveToTag()}/{@code loadFromTag()} hooks because they are
+     * {@code protected}.</p>
      */
     private void nbtRoundTrip() {
         TestBlockEntity src = mutate(newEntity());
-        CompoundTag tag = src.saveToTag();
+        CompoundTag tag = src.saveToTag(registries);
 
         expect("nbt.versionWritten", tag.getInt("field_data_dataVersion"), FieldDataHolderBlockEntity.VERSION);
         expect("nbt.saveArrayPresent", tag.get("field_save") instanceof ByteArrayTag, true);
@@ -261,14 +291,14 @@ public final class TestBlockEntityTests {
         // Wipe the destination, then restore from NBT and compare.
         TestBlockEntity dst = newEntity();
         clear(dst);
-        dst.loadFromTag(tag);
+        dst.loadFromTag(tag, registries);
         expectSaved("nbt", src, dst);
 
         // Mutating a field past its default makes it persist.
         TestBlockEntity other = newEntity();
         other.withDefault = 8;
         other.skipped = -1; // skipMe returns true → still skipped
-        CompoundTag otherTag = other.saveToTag();
+        CompoundTag otherTag = other.saveToTag(registries);
         if (otherTag.get("field_save") instanceof ByteArrayTag array) {
             Data data = Data.readData(array.getAsByteArray());
             if (data instanceof StringMapData map) {
@@ -285,19 +315,21 @@ public final class TestBlockEntityTests {
     /**
      * Chunk-load synchronization.
      *
-     * <p><b>Usage:</b> nothing to override — {@code getUpdateTag()} already embeds the full
-     * {@code @SyncToClient} state under {@code field_sync}, so a player entering the chunk receives the
-     * current values without a dedicated packet. {@code load(tag)} prefers {@code field_sync} over
-     * {@code field_save}, and only the sync-to-client direction travels.</p>
+     * <p><b>Usage:</b> nothing to override — {@code getUpdateTag(lookup)} already embeds the full
+     * {@code @SyncToClient} state under {@code field_sync} (as a non-consuming snapshot), so a player
+     * entering the chunk receives the current values without a dedicated packet. 1.21 routes that tag
+     * to {@code handleUpdateTag(tag, lookup)} on the receiving side instead of the old {@code load}
+     * entry point, while {@code loadAdditional} now reads only {@code field_save}; so a client can
+     * never mistake synced state for saved state. Only the sync-to-client direction travels.</p>
      */
     private void chunkLoadSync() {
         TestBlockEntity src = mutate(newEntity());
-        CompoundTag updateTag = src.getUpdateTag();
+        CompoundTag updateTag = src.saveSyncTag(registries);
         expect("chunkLoad.syncArrayPresent", updateTag.get("field_sync") instanceof ByteArrayTag, true);
 
         TestBlockEntity client = newEntity();
         clear(client);
-        client.loadFromTag(updateTag); // load() prefers field_sync over field_save
+        client.loadSyncTag(updateTag, registries); // handleUpdateTag applies field_sync
         expectSynced("chunkLoad", src, client);
         // field_sync carries only the sync-to-client direction.
         expect("chunkLoad.saveOnlyUntouched", client.i, newEntity().i);
@@ -306,28 +338,30 @@ public final class TestBlockEntityTests {
     /**
      * Full network round-trip in both directions.
      *
-     * <p><b>Usage:</b> the sender calls {@code writeToNetworkBuffer(side, true)} and the receiver applies
-     * the bytes with {@code readFromNetworkBuffer(oppositeSide, bytes)}. {@code LogicalSide.SERVER}
-     * serializes {@code @SyncToClient} fields, {@code LogicalSide.CLIENT} serializes
-     * {@code @SyncToServer} ones (here the {@code ObjNotifiableHolder} field).</p>
+     * <p><b>Usage:</b> the sender calls {@code writeToNetworkBuffer(side, context, true)} and the
+     * receiver applies the bytes with {@code readFromNetworkBuffer(oppositeSide, context, bytes)};
+     * the {@link SyncContext} carries the registries and the {@code ConnectionType}, both of which the
+     * 1.21 {@code RegistryFriendlyByteBuf} needs. {@code LogicalSide.SERVER} serializes
+     * {@code @SyncToClient} fields, {@code LogicalSide.CLIENT} serializes {@code @SyncToServer} ones
+     * (here the {@code ObjNotifiableHolder} field).</p>
      */
     private void networkFull() {
         TestBlockEntity src = mutate(newEntity());
-        byte[] server = src.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true);
+        byte[] server = src.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, true);
 
         TestBlockEntity client = newEntity();
         clear(client);
-        client.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, server);
+        client.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, context, server);
         expectSynced("netFull", src, client);
 
         // Client → server direction: only @SyncToServer fields, and the listener must fire.
         TestBlockEntity sender = newEntity();
         sender.objectHolder.value = "from-client";
-        byte[] toServer = sender.getFieldDataManager().writeToNetworkBuffer(LogicalSide.CLIENT, true);
+        byte[] toServer = sender.getFieldDataManager().writeToNetworkBuffer(LogicalSide.CLIENT, context, true);
 
         TestBlockEntity receiver = newEntity();
         receiver.b.receiverCalls = 0;
-        receiver.getFieldDataManager().readFromNetworkBuffer(LogicalSide.SERVER, toServer);
+        receiver.getFieldDataManager().readFromNetworkBuffer(LogicalSide.SERVER, context, toServer);
         expect("netFull.toServer", sender.objectHolder.value, receiver.objectHolder.value);
     }
 
@@ -335,7 +369,7 @@ public final class TestBlockEntityTests {
      * Incremental sync — the normal per-tick path.
      *
      * <p><b>Usage:</b> {@code updateFieldDirtyFlags(side, autoDetectOnly)} detects what changed and
-     * {@code writeToNetworkBuffer(side, false)} sends only those fields as a sequence of
+     * {@code writeToNetworkBuffer(side, context, false)} sends only those fields as a sequence of
      * (fieldIndex, payload) pairs; a field declared with {@code autoDetect = false} needs an explicit
      * {@code markFieldsForSync(name)} first. The assertions also pin down that an incremental buffer stays
      * smaller than a full one, and that a single changed slot of an {@code ItemStackHandler[]} does not
@@ -343,45 +377,45 @@ public final class TestBlockEntityTests {
      */
     private void networkIncremental() {
         TestBlockEntity src = mutate(newEntity());
-        byte[] full = src.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true);
+        byte[] full = src.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, true);
 
         // One small change only → the incremental buffer must be far smaller than the full one.
         src.synced = 31337;
         src.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true);
-        byte[] incremental = src.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, false);
+        byte[] incremental = src.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, false);
         expect("netIncremental.notEmpty", incremental.length > 0, true);
         expect("netIncremental.smallerThanFull", incremental.length < full.length, true);
 
         // Applying it to a client that already has the full state updates just that field.
         TestBlockEntity client = newEntity();
         clear(client);
-        client.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, full);
-        client.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, incremental);
+        client.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, context, full);
+        client.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, context, incremental);
         expect("netIncremental.applied", src.synced, client.synced);
         expectSynced("netIncremental.clientState", src, client);
 
         // A single changed slot of an INBTSerializable array must not re-send the other slots.
         TestBlockEntity arrayFull = mutate(newEntity());
-        byte[] arrayFullBytes = arrayFull.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true);
+        byte[] arrayFullBytes = arrayFull.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, true);
         arrayFull.handlerArray[1].setStackInSlot(0, new ItemStack(Items.EMERALD, 9));
         arrayFull.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true);
-        byte[] arrayIncremental = arrayFull.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, false);
+        byte[] arrayIncremental = arrayFull.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, false);
         expect("netIncremental.arraySmaller", arrayIncremental.length < arrayFullBytes.length, true);
 
         // markFieldsForSync forces a field with autoDetect = false to be sent. The entity is primed
         // first, because a brand-new one reports every field as changed on its first check.
         TestBlockEntity manual = mutate(newEntity());
         manual.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true);
-        manual.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true);
+        manual.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, true);
         manual.manual = 4711;
         manual.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true);
         expect("netIncremental.manualNotAutoDetected",
-                manual.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, false).length, 0);
+                manual.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, false).length, 0);
         manual.getFieldDataManager().markFieldsForSync("manual");
-        byte[] marked = manual.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, false);
+        byte[] marked = manual.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, false);
         expect("netIncremental.manualAfterMark", marked.length > 0, true);
         TestBlockEntity manualClient = newEntity();
-        manualClient.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, marked);
+        manualClient.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, context, marked);
         expect("netIncremental.manualValue", manual.manual, manualClient.manual);
     }
 
@@ -398,12 +432,12 @@ public final class TestBlockEntityTests {
         // @SaveToDisk(listener): fires on load with the restored value.
         TestBlockEntity src = newEntity();
         src.loaded = 4242;
-        CompoundTag tag = src.saveToTag();
+        CompoundTag tag = src.saveToTag(registries);
 
         TestBlockEntity dst = newEntity();
         dst.loadedListenerCalls = 0;
         dst.lastLoaded = -1;
-        dst.loadFromTag(tag);
+        dst.loadFromTag(tag, registries);
         expect("listener.saveCalls", dst.loadedListenerCalls, 1);
         expect("listener.saveValue", dst.lastLoaded, 4242);
         expect("listener.saveFieldRestored", dst.loaded, 4242);
@@ -411,12 +445,12 @@ public final class TestBlockEntityTests {
         // Sync listener: invoked as (newValue, oldValue) on the receiving side.
         TestBlockEntity sender = newEntity();
         sender.synced = 99;
-        byte[] bytes = sender.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true);
+        byte[] bytes = sender.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, true);
 
         TestBlockEntity receiver = newEntity();
         receiver.syncedListenerCalls = 0;
         receiver.lastSyncedOld = -1;
-        receiver.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, bytes);
+        receiver.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, context, bytes);
         expect("listener.syncCalls", receiver.syncedListenerCalls, 1);
         expect("listener.syncOldValue", receiver.lastSyncedOld, 0);
         expect("listener.syncNewValue", receiver.synced, 99);
@@ -424,12 +458,12 @@ public final class TestBlockEntityTests {
         // Nested holder: reading B's ObjNotifiableHolder fires its receiver listener.
         TestBlockEntity nestedSender = newEntity();
         nestedSender.b.c.value = "nested";
-        byte[] nestedBytes = nestedSender.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true);
+        byte[] nestedBytes = nestedSender.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, true);
 
         TestBlockEntity nestedReceiver = newEntity();
         nestedReceiver.b.receiverCalls = 0;
         nestedReceiver.b.lastReceived = null;
-        nestedReceiver.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, nestedBytes);
+        nestedReceiver.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, context, nestedBytes);
         expect("listener.nestedCalls", nestedReceiver.b.receiverCalls, 1);
         expect("listener.nestedValue", nestedReceiver.b.lastReceived, "nested");
     }
@@ -452,7 +486,7 @@ public final class TestBlockEntityTests {
         expect("dirty.stickyUntilWrite", manager.updateFieldDirtyFlags(LogicalSide.SERVER, true), true);
         expect("dirty.managerFlag", manager.isChanged(), true);
 
-        byte[] written = manager.writeToNetworkBuffer(LogicalSide.SERVER, false);
+        byte[] written = manager.writeToNetworkBuffer(LogicalSide.SERVER, context, false);
         expect("dirty.written", written.length > 0, true);
         expect("dirty.clearedAfterWrite", manager.isChanged(), false);
         expect("dirty.noChangeAfterWrite", manager.updateFieldDirtyFlags(LogicalSide.SERVER, true), false);
@@ -460,7 +494,7 @@ public final class TestBlockEntityTests {
         // Explicit marking by name and by definition.
         manager.markFieldsForSync("synced");
         expect("dirty.markByName", manager.updateFieldDirtyFlags(LogicalSide.SERVER, true), true);
-        manager.writeToNetworkBuffer(LogicalSide.SERVER, false);
+        manager.writeToNetworkBuffer(LogicalSide.SERVER, context, false);
         manager.clearAllChangeMarks();
         expect("dirty.clearAll", manager.isChanged(), false);
         expect("dirty.clearAllClearsFields", manager.updateFieldDirtyFlags(LogicalSide.SERVER, true), false);
@@ -561,9 +595,9 @@ public final class TestBlockEntityTests {
         expect("child.name", dst.module.name, "child");
         expect("child.values", dst.module.values, List.of(3, 4));
 
-        byte[] bytes = src.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true);
+        byte[] bytes = src.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, true);
         TestBlockEntity client = newEntity();
-        client.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, bytes);
+        client.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, context, bytes);
         expect("child.netTicks", client.module.ticks, 900);
         expect("child.netValues", client.module.values, List.of(3, 4));
 
@@ -720,10 +754,12 @@ public final class TestBlockEntityTests {
     }
 
     /**
-     * Nothing here requires a {@code Level}.
+     * Nothing here requires a {@code Level} — only the registry lookup the suite was handed.
      *
-     * <p><b>Usage:</b> {@code setChanged()} and the {@code DataSyncNetwork} send helpers are no-ops without
-     * one, so a test (or any headless helper) can drive the framework from a plain server tick.</p>
+     * <p><b>Usage:</b> {@code setChanged()} and the {@code DataSyncNetwork} send helpers are no-ops
+     * without a level, so a test (or any headless helper) can drive the framework from a plain server
+     * tick; the block-entity NBT and chunk-load entry points take their lookup as a parameter (1.21) and
+     * therefore work on a directly constructed block entity as well.</p>
      */
     private void levelFreeNoThrow() {
         TestBlockEntity be = newEntity();
@@ -753,11 +789,16 @@ public final class TestBlockEntityTests {
      */
     private void prime(TestBlockEntity be) {
         be.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true);
-        be.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, false);
+        be.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, false);
     }
 
     /**
      * Gives every managed family a non-default value so a round-trip has something to carry.
+     *
+     * <p>1.21: the scalar {@code ItemStack} and {@code FluidStack} also carry a custom-name
+     * <em>component</em> (the replacement for the old per-stack NBT tag), so every round-trip
+     * assertion below proves that components survive the component-based codecs — which is exactly
+     * what {@code ItemStack.matches} / {@link FluidStack#matches} compare.</p>
      */
     private TestBlockEntity mutate(TestBlockEntity be) {
         be.i = 1234;
@@ -766,9 +807,11 @@ public final class TestBlockEntityTests {
         }
         be.stacks[0] = new ItemStack(Items.DIAMOND, 5);
         be.stack = new ItemStack(Items.GOLD_INGOT, 3);
+        be.stack.set(DataComponents.CUSTOM_NAME, Component.literal("stack-proof"));
         be.tanks[0] = new FluidStack(Fluids.LAVA, 250);
         be.tanks[1] = new FluidStack(Fluids.WATER, 4000);
         be.fluid = new FluidStack(Fluids.LAVA, 750);
+        be.fluid.set(DataComponents.CUSTOM_NAME, Component.literal("fluid-proof"));
         be.directions[0][0] = Direction.UP;
         be.uuidSet.clear();
         be.uuidSet.add("set-a");
@@ -846,7 +889,8 @@ public final class TestBlockEntityTests {
 
     private void expectSaved(String prefix, TestBlockEntity src, TestBlockEntity dst) {
         expect(prefix + ".i", src.i, dst.i);
-        // ItemStack has no equals/hashCode, so content has to be compared through ItemStack.matches.
+        // ItemStack has no content equals, so content has to be compared through ItemStack.matches
+        // (item, count and — since 1.21 — the data components).
         expect(prefix + ".stack", ItemStack.matches(src.stack, dst.stack), true);
         expect(prefix + ".uuids", Arrays.equals(src.uuids, dst.uuids), true);
         expect(prefix + ".stacks", stacksEqual(src.stacks, dst.stacks), true);
@@ -863,7 +907,7 @@ public final class TestBlockEntityTests {
         expect(prefix + ".floats", Arrays.equals(src.floats, dst.floats), true);
         expect(prefix + ".intList", src.intList, dst.intList);
         expect(prefix + ".object2IntMap", src.object2IntMap, dst.object2IntMap);
-        expect(prefix + ".handler", src.handler.serializeNBT(), dst.handler.serializeNBT());
+        expect(prefix + ".handler", src.handler.serializeNBT(registries), dst.handler.serializeNBT(registries));
         expect(prefix + ".handlerArray", handlerArrayTag(src), handlerArrayTag(dst));
         expect(prefix + ".module.ticks", src.module.ticks, dst.module.ticks);
         expect(prefix + ".module.name", src.module.name, dst.module.name);
@@ -885,7 +929,7 @@ public final class TestBlockEntityTests {
         expect(prefix + ".floats", Arrays.equals(src.floats, dst.floats), true);
         expect(prefix + ".intList", src.intList, dst.intList);
         expect(prefix + ".object2IntMap", src.object2IntMap, dst.object2IntMap);
-        expect(prefix + ".handler", src.handler.serializeNBT(), dst.handler.serializeNBT());
+        expect(prefix + ".handler", src.handler.serializeNBT(registries), dst.handler.serializeNBT(registries));
         expect(prefix + ".handlerArray", handlerArrayTag(src), handlerArrayTag(dst));
         expect(prefix + ".module.ticks", src.module.ticks, dst.module.ticks);
         expect(prefix + ".module.name", src.module.name, dst.module.name);
@@ -897,12 +941,12 @@ public final class TestBlockEntityTests {
     private List<CompoundTag> handlerArrayTag(TestBlockEntity be) {
         List<CompoundTag> tags = new ArrayList<>();
         for (ItemStackHandler handler : be.handlerArray) {
-            tags.add(handler.serializeNBT());
+            tags.add(handler.serializeNBT(registries));
         }
         return tags;
     }
 
-    /** {@code ItemStack} has no {@code equals}, so compare slot by slot through {@code matches}. */
+    /** {@code ItemStack} has no content {@code equals}, so compare slot by slot through {@code matches}. */
     private boolean stacksEqual(ItemStack[] a, ItemStack[] b) {
         if (a.length != b.length) return false;
         for (int i = 0; i < a.length; i++) {
@@ -918,16 +962,14 @@ public final class TestBlockEntityTests {
     }
 
     /**
-     * Compares fluid kind, amount and NBT, treating an absent tag and an empty tag as equal — NBT codecs
-     * are free to normalize one into the other, and {@code Objects.equals} would not.
+     * Compares fluid kind, amount and components. 1.21 replaced the free-form NBT tag with data
+     * components, and {@link FluidStack#matches} is exactly that comparison, so an absent component
+     * map and an empty one still compare equal (which {@code Objects.equals} on the raw tag would not
+     * have guaranteed either).
      */
     private boolean fluidsEqual(FluidStack a, FluidStack b) {
         if (a == null || b == null) return a == b;
-        if (a.getAmount() != b.getAmount() || a.getFluid() != b.getFluid()) return false;
-        var tagA = a.getTag();
-        var tagB = b.getTag();
-        if (tagA == null || tagA.isEmpty()) return tagB == null || tagB.isEmpty();
-        return tagA.equals(tagB);
+        return FluidStack.matches(a, b);
     }
 
     private boolean fluidsEqual(FluidStack[] a, FluidStack[] b) {

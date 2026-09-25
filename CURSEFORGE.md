@@ -165,7 +165,7 @@ repositories {
 }
 
 dependencies {
-    implementation fg.deobf("com.gto:datasynclib-forge-1.20.1:26.9.4")
+    implementation "com.gto:datasynclib-neoforge-1.21.1:26.10.0-neoforge"
 }
 ```
 
@@ -194,7 +194,7 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 | **FieldDefinitionStorage** | Global cache — scans class hierarchy for annotated fields |
 | **FieldDataManager** | Per-instance lifecycle manager — field discovery, change detection, serialization |
 | **DataField hierarchy** | `AbstractField` (primitive values), `ObjField` (objects with codecs), `AbstractFieldAccess` (collections/maps/arrays) |
-| **DataSyncCodec** | Unified codec registry pairing `ByteStreamCodec` (network) with `DataCodec` (persistence) |
+| **DataSyncCodec** | Unified codec registry pairing a native `StreamCodec<RegistryFriendlyByteBuf, T>` (network) with a `DataCodec` (persistence) |
 | **Data type system** | 19-type sealed binary format, more compact than NBT, with VarInt encoding |
 
 ---

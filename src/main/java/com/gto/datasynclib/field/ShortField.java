@@ -2,10 +2,11 @@ package com.gto.datasynclib.field;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.SnapshotScope;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.datastream.data.ShortData;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -31,14 +32,14 @@ public final class ShortField extends AbstractField<Short> {
     }
 
     @Override
-    public void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean writeAll) {
+    public void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         var value = definition.getShort(source);
-        lastValue = value;
+        if (!SnapshotScope.active()) lastValue = value;
         data.writeShort(value);
     }
 
     @Override
-    public void readFromBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data) {
+    public void readFromBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull RegistryFriendlyByteBuf data) {
         var value = data.readShort();
         definition.setShort(source, value);
         var listener = definition.getListener(side);

@@ -164,11 +164,11 @@ li { margin: 4px 0; }
 
 <!-- ===== HERO ===== -->
 <div class="hero">
-    <h1>DataSyncLib <span class="version">v26.9.4 for Minecraft 1.20.1</span></h1>
+    <h1>DataSyncLib <span class="version">v26.10.0-neoforge for Minecraft 1.21.1</span></h1>
     <p>An annotation-driven Minecraft data synchronization framework — automatic client-server field sync, change detection, and disk persistence.</p>
     <div class="badge-row">
-        <span class="badge green">Minecraft 1.20.1</span>
-        <span class="badge blue">Forge 47.4.21</span>
+        <span class="badge green">Minecraft 1.21.1</span>
+        <span class="badge blue">NeoForge 21.1.234</span>
         <span class="badge orange">Java 21</span>
         <span class="badge purple">LGPL 3.0</span>
     </div>
@@ -177,7 +177,7 @@ li { margin: 4px 0; }
 <!-- ===== INTRO ===== -->
 <h2 id="intro">Introduction</h2>
 <p><strong>DataSyncLib</strong> is a data synchronization library purpose-built for Minecraft mod development. Using declarative annotations (<code>@SyncToClient</code>, <code>@SyncToServer</code>, <code>@SaveToDisk</code>), it automates field synchronization between client and server, change detection, and disk persistence — drastically reducing boilerplate code.</p>
-<p>In traditional Forge development, you must manually handle <code>FriendlyByteBuf</code> reading/writing, <code>CompoundTag</code> serialization, and methods like <code>getUpdateTag()</code>/<code>saveAdditional()</code>. DataSyncLib abstracts these patterns into a unified framework — just annotate your fields and extend the provided base class.</p>
+<p>In traditional NeoForge development, you must manually handle <code>RegistryFriendlyByteBuf</code> reading/writing, <code>CompoundTag</code> serialization, and methods like <code>getUpdateTag(HolderLookup.Provider)</code>/<code>saveAdditional(CompoundTag, HolderLookup.Provider)</code>. DataSyncLib abstracts these patterns into a unified framework — just annotate your fields and extend the provided base class.</p>
 
 <!-- ===== FEATURES ===== -->
 <h2 id="features">Key Features</h2>
@@ -201,7 +201,7 @@ li { margin: 4px 0; }
 <h3>1. Add Dependency</h3>
 <pre><code><span class="cmt">// build.gradle</span>
 <span class="kw">dependencies</span> {
-    <span class="kw">implementation</span> <span class="str">'com.gto:datasynclib:26.9.4'</span>
+    <span class="kw">implementation</span> <span class="str">'com.gto:datasynclib-neoforge-1.21.1:26.10.0-neoforge'</span>
 }</code></pre>
 
 <h3>2. Create a BlockEntity</h3>
@@ -224,7 +224,7 @@ li { margin: 4px 0; }
         <span class="typ">DataSyncNetwork</span>.syncBlockEntityToClient(<span class="kw">this</span>, <span class="kw">false</span>, <span class="kw">true</span>);
     }
 }</code></pre>
-<div class="note">When extending <code>FieldDataHolderBlockEntity</code>, the framework automatically handles serialization in <code>getUpdateTag()</code> / <code>saveAdditional()</code> / <code>load()</code>.</div>
+<div class="note">When extending <code>FieldDataHolderBlockEntity</code>, the framework automatically handles serialization in <code>getUpdateTag(HolderLookup.Provider)</code> / <code>saveAdditional(CompoundTag, HolderLookup.Provider)</code> / <code>loadAdditional(CompoundTag, HolderLookup.Provider)</code>.</div>
 
 <!-- ===== ARCHITECTURE ===== -->
 <h2 id="architecture">Architecture Overview</h2>
@@ -238,8 +238,8 @@ li { margin: 4px 0; }
         <tr><td>Management</td><td>FieldDataManager, LazyFieldDataManager</td><td>Per-instance lifecycle: change detection, serialization, deserialization, with re-entrancy guards</td></tr>
         <tr><td>Field</td><td>DataField, BooleanField, IntField, ObjCodecField&hellip;</td><td>Concrete field read/write, change detection, and buffer serialization implementations</td></tr>
         <tr><td>Access</td><td>CollectionAccess, MapAccess, SerializableAccess&hellip;</td><td>Proxy access and serialization for final fields (collections/Maps/custom types)</td></tr>
-        <tr><td>Codec</td><td>DataSyncCodec, ByteStreamCodec, DataCodec</td><td>Type-level codec registration and invocation, unifying network and persistence paths</td></tr>
-        <tr><td>Transport</td><td>DataSyncNetwork, BlockEntitySyncPacket, EntitySyncPacket</td><td>Network packet send/receive for both BlockEntity and Entity, C2S/S2C bidirectional</td></tr>
+        <tr><td>Codec</td><td>DataSyncCodec, CombinedCodec, DataCodec</td><td>Type-level codec registration and invocation, unifying network (StreamCodec) and persistence (DataCodec) paths</td></tr>
+        <tr><td>Transport</td><td>DataSyncNetwork, BlockEntitySyncPacket, EntitySyncPacket</td><td>NeoForge payload (<code>CustomPacketPayload</code> + <code>StreamCodec</code>) send/receive for both BlockEntity and Entity, C2S/S2C bidirectional</td></tr>
     </tbody>
 </table>
 
@@ -251,17 +251,18 @@ li { margin: 4px 0; }
 <ol>
     <li><strong>Modify field values</strong> — change annotated fields in tick or business methods</li>
     <li><strong>Call sync method</strong> — invoke <code>DataSyncNetwork.syncBlockEntityToClient(be, writeAll, autoDetectOnly)</code> (server side) or <code>syncBlockEntityToServer(be, writeAll, autoDetectOnly)</code> (client side)</li>
-    <li><strong>Internal pipeline</strong> — the method internally calls <code>FieldDataManager.updateFieldDirtyFlags()</code> → <code>writeToNetworkBuffer()</code> → sends network packet</li>
-    <li><strong>Remote reception</strong> — the packet triggers <code>FieldDataManager.readFromNetworkBuffer()</code> to deserialize and restore field values</li>
+    <li><strong>Internal pipeline</strong> — the method internally calls <code>FieldDataManager.updateFieldDirtyFlags()</code> → <code>writeToNetworkBuffer(side, context, writeAll)</code> → sends the payload via <code>PacketDistributor</code></li>
+    <li><strong>Remote reception</strong> — the payload triggers <code>FieldDataManager.readFromNetworkBuffer(side, context, data)</code> to deserialize and restore field values</li>
     <li><strong>Update notification</strong> — if the field has <code>scheduleUpdate = true</code>, <code>scheduleUpdate()</code> is called to notify UI refresh</li>
 </ol>
 <div class="note"><strong>Async support:</strong> all <code>DataSyncNetwork</code> send methods are async-safe. After detecting changes and serializing, they dispatch network sends to the main thread via <code>level.getServer().execute()</code> (server) or <code>Minecraft.getInstance().execute()</code> (client).</div>
+<div class="note"><strong>New in 1.21: SyncContext</strong> — the network buffer is now a <code>RegistryFriendlyByteBuf</code>, and it can only be built from a <code>RegistryAccess</code> (plus a connection type); neither can be recovered from a plain <code>byte[]</code>. Every network read/write therefore takes an explicit <code>SyncContext(RegistryAccess, ConnectionType)</code>: <code>FieldDataManager#writeToNetworkBuffer(LogicalSide, SyncContext, boolean)</code>, <code>readFromNetworkBuffer(LogicalSide, SyncContext, byte[])</code>, and the new <code>writeSnapshot(LogicalSide, SyncContext)</code>. It replaces the implicit thread context; nested managers and array sub-payloads simply inherit both attributes from the parent buffer.</div>
 
 <h3>Persistence Flow</h3>
 <ol>
     <li><strong>Call setChanged()</strong> — when data changes, you must call the BlockEntity's <code>setChanged()</code> to mark the chunk as needing save</li>
-    <li><strong>Minecraft saves the chunk</strong> — vanilla save mechanics trigger <code>saveAdditional()</code>, where the framework serializes <code>@SaveToDisk</code> fields to NBT</li>
-    <li><strong>Load restoration</strong> — on chunk load, <code>load()</code> automatically restores persisted field values</li>
+    <li><strong>Minecraft saves the chunk</strong> — vanilla save mechanics trigger <code>saveAdditional(CompoundTag, HolderLookup.Provider)</code>, where the framework serializes <code>@SaveToDisk</code> fields to NBT</li>
+    <li><strong>Load restoration</strong> — on disk load, <code>loadAdditional(CompoundTag, HolderLookup.Provider)</code> automatically restores persisted field values; the chunk-sync <code>"field_sync"</code> data is handled separately by <code>handleUpdateTag(CompoundTag, HolderLookup.Provider)</code> in 1.21, so the two paths never interfere</li>
 </ol>
 <div class="note warn"><strong>Important:</strong> the framework does <strong>not</strong> call <code>setChanged()</code> for you. You must call it manually after data changes, otherwise the chunk is not marked dirty and data won't be written to disk.</div>
 
@@ -411,8 +412,8 @@ li { margin: 4px 0; }
         <tr><td>getFieldDataManager()</td><td><strong>Required.</strong> Returns the associated FieldDataManager instance</td></tr>
         <tr><td>markFieldsForSync(String...)</td><td>Convenience default. Marks specified fields as dirty (for autoDetect=false fields)</td></tr>
         <tr><td>scheduleUpdate(LogicalSide)</td><td>Default. Called on field update notification. Override to trigger UI refresh etc.</td></tr>
-        <tr><td>writeCustomSyncData(buf, writeAll)</td><td>Write additional custom data to the network buffer before standard field sync</td></tr>
-        <tr><td>readCustomSyncData(buf)</td><td>Read additional custom data from the network buffer before standard field sync</td></tr>
+        <tr><td>writeCustomSyncData(buf, writeAll)</td><td>Write additional custom data to the <code>RegistryFriendlyByteBuf</code> before standard field sync</td></tr>
+        <tr><td>readCustomSyncData(buf)</td><td>Read additional custom data from the <code>RegistryFriendlyByteBuf</code> before standard field sync</td></tr>
         <tr><td>writeCustomSaveData(data)</td><td>Write additional custom data to StringMapData before standard field persistence</td></tr>
         <tr><td>readCustomSaveData(data, version)</td><td>Read additional custom data from StringMapData before standard field loading</td></tr>
     </tbody>
@@ -428,8 +429,8 @@ li { margin: 4px 0; }
         <tr><td>markAsChanged()</td><td>Force-mark as changed, ensuring inclusion in next sync</td></tr>
         <tr><td>clearChanged()</td><td>Clear the change flag (called after sync/persistence completes)</td></tr>
         <tr><td>isChanged()</td><td>Check whether marked as changed</td></tr>
-        <tr><td>writeBuffer(side, buf)</td><td>Write data to FriendlyByteBuf (network sync)</td></tr>
-        <tr><td>readBuffer(side, buf)</td><td>Read data from FriendlyByteBuf (network sync)</td></tr>
+        <tr><td>writeBuffer(side, buf)</td><td>Write data to a <code>RegistryFriendlyByteBuf</code> (network sync)</td></tr>
+        <tr><td>readBuffer(side, buf)</td><td>Read data from a <code>RegistryFriendlyByteBuf</code> (network sync)</td></tr>
         <tr><td>writeData()</td><td>Encode data to a Data object (disk persistence)</td></tr>
         <tr><td>readData(data, dataVersion)</td><td>Decode data from a Data object, with version for migration (disk persistence)</td></tr>
     </tbody>
@@ -447,8 +448,8 @@ li { margin: 4px 0; }
         <tr><td>isChanged(source)</td><td>Check whether the field is marked dirty</td></tr>
         <tr><td>clearChanged(source)</td><td>Clear the dirty flag</td></tr>
         <tr><td>detectChange(side, source, autoDetectOnly)</td><td>Detect whether field value has changed. autoDetectOnly=true: only checks fields with autoDetect=true; false=force-detect all fields</td></tr>
-        <tr><td>writeToBuffer(side, source, buf, writeAll)</td><td>Write field value to network buffer. writeAll=true writes all fields regardless of dirty state</td></tr>
-        <tr><td>readFromBuffer(side, source, buf)</td><td>Read and set field value from network buffer, also triggers listener callbacks</td></tr>
+        <tr><td>writeToBuffer(side, source, buf, writeAll)</td><td>Write field value to a <code>RegistryFriendlyByteBuf</code>. writeAll=true writes all fields regardless of dirty state</td></tr>
+        <tr><td>readFromBuffer(side, source, buf)</td><td>Read and set field value from a <code>RegistryFriendlyByteBuf</code>, also triggers listener callbacks</td></tr>
         <tr><td>writeToData(source)</td><td>Encode field value to a Data object for persistence</td></tr>
         <tr><td>readFromData(source, data, version)</td><td>Decode and restore field value from a Data object</td></tr>
         <tr><td>mustDetect()</td><td>Default false. When true, detectChange is always called even if not marked dirty</td></tr>
@@ -476,7 +477,7 @@ li { margin: 4px 0; }
 <ul style="line-height: 2;">
     <li><strong>Field discovery &amp; instantiation</strong> — reads class-level metadata from <code>FieldDefinitionStorage</code>, creates DataField implementations for each field</li>
     <li><strong>Change detection</strong> — <code>updateFieldDirtyFlags(LogicalSide, boolean autoDetectOnly)</code> iterates sync fields, calling detectChange</li>
-    <li><strong>Network serialization</strong> — writes custom sync data first, then each dirty field as (VarInt fieldIndex, fieldPayload) pairs</li>
+    <li><strong>Network serialization</strong> — under the given <code>SyncContext</code>, writes custom sync data first, then each dirty field as (VarInt fieldIndex, fieldPayload) pairs</li>
     <li><strong>Data persistence</strong> — via <code>writeToData()</code>/<code>readFromData()</code> using the StringMapData format</li>
     <li><strong>Re-entrancy protection</strong> — <code>updating</code> and <code>writing</code> volatile flags prevent recursion</li>
     <li><strong>Directional field management</strong> — maintains three independent arrays: syncToClientFields[], syncToServerFields[], saveFields[]</li>
@@ -487,8 +488,9 @@ li { margin: 4px 0; }
     <thead><tr><th>Method</th><th>Description</th></tr></thead>
     <tbody>
         <tr><td>updateFieldDirtyFlags(side, autoDetectOnly)</td><td>Iterates sync fields calling detectChange. Returns true if any change or dirty flag found</td></tr>
-        <tr><td>writeToNetworkBuffer(side, writeAll)</td><td>Serializes dirty fields to byte[]. writeAll=true writes all fields</td></tr>
-        <tr><td>readFromNetworkBuffer(side, data)</td><td>Deserializes byte[] and restores field values, triggers listener and scheduleUpdate</td></tr>
+        <tr><td>writeToNetworkBuffer(side, context, writeAll)</td><td>Serializes dirty fields to byte[] under the given <code>SyncContext</code> (registries + connection type). writeAll=true writes all fields</td></tr>
+        <tr><td>readFromNetworkBuffer(side, context, data)</td><td>Deserializes byte[] under the given <code>SyncContext</code> and restores field values, triggers listener and scheduleUpdate</td></tr>
+        <tr><td>writeSnapshot(side, context)</td><td>New in 1.21: a <strong>non-consuming</strong> full snapshot (does not clear dirty flags or advance other observers' baseline), for one new observer</td></tr>
         <tr><td>writeToData()</td><td>Serializes all @SaveToDisk fields to StringMapData</td></tr>
         <tr><td>readFromData(data, dataVersion)</td><td>Deserializes and restores all persisted fields from StringMapData</td></tr>
         <tr><td>markFieldsForSync(fields...)</td><td>Marks fields as dirty by DataFieldDefinition or field name string</td></tr>
@@ -530,28 +532,29 @@ li { margin: 4px 0; }
 
 <!-- ===== DataSyncNetwork ===== -->
 <h2 id="datasync-network">DataSyncNetwork</h2>
-<p>The central network entry point (<code>@UtilityClass</code>), managing 4 registered network channels:</p>
+<p>The central network entry point. On 1.21/NeoForge the Forge <code>SimpleChannel</code> is gone; the library registers two NeoForge payloads (<code>CustomPacketPayload</code> + Mojang <code>StreamCodec</code>):</p>
 <table>
-    <thead><tr><th>Index</th><th>Direction</th><th>Description</th></tr></thead>
+    <thead><tr><th>Payload</th><th>Direction</th><th>Description</th></tr></thead>
     <tbody>
-        <tr><td>0</td><td>BlockEntity C2S</td><td>Client pushes field changes to server</td></tr>
-        <tr><td>1</td><td>BlockEntity S2C</td><td>Server pushes field changes to tracking clients</td></tr>
-        <tr><td>2</td><td>Entity C2S</td><td>Client pushes field changes to server</td></tr>
-        <tr><td>3</td><td>Entity S2C</td><td>Server pushes field changes to tracking clients</td></tr>
+        <tr><td>BlockEntitySyncPacket</td><td>playBidirectional (C2S + S2C)</td><td>Dimension + block position + block entity type + serialized field data</td></tr>
+        <tr><td>EntitySyncPacket</td><td>playBidirectional (C2S + S2C)</td><td>Dimension + entity network id + UUID + serialized field data</td></tr>
     </tbody>
 </table>
+<p>Payloads must be registered during mod construction through <code>RegisterPayloadHandlersEvent</code> (<code>modEventBus.addListener(DataSyncNetwork::register)</code>) — anything registered later is never sent to clients — and are sent with <code>PacketDistributor</code>. Each payload has a single handler; the direction is resolved at receive time from <code>IPayloadContext.flow()</code> (<code>CLIENTBOUND</code> → <code>LogicalSide.CLIENT</code>, <code>SERVERBOUND</code> → <code>LogicalSide.SERVER</code>) and the actual connection type comes from <code>context.listener().getConnectionType()</code>. Before use, a payload is re-validated against the receiver's own level: dimension, chunk, block entity type / entity identity, plus the sender's distance (within 8 blocks) for C2S.</p>
 
 <h3>Public Send Methods (all async-safe)</h3>
 <table>
     <thead><tr><th>Method</th><th>Calling Side</th><th>Parameters</th></tr></thead>
     <tbody>
         <tr><td>syncBlockEntityToClient(be, all, autoDetectOnly)</td><td>Server</td><td>all: full sync (true=all fields); autoDetectOnly: true=only check autoDetect fields</td></tr>
+        <tr><td>syncBlockEntityToPlayer(be, player)</td><td>Server</td><td>Sends the full state to one player as a non-consuming snapshot (<code>writeSnapshot</code>), without disturbing the chunk observers' delta baseline</td></tr>
         <tr><td>syncBlockEntityToServer(be, all, autoDetectOnly)</td><td>Client</td><td>Same as above</td></tr>
         <tr><td>syncEntityToClient(entity, all, autoDetectOnly)</td><td>Server</td><td>Same as above</td></tr>
         <tr><td>syncEntityToServer(entity, all, autoDetectOnly)</td><td>Client</td><td>Same as above</td></tr>
     </tbody>
 </table>
-<div class="note"><strong>Async mechanism:</strong> after detecting changes and serializing data, the methods dispatch the actual network send to the main thread via <code>level.getServer().execute()</code> (server) or <code>Minecraft.getInstance().execute()</code> (client), so they can be called from any thread. Additionally, when data is synced server→client, the receiving handler automatically calls <code>be.setChanged()</code> on the BlockEntity.</div>
+<div class="note"><strong>Async mechanism:</strong> after detecting changes and serializing data, the methods dispatch the actual payload send to the main thread via <code>level.getServer().execute()</code> (server) or <code>Minecraft.getInstance().execute()</code> (client), so they can be called from any thread; the dirty-flag update and the serialization are scheduled onto the owning thread as well, so a mutable holder is only ever touched by its own game thread.</div>
+<div class="note warn"><strong>C2S is handled as a request:</strong> the server never decodes a client payload straight into authoritative state. The target must implement <code>ClientSyncTarget</code> (deciding whether that player may send), provide a <strong>detached request holder</strong>, and validate the decoded values before merging. Decoding into the live holder is rejected by the framework.</div>
 
 <!-- ===== DataSyncCodec ===== -->
 <h2 id="codec">DataSyncCodec System</h2>
@@ -559,16 +562,24 @@ li { margin: 4px 0; }
 <table>
     <thead><tr><th>Component</th><th>Type</th><th>Purpose</th></tr></thead>
     <tbody>
-        <tr><td>streamWriter</td><td>ByteStreamEncoder&lt;T&gt;</td><td>Write objects to FriendlyByteBuf (network sync)</td></tr>
-        <tr><td>streamReader</td><td>ByteStreamDecoder&lt;T&gt;</td><td>Read objects from FriendlyByteBuf (network sync)</td></tr>
+        <tr><td>streamWriter</td><td>StreamEncoder&lt;? super RegistryFriendlyByteBuf, ? super T&gt;</td><td>Write objects to RegistryFriendlyByteBuf (network sync)</td></tr>
+        <tr><td>streamReader</td><td>StreamDecoder&lt;? super RegistryFriendlyByteBuf, ? extends T&gt;</td><td>Read objects from RegistryFriendlyByteBuf (network sync)</td></tr>
         <tr><td>dataWriter</td><td>DataEncoder&lt;T&gt;</td><td>Encode objects to Data objects (persistence)</td></tr>
         <tr><td>dataReader</td><td>DataDecoder&lt;T&gt;</td><td>Decode objects from Data objects (persistence)</td></tr>
     </tbody>
 </table>
+<div class="note"><strong>Changed in 1.21:</strong> the hand-rolled <code>ByteStreamCodec</code> / <code>ByteStreamEncoder</code> / <code>ByteStreamDecoder</code> are gone; the network side always uses Mojang's <code>StreamCodec&lt;RegistryFriendlyByteBuf, T&gt;</code>. <code>CombinedCodec&lt;T&gt;</code> extends both <code>DataCodec&lt;T&gt;</code> and <code>StreamCodec&lt;RegistryFriendlyByteBuf, T&gt;</code>, and <code>toStreamCodec()</code> / <code>toDataCodec()</code> expose either half. Container types are configured for both paths at once with the <code>CombinedCodec</code> static factories: <code>collection(factory, codec)</code>, <code>list(codec)</code>, <code>set(codec)</code>, <code>array(type, codec)</code>, <code>map(factory, keyCodec, valueCodec)</code>. When only a disk codec exists, <code>StreamCodecs.fromData(DataCodec)</code> bridges the network side (it writes the Data tree inline, with the registry lookup supplied by the buffer).</div>
+<pre><code>// Compose a container across both paths (network: VarInt size + elements; disk: ListData)
+DataSyncCodec&lt;List&lt;ItemStack&gt;&gt; LIST_CODEC = CombinedCodec.list(DataSyncCodec.ITEM_STACK_CODEC);
+DataSyncCodec&lt;Map&lt;String, Integer&gt;&gt; MAP_CODEC =
+    CombinedCodec.map(HashMap::new, DataSyncCodec.STRING_CODEC, DataSyncCodec.INT_CODEC);
+
+// With a disk codec only: StreamCodecs.fromData bridges the network side in the buffer's registry context
+StreamCodec&lt;RegistryFriendlyByteBuf, MyType&gt; stream = StreamCodecs.fromData(MY_DATA_CODEC);</code></pre>
 <p>Features:</p>
 <ul>
     <li><strong>FastUtil-backed registry</strong> — internal <code>Reference2ReferenceOpenHashMap</code> for type-to-codec mapping, O(1) identity-keyed lookup</li>
-    <li><strong>Multi-source construction</strong> — of(streamCodec) / of(dataCodec) / of(streamCodec, dataCodec) / of(streamCodec, mojangCodec)</li>
+    <li><strong>Multi-source construction</strong> — of(streamCodec, dataCodec) / of(dataCodec) (the latter derives the network side via <code>StreamCodecs.fromData</code>) / of(four codec components); <code>CombinedCodec.of(Codec)</code> also adapts a Mojang Codec</li>
     <li><strong>Auto-generated enums</strong> — all enum types auto-generate codecs on first access via ConcurrentHashMapCache</li>
     <li><strong>Auto-generated arrays</strong> — all non-primitive array types auto-generate codecs on first access via ConcurrentHashMapCache</li>
     <li><strong>Generic support</strong> — register() accepts Class&lt;?&gt;... genericTypes, using identityHashCode-wrapped arrays as cache keys</li>
@@ -577,7 +588,7 @@ li { margin: 4px 0; }
 
 <!-- ===== FieldDataCodec ===== -->
 <h2 id="field-data-codec">FieldDataCodec — POJO Codec</h2>
-<p><code>FieldDataCodec&lt;T&gt;</code> wraps an annotated POJO class, serializing all its <code>@SaveToDisk</code>/<code>@SyncToClient</code> fields as a single unit. It implements both <code>ByteStreamCodec&lt;T&gt;</code> and <code>DataCodec&lt;T&gt;</code>, so it can be referenced directly in the <code>@Codec</code> annotation.</p>
+<p><code>FieldDataCodec&lt;T&gt;</code> wraps an annotated POJO class, serializing all its <code>@SaveToDisk</code>/<code>@SyncToClient</code> fields as a single unit. It implements <code>CombinedCodec&lt;T&gt;</code> (that is <code>StreamCodec&lt;RegistryFriendlyByteBuf, T&gt;</code> plus <code>DataCodec&lt;T&gt;</code>), so it can be referenced directly in the <code>@Codec</code> annotation.</p>
 
 <div class="code-block"><pre><span class="kw">private static final</span> <span class="typ">FieldDataCodec</span>&lt;<span class="typ">MyConfig</span>&gt; CONFIG_CODEC =
     <span class="typ">FieldDataManager</span>.createCodec(<span class="typ">MyConfig</span>.class, <span class="typ">MyConfig</span>::<span class="kw">new</span>);
@@ -605,7 +616,7 @@ li { margin: 4px 0; }
 <p>The DataComponent system provides an optional component-based data model, similar to vanilla Minecraft's DataComponents. It manages typed keys via <code>DataComponentRegistry</code> and stores data in <code>DataComponentMap</code>, with efficient merge semantics.</p>
 
 <h3>DataComponentRegistry</h3>
-<p>Extends <code>Registry&lt;String, DataComponentKey&lt;?&gt;&gt;</code> and simultaneously implements <code>ByteStreamCodec&lt;DataComponentMap&gt;</code>, <code>DataCodec&lt;DataComponentMap&gt;</code>, and Mojang's <code>Codec&lt;DataComponentMap&gt;</code> — usable directly as a codec for all three serialization paths.</p>
+<p>Extends <code>Registry&lt;String, DataComponentKey&lt;?&gt;&gt;</code> and implements <code>CombinedCodec&lt;DataComponentMap&gt;</code> (that is <code>StreamCodec&lt;RegistryFriendlyByteBuf, DataComponentMap&gt;</code> plus <code>DataCodec&lt;DataComponentMap&gt;</code>) — usable directly as a codec for both the network and the persistence path.</p>
 <pre><code><span class="cmt">// Create registry</span>
 <span class="typ">DataComponentRegistry</span> registry = <span class="kw">new</span> <span class="typ">DataComponentRegistry</span>(<span class="str">"my_mod"</span>);
 registry.unfreeze();
@@ -669,8 +680,9 @@ map.merge(otherMap);                           <span class="cmt">// bulk merge a
         <tr><td>getId(value) / getKey(value)</td><td>Reverse-lookup integer ID or key</td></tr>
         <tr><td>containsKey(key) / containsValue(value)</td><td>Existence checks</td></tr>
         <tr><td>unfreeze() / freeze()</td><td>Lifecycle: unfreeze to register → freeze to lock and build indices</td></tr>
-        <tr><td>streamCodec()</td><td>Returns an integer-ID-based ByteStreamCodec&lt;V&gt;</td></tr>
-        <tr><td>dataCodec(keyCodec)</td><td>Returns a key-serialization-based DataCodec&lt;V&gt;</td></tr>
+        <tr><td>streamCodec()</td><td>Returns an integer-ID-based StreamCodec&lt;RegistryFriendlyByteBuf, V&gt;</td></tr>
+        <tr><td>dataCodec()</td><td>Returns the key-serialization-based DataCodec&lt;V&gt; (cached at construction time)</td></tr>
+        <tr><td>combinedCodec()</td><td>Returns the DataSyncCodec&lt;V&gt; built from <code>streamCodec()</code> + <code>dataCodec()</code></td></tr>
         <tr><td>codec(keyCodec)</td><td>Returns a Mojang Codec&lt;V&gt;</td></tr>
     </tbody>
 </table>
@@ -681,7 +693,7 @@ reg.register(<span class="str">"foo"</span>, fooInstance);
 reg.register(<span class="str">"bar"</span>, barInstance);
 reg.freeze();
 
-<span class="kw">int</span> id = reg.getId(fooInstance);        <span class="cmt">// auto-assigned integer ID<br></span><span class="cmt"></span><span class="typ">MyType</span> v = reg.get(<span class="str">"foo"</span>);              <span class="cmt">// lookup by key<br></span><span class="cmt"></span><span class="typ">ByteStreamCodec</span>&lt;<span class="typ">MyType</span>&gt; c = reg.streamCodec();  <span class="cmt">// for network sync</span></code></pre>
+<span class="kw">int</span> id = reg.getId(fooInstance);        <span class="cmt">// auto-assigned integer ID<br></span><span class="cmt"></span><span class="typ">MyType</span> v = reg.get(<span class="str">"foo"</span>);              <span class="cmt">// lookup by key<br></span><span class="cmt"></span><span class="typ">StreamCodec</span>&lt;<span class="typ">RegistryFriendlyByteBuf</span>, <span class="typ">MyType</span>&gt; c = reg.streamCodec();  <span class="cmt">// for network sync</span></code></pre>
 
 <!-- ===== NotifiableHolder ===== -->
 <h2 id="notifiable-holder">NotifiableHolder System</h2>
@@ -763,11 +775,13 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
         <tr><td><code>TAG_CODEC</code></td><td>CustomData → NbtUtil.TAG_TYPE</td><td>1-byte type ID + NBT write</td></tr>
         <tr><td><code>COMPOUND_TAG_CODEC</code></td><td>CustomData → NbtUtil.COMPOUND_TAG_TYPE</td><td>Direct NBT write (no type ID)</td></tr>
         <tr><td><code>LIST_TAG_CODEC</code></td><td>CustomData → NbtUtil.LIST_TAG_TYPE</td><td>Direct NBT write (no type ID)</td></tr>
-        <tr><td><code>ITEM_STACK_CODEC</code></td><td>CompoundTag (save/load)</td><td><code>FriendlyByteBuf.writeItem()</code></td></tr>
-        <tr><td><code>FLUID_STACK_CODEC</code></td><td>CompoundTag (writeToNBT)</td><td><code>FluidStack.writeToPacket()</code></td></tr>
-        <tr><td><code>COMPONENT_CODEC</code></td><td>StringData (JSON)</td><td><code>FriendlyByteBuf.writeComponent()</code></td></tr>
+        <tr><td><code>ITEM_STACK_CODEC</code></td><td>CompoundTag (1.21 data components: <code>saveOptional</code>/<code>parseOptional</code>)</td><td><code>ItemStack.OPTIONAL_STREAM_CODEC</code> (data components)</td></tr>
+        <tr><td><code>FLUID_STACK_CODEC</code></td><td>CompoundTag (1.21 data components: <code>saveOptional</code>/<code>parseOptional</code>)</td><td><code>FluidStack.OPTIONAL_STREAM_CODEC</code> (data components)</td></tr>
+        <tr><td><code>COMPONENT_CODEC</code></td><td>StringData (JSON, converted with the registry from <code>RegistryContext</code>)</td><td><code>ComponentSerialization.STREAM_CODEC</code></td></tr>
     </tbody>
 </table>
+
+<div class="note"><strong>1.21 data components:</strong> item, fluid and chat-component encoding now goes through 1.21's data components. On the disk side <code>DataCodecs</code> uses the component-aware <code>saveOptional(provider)</code> / <code>parseOptional(provider, tag)</code> (and <code>Component.Serializer.toJson/fromJson(..., provider)</code> for components), with the registry supplied by <code>RegistryContext</code> inside the persistence scope; on the network side it reuses vanilla's <code>ItemStack.OPTIONAL_STREAM_CODEC</code>, <code>FluidStack.OPTIONAL_STREAM_CODEC</code> and <code>ComponentSerialization.STREAM_CODEC</code> directly.</div>
 
 <p>Both classes also provide <code>of(Registry)</code> methods to create codecs from vanilla Minecraft Registries (numeric IDs for network, ResourceLocation keys for persistence).</p>
 
@@ -905,13 +919,14 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 <table>
     <thead><tr><th>Method</th><th>Auto Behavior</th></tr></thead>
     <tbody>
-        <tr><td><code>getUpdateTag()</code></td><td>Overrides vanilla to include <code>@SyncToClient</code> fields under <code>"field_sync"</code>. New players receive current state on chunk load</td></tr>
-        <tr><td><code>saveAdditional(tag)</code></td><td>Writes <code>VERSION</code> and <code>"field_save"</code> — serialized <code>@SaveToDisk</code> fields</td></tr>
-        <tr><td><code>load(tag)</code></td><td>Prefers <code>"field_sync"</code> (chunk sync), falls back to <code>"field_save"</code> (disk restore). Sync-first ensures fresh state for new players</td></tr>
+        <tr><td><code>getUpdateTag(lookup)</code></td><td>Overrides vanilla to include <code>@SyncToClient</code> fields under <code>"field_sync"</code>, written with <code>writeSnapshot(LogicalSide.SERVER, SyncContext)</code>. New players receive current state on chunk load</td></tr>
+        <tr><td><code>handleUpdateTag(tag, lookup)</code></td><td>New in 1.21: the client decodes <code>"field_sync"</code> here (<code>LogicalSide.CLIENT</code>) when a chunk / block entity data packet arrives — no longer through <code>loadAdditional</code></td></tr>
+        <tr><td><code>saveAdditional(tag, lookup)</code></td><td>Writes <code>dataVersion()</code> and <code>"field_save"</code> — serialized <code>@SaveToDisk</code> fields</td></tr>
+        <tr><td><code>loadAdditional(tag, lookup)</code></td><td>Restores disk data from <code>"field_save"</code> (1.21 no longer routes chunk-sync data through it)</td></tr>
     </tbody>
 </table>
 
-<p>Manual steps: ① Call sync methods in tick, ② Call <code>setChanged()</code> after field changes, ③ Increment <code>VERSION</code> when changing field layout</p>
+<p>Manual steps: ① Call sync methods in tick, ② Call <code>setChanged()</code> after field changes, ③ Override <code>dataVersion()</code> (it defaults to the shared <code>VERSION</code>) or bump <code>VERSION</code> when changing field layout</p>
 
 <!-- ===== USAGE ===== -->
 <h2 id="usage-blockentity">BlockEntity Usage (Recommended)</h2>
@@ -1064,8 +1079,8 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 <p>Persistence relies on Minecraft's vanilla chunk save mechanism:</p>
 <ol>
     <li><strong>Mark dirty chunk</strong> — call <code>setChanged()</code> after data changes</li>
-    <li><strong>Minecraft auto-saves</strong> — vanilla periodically checks dirty chunks and calls <code>saveAdditional()</code></li>
-    <li><strong>Framework serializes</strong> — <code>FieldDataHolderBlockEntity.saveAdditional()</code> auto-calls <code>writeToData()</code></li>
+    <li><strong>Minecraft auto-saves</strong> — vanilla periodically checks dirty chunks and calls <code>saveAdditional(CompoundTag, HolderLookup.Provider)</code></li>
+    <li><strong>Framework serializes</strong> — <code>FieldDataHolderBlockEntity.saveAdditional(tag, lookup)</code> auto-calls <code>writeToData()</code> (publishing the registry through <code>RegistryContext</code> while it serializes)</li>
 </ol>
 <div class="note warn"><strong>Critical:</strong> without calling <code>setChanged()</code>, data will <strong>not</strong> be written to disk. Call it immediately after modifying any <code>@SaveToDisk</code> field.</div>
 
@@ -1079,19 +1094,25 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
     (data, version) -> <span class="kw">new</span> <span class="typ">MyCustomType</span>(data.getInt())        <span class="cmt">// dataReader</span>
 );
 
-<span class="cmt">// Method 2: use ByteStreamCodec + DataCodec</span>
+<span class="cmt">// Method 2: native StreamCodec + DataCodec</span>
 <span class="typ">DataSyncCodec</span>.register(<span class="typ">MyCustomType</span>.class,
-    <span class="typ">ByteStreamCodec</span>.of(myWriter, myReader),
+    <span class="typ">StreamCodec</span>.of(myWriter, myReader),
     <span class="typ">DataCodec</span>.of(myDataWriter, myDataReader)
 );
 
-<span class="cmt">// Method 3: use ByteStreamCodec + Mojang Codec</span>
+<span class="cmt">// Method 3: native StreamCodec + Mojang Codec</span>
 <span class="typ">DataSyncCodec</span>.register(<span class="typ">MyCustomType</span>.class,
-    <span class="typ">ByteStreamCodec</span>.of(myWriter, myReader),
+    <span class="typ">StreamCodec</span>.of(myWriter, myReader),
     myMojangCodec
 );
 
-<span class="cmt">// Method 4: from Forge Registry</span>
+<span class="cmt">// Method 4: with a disk codec only, derive the network side via StreamCodecs.fromData</span>
+<span class="typ">DataSyncCodec</span>.register(<span class="typ">MyCustomType</span>.class,
+    <span class="typ">StreamCodecs</span>.fromData(MY_DATA_CODEC),
+    MY_DATA_CODEC
+);
+
+<span class="cmt">// Method 5: from a NeoForge Registry</span>
 <span class="typ">DataSyncCodec</span>.register(<span class="typ">MyMobEffect</span>.class, <span class="typ">BuiltInRegistries</span>.MOB_EFFECT);</code></pre>
 
 <h2 id="usage-advanced">Advanced Features</h2>
@@ -1127,12 +1148,12 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 
 <h3>Custom Sync Data</h3>
 <pre><code><span class="an">@Override</span>
-<span class="kw">public void</span> <span class="typ">writeCustomSyncData</span>(<span class="typ">FriendlyByteBuf</span> buf, <span class="kw">boolean</span> force) {
+<span class="kw">public void</span> <span class="typ">writeCustomSyncData</span>(<span class="typ">RegistryFriendlyByteBuf</span> buf, <span class="kw">boolean</span> force) {
     buf.writeBoolean(someCustomFlag);
 }
 
 <span class="an">@Override</span>
-<span class="kw">public void</span> <span class="typ">readCustomSyncData</span>(<span class="typ">FriendlyByteBuf</span> buf) {
+<span class="kw">public void</span> <span class="typ">readCustomSyncData</span>(<span class="typ">RegistryFriendlyByteBuf</span> buf) {
     <span class="kw">this</span>.someCustomFlag = buf.readBoolean();
 }</code></pre>
 
@@ -1172,9 +1193,9 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
         <tr><td>ResourceLocation</td><td>RESOURCE_LOCATION_CODEC</td><td>Resource location</td></tr>
         <tr><td>BlockPos</td><td>BLOCK_POS_CODEC</td><td>Block position</td></tr>
         <tr><td>CompoundTag</td><td>COMPOUND_TAG_CODEC</td><td>NBT compound tag</td></tr>
-        <tr><td>ItemStack</td><td>ITEM_STACK_CODEC</td><td>Item stack</td></tr>
-        <tr><td>FluidStack</td><td>FLUID_STACK_CODEC</td><td>Fluid stack</td></tr>
-        <tr><td>Component</td><td>COMPONENT_CODEC</td><td>Chat component</td></tr>
+        <tr><td>ItemStack</td><td>ITEM_STACK_CODEC</td><td>Item stack (1.21 data components)</td></tr>
+        <tr><td>FluidStack</td><td>FLUID_STACK_CODEC</td><td>Fluid stack (1.21 data components)</td></tr>
+        <tr><td>Component</td><td>COMPONENT_CODEC</td><td>Chat component (1.21 data components)</td></tr>
         <tr><td>BlockState</td><td>BLOCK_STATE_CODEC</td><td>Block state</td></tr>
         <tr><td>Data</td><td>DATA_CODEC</td><td>Data type system itself (passthrough)</td></tr>
         <tr><td>StringMapData</td><td>MAP_DATA_CODEC</td><td>String-keyed map data</td></tr>
@@ -1223,11 +1244,14 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
         <tr><td>Reference2LongMapAccess</td><td>Reference2LongMap (FastUtil)</td></tr>
         <tr><td>SerializableAccess</td><td>IDataSerializable</td></tr>
         <tr><td>FieldDataHolderAccess</td><td>IFieldDataHolder</td></tr>
+        <tr><td>TagSerializableAccess</td><td>INBTSerializable (NeoForge)</td></tr>
+        <tr><td>TagSerializableArrayAccess</td><td>INBTSerializable[] (NeoForge)</td></tr>
     </tbody>
 </table>
+<div class="note"><strong>1.21 note:</strong> NeoForge's <code>INBTSerializable</code> now lives in <code>net.neoforged.neoforge.common.util</code>, and both <code>serializeNBT(provider)</code> and <code>deserializeNBT(provider, tag)</code> take a <code>HolderLookup.Provider</code>. Such fields (e.g. <code>ItemStackHandler</code>, <code>FluidTank</code>) are supported through <code>TagSerializableAccess</code> / <code>TagSerializableArrayAccess</code>, registered below <code>IFieldDataHolder</code> / <code>IDataSerializable</code> and above plain <code>Collection</code> / <code>Map</code>. Note that its change detection hashes the serialized tag deeply on every check (it calls <code>serializeNBT</code> internally), so on hot fields prefer <code>@SyncToClient(autoDetect = false)</code> plus a manual <code>markFieldsForSync</code>.</div>
 
 <div class="footer">
-    <p>DataSyncLib v26.9.4 · Minecraft 1.20.1 · Forge 47.4.21 · Java 21 · License: GNU LGPL 3.0</p>
+    <p>DataSyncLib v26.10.0-neoforge · Minecraft 1.21.1 · NeoForge 21.1.234 · Java 21 · License: GNU LGPL 3.0</p>
 </div>
 
 </main>

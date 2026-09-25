@@ -1,7 +1,7 @@
 package com.gto.datasynclib;
 
 import com.gto.datasynclib.datastream.data.Data;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -16,7 +16,7 @@ import org.jetbrains.annotations.NotNull;
  * <h3>Two independent I/O paths:</h3>
  * <ul>
  *   <li><strong>Network:</strong> {@link #writeBuffer}/{@link #readBuffer} — uses
- *       {@link FriendlyByteBuf} for live client-server sync</li>
+ *       {@link RegistryFriendlyByteBuf} for live client-server sync</li>
  *   <li><strong>Persistence:</strong> {@link #writeData}/{@link #readData} — uses
  *       {@link Data} objects for disk save/load</li>
  * </ul>
@@ -73,7 +73,7 @@ public interface IDataSerializable {
      * @param side the logical side (client or server) performing the write
      * @param buf  the network buffer to write to, must not be null
      */
-    void writeBuffer(LogicalSide side, @NotNull FriendlyByteBuf buf);
+    void writeBuffer(LogicalSide side, @NotNull RegistryFriendlyByteBuf buf);
 
     /**
      * Reads the object's data from a network buffer during live synchronization.
@@ -82,7 +82,7 @@ public interface IDataSerializable {
      * @param side the logical side (client or server) performing the read
      * @param buf  the network buffer to read from, must not be null
      */
-    void readBuffer(LogicalSide side, @NotNull FriendlyByteBuf buf);
+    void readBuffer(LogicalSide side, @NotNull RegistryFriendlyByteBuf buf);
 
     /**
      * Serializes the object's data to a {@link Data} tree for persistent storage.

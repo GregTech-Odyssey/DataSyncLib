@@ -1,12 +1,13 @@
 package com.gto.datasynclib.field.access;
 
 import com.gto.datasynclib.DataFieldDefinition;
+import com.gto.datasynclib.DecodeLimits;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.LongArrayData;
 import com.gto.datasynclib.datastream.data.NullData;
 import it.unimi.dsi.fastutil.longs.LongCollection;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -33,14 +34,14 @@ public final class LongCollectionAccess extends AbstractFieldAccess<LongCollecti
     }
 
     @Override
-    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull LongCollection instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull LongCollection instance, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         data.writeVarInt(instance.size());
         instance.forEach(data::writeLong);
     }
 
     @Override
-    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull LongCollection instance, @NotNull FriendlyByteBuf data) {
-        var length = data.readVarInt();
+    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull LongCollection instance, @NotNull RegistryFriendlyByteBuf data) {
+        var length = DecodeLimits.size(data.readVarInt(), data, 0);
         instance.clear();
         for (int i = 0; i < length; i++) {
             instance.add(data.readLong());

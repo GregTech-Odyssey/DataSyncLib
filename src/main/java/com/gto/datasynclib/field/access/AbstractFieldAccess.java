@@ -8,7 +8,7 @@ import com.gto.datasynclib.datastream.data.ListData;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.datastream.data.StringMapData;
 import lombok.Getter;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -112,7 +112,7 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
     }
 
     @Override
-    public final void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean writeAll) {
+    public final void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         var value = getInstance(source);
         if (definition.instanceAsValue) {
             if (value == null) {
@@ -126,7 +126,7 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
     }
 
     @Override
-    public final void readFromBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data) {
+    public final void readFromBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull RegistryFriendlyByteBuf data) {
         T value;
         if (definition.instanceAsValue) {
             if (data.readBoolean()) {
@@ -226,13 +226,13 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
      *                 accessors); other implementations can ignore it because the caller has
      *                 already decided whether this field is written at all
      */
-    protected abstract void doWriteBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull FriendlyByteBuf data, boolean writeAll);
+    protected abstract void doWriteBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull RegistryFriendlyByteBuf data, boolean writeAll);
 
     /**
      * Template method: read the container's <em>contents</em> from the network buffer.
      * Called by {@link #readFromBuffer} after null/instance handling.
      */
-    protected abstract void doReadBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull FriendlyByteBuf data);
+    protected abstract void doReadBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull RegistryFriendlyByteBuf data);
 
     /**
      * Template method: serialize the container's <em>contents</em> to a Data object.

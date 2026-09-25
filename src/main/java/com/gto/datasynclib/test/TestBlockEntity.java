@@ -4,6 +4,8 @@ import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.DataSyncLib;
 import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
+import com.gto.datasynclib.RegistryContext;
+import com.gto.datasynclib.SyncContext;
 import com.gto.datasynclib.annotations.*;
 import com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity;
 import com.gto.datasynclib.listener.ObjNotifiableHolder;
@@ -18,6 +20,7 @@ import lombok.Getter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.GlobalPos;
+import net.minecraft.core.HolderLookup;
 import net.minecraft.core.SectionPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
@@ -31,8 +34,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.phys.AABB;
-import net.minecraftforge.fluids.FluidStack;
-import net.minecraftforge.items.ItemStackHandler;
+import net.neoforged.neoforge.fluids.FluidStack;
+import net.neoforged.neoforge.items.ItemStackHandler;
 
 import java.util.*;
 import java.util.function.Function;
@@ -58,6 +61,12 @@ import java.util.function.Function;
  * <p>{@code TestBlockEntityTests} is the executable documentation for all of it — read the two side by
  * side. Fields and nested types are package-private on purpose so the suite can read and mutate them
  * directly. Only registered when the mod is not running in production (see {@code DataSyncLib}).</p>
+ *
+ * <p><b>1.21 note:</b> the NBT entry points take a {@link HolderLookup.Provider}
+ * ({@code saveAdditional(tag, lookup)} / {@code loadAdditional(tag, lookup)}) and the chunk-load tag
+ * is built by {@code getUpdateTag(lookup)} and applied by {@code handleUpdateTag(tag, lookup)}. The
+ * network paths take a {@link SyncContext} instead, which is why both the suites and the test hooks
+ * below receive the registry context explicitly instead of reading it from a {@code Level}.</p>
  */
 class TestBlockEntity extends FieldDataHolderBlockEntity {
 
@@ -147,7 +156,7 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     @SyncToClient
     final Object2IntMap<String> object2IntMap = new Object2IntOpenHashMap<>();
 
-    /** Forge {@code INBTSerializable} → TagSerializableAccess / TagSerializableArrayAccess. */
+    /** NeoForge {@code INBTSerializable} → TagSerializableAccess / TagSerializableArrayAccess. */
     @SaveToDisk
     @SyncToClient
     final ItemStackHandler handler = new ItemStackHandler(3);
@@ -247,16 +256,38 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
         return value < 0;
     }
 
-    /** Test hook: the BE-level save path ({@code saveAdditional} is protected in the base class). */
-    CompoundTag saveToTag() {
+    /**
+     * Test hook: the BE-level save path ({@code saveAdditional} is protected in the base class).
+     *
+     * <p>1.21: the registry lookup is a parameter, exactly as the game passes it, so the suite can
+     * drive the save path without a {@code Level}.</p>
+     */
+    CompoundTag saveToTag(HolderLookup.Provider lookup) {
         var tag = new CompoundTag();
-        saveAdditional(tag);
+        saveAdditional(tag, lookup);
         return tag;
     }
 
-    /** Test hook: the BE-level load path. */
-    void loadFromTag(CompoundTag tag) {
-        load(tag);
+    /** Test hook: the BE-level load path (1.21 signature, hence the lookup parameter). */
+    void loadFromTag(CompoundTag tag, HolderLookup.Provider lookup) {
+        loadAdditional(tag, lookup);
+    }
+
+    /**
+     * Test hook: the chunk-load tag the base class builds in {@code getUpdateTag(lookup)}, which
+     * carries the full {@code @SyncToClient} state under {@code field_sync}.
+     */
+    CompoundTag saveSyncTag(HolderLookup.Provider lookup) {
+        return getUpdateTag(lookup);
+    }
+
+    /**
+     * Test hook: the client-side chunk-load path. In 1.21 NeoForge hands the
+     * {@code getUpdateTag} payload to {@code handleUpdateTag(tag, lookup)} instead of routing it
+     * through the save/load pair, so the suite applies it the same way.
+     */
+    void loadSyncTag(CompoundTag tag, HolderLookup.Provider lookup) {
+        handleUpdateTag(tag, lookup);
     }
 
     /**
@@ -313,13 +344,21 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
      * <p>Persistence needs {@code setChanged()} (here driven by the {@link #isDirty} flag through
      * {@link #updateTick()}); fields declared with {@code autoDetect = false} additionally need
      * {@code getFieldDataManager().markFieldsForSync("name")} before the sync call.</p>
+     *
+     * <p>1.21: the suites are still started here, once per JVM, because this is the only place with a
+     * live ticking {@code ServerLevel} — the level is used <em>only</em> to obtain
+     * {@code registryAccess()}, which becomes the suites' {@link SyncContext} (network) and their
+     * ambient {@link RegistryContext} (disk), so the test classes themselves stay level-free.</p>
      */
     protected void serverTick(ServerLevel level) {
         updateTick();
         if (!selfTestsRun) {
             selfTestsRun = true;
-            DataSyncSelfTests.runAll();
-            TestBlockEntityTests.runAll();
+            // Each suite publishes the lookup for its own disk work with RegistryContext.use(...),
+            // so all it needs from the level is the registry access.
+            var context = SyncContext.neoforge(level.registryAccess());
+            DataSyncSelfTests.runAll(context);
+            TestBlockEntityTests.runAll(context);
         }
         if (level.getGameTime() % 20 == 0) {
             isDirty = true;

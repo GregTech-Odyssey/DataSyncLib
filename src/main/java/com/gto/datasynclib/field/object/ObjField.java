@@ -2,10 +2,11 @@ package com.gto.datasynclib.field.object;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.SnapshotScope;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.field.AbstractField;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -46,9 +47,9 @@ public abstract class ObjField<T> extends AbstractField<T> {
     }
 
     @Override
-    public final void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data, boolean writeAll) {
+    public final void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         T value = definition.get(source);
-        lastValue = value;
+        if (!SnapshotScope.active()) lastValue = value;
         if (value == null) {
             data.writeBoolean(false);
         } else {
@@ -58,7 +59,7 @@ public abstract class ObjField<T> extends AbstractField<T> {
     }
 
     @Override
-    public void readFromBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data) {
+    public void readFromBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull RegistryFriendlyByteBuf data) {
         T value;
         if (data.readBoolean()) {
             value = read(source, data);
@@ -116,12 +117,12 @@ public abstract class ObjField<T> extends AbstractField<T> {
      * Encodes a non-null value into the network buffer.
      * The {@code null} case is handled by {@link #writeToBuffer} before this is called.
      */
-    protected abstract void write(@NotNull Object source, @NotNull FriendlyByteBuf data, @NotNull T value);
+    protected abstract void write(@NotNull Object source, @NotNull RegistryFriendlyByteBuf data, @NotNull T value);
 
     /**
      * Decodes a value from the network buffer; never asked to decode {@code null}.
      */
-    protected abstract @NotNull T read(@NotNull Object source, @NotNull FriendlyByteBuf data);
+    protected abstract @NotNull T read(@NotNull Object source, @NotNull RegistryFriendlyByteBuf data);
 
     /**
      * Encodes a non-null value into a {@link Data} tree. Returning {@link NullData#NONE}

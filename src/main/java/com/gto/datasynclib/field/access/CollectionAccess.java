@@ -1,12 +1,13 @@
 package com.gto.datasynclib.field.access;
 
 import com.gto.datasynclib.DataFieldDefinition;
+import com.gto.datasynclib.DecodeLimits;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.ListData;
 import com.gto.datasynclib.datastream.data.NullData;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
@@ -41,7 +42,7 @@ public final class CollectionAccess<E> extends AbstractFieldAccess<Collection> {
     }
 
     @Override
-    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull Collection instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull Collection instance, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         data.writeVarInt(instance.size());
         instance.forEach(element -> {
             if (element == null) {
@@ -54,8 +55,8 @@ public final class CollectionAccess<E> extends AbstractFieldAccess<Collection> {
     }
 
     @Override
-    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull Collection instance, @NotNull FriendlyByteBuf data) {
-        var length = data.readVarInt();
+    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull Collection instance, @NotNull RegistryFriendlyByteBuf data) {
+        var length = DecodeLimits.size(data.readVarInt(), data, 0);
         instance.clear();
         for (int i = 0; i < length; i++) {
             if (data.readBoolean()) {

@@ -2,6 +2,8 @@ package com.gto.datasynclib.forge;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.RegistryContext;
+import com.gto.datasynclib.SnapshotScope;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.ListData;
 import com.gto.datasynclib.datastream.data.NullData;
@@ -13,8 +15,8 @@ import net.minecraft.nbt.EndTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.Tag;
 import net.minecraft.nbt.TagTypes;
-import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.common.util.INBTSerializable;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.neoforged.neoforge.common.util.INBTSerializable;
 import org.apache.commons.lang3.ArrayUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -111,12 +113,12 @@ public final class TagSerializableArrayAccess extends AbstractFieldAccess<INBTSe
      */
     private static int hashOf(@Nullable INBTSerializable element) {
         if (element == null) return 0;
-        var nbt = element.serializeNBT();
+        var nbt = element.serializeNBT(RegistryContext.current());
         return nbt == null ? 0 : nbt.hashCode();
     }
 
     @Override
-    protected void doWriteBuffer(@NotNull LogicalSide side, INBTSerializable @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, INBTSerializable @NotNull [] instance, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         // Without per-slot information (a manual markFieldsForSync, or a write that has no marks)
         // fall back to sending everything, so an explicit mark is never silently dropped.
         boolean all = writeAll || slotHashes.length != instance.length || dirtySlots.isEmpty();
@@ -125,7 +127,7 @@ public final class TagSerializableArrayAccess extends AbstractFieldAccess<INBTSe
                 data.writeByte(0); // unchanged: the peer keeps the element it already has
                 continue;
             }
-            var nbt = instance[i] == null ? null : instance[i].serializeNBT();
+            var nbt = instance[i] == null ? null : instance[i].serializeNBT(RegistryContext.current());
             if (nbt == null) {
                 data.writeByte(0);
             } else {
@@ -137,17 +139,19 @@ public final class TagSerializableArrayAccess extends AbstractFieldAccess<INBTSe
                 }
             }
         }
-        dirtySlots.clear();
+        if (!SnapshotScope.active()) dirtySlots.clear();
     }
 
     @Override
-    protected void doReadBuffer(@NotNull LogicalSide side, INBTSerializable @NotNull [] instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, INBTSerializable @NotNull [] instance, @NotNull RegistryFriendlyByteBuf data) {
         for (var element : instance) {
             var type = TagTypes.getType(data.readByte());
             if (type == EndTag.TYPE) continue;
-            if (element == null) continue;
             try {
-                element.deserializeNBT(type.load(new ByteBufInputStream(data), 0, NbtAccounter.UNLIMITED));
+                // The tag must still be consumed for a null slot: the type byte and payload are
+                // read positionally, so skipping the load would desynchronize every later slot.
+                var tag = type.load(new ByteBufInputStream(data), NbtAccounter.create(2097152L));
+                if (element != null) element.deserializeNBT(RegistryContext.current(), tag);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -158,7 +162,7 @@ public final class TagSerializableArrayAccess extends AbstractFieldAccess<INBTSe
     protected @NotNull Data doWriteData(@NotNull Object source, INBTSerializable @NotNull [] instance) {
         var list = new ListData();
         for (var element : instance) {
-            var nbt = element == null ? null : element.serializeNBT();
+            var nbt = element == null ? null : element.serializeNBT(RegistryContext.current());
             if (nbt == null) {
                 list.addNull();
             } else {
@@ -181,7 +185,7 @@ public final class TagSerializableArrayAccess extends AbstractFieldAccess<INBTSe
             if (d == NullData.INSTANCE) continue;
             var element = instance[i];
             if (element == null) continue;
-            element.deserializeNBT(DataCodecs.TAG_CODEC.decode(d, dataVersion));
+            element.deserializeNBT(RegistryContext.current(), DataCodecs.TAG_CODEC.decode(d, dataVersion));
         }
     }
 }

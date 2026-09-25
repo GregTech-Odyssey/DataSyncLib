@@ -1,7 +1,7 @@
 package com.gto.datasynclib;
 
 import com.gto.datasynclib.datastream.data.StringMapData;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -74,12 +74,12 @@ public final class ChildFieldDataHolder implements IFieldDataHolder {
     }
 
     @Override
-    public void writeCustomSyncData(FriendlyByteBuf buf, boolean writeAll) {
+    public void writeCustomSyncData(RegistryFriendlyByteBuf buf, boolean writeAll) {
         if (target instanceof IFieldDataHolder h) h.writeCustomSyncData(buf, writeAll);
     }
 
     @Override
-    public void readCustomSyncData(FriendlyByteBuf buf) {
+    public void readCustomSyncData(RegistryFriendlyByteBuf buf) {
         if (target instanceof IFieldDataHolder h) h.readCustomSyncData(buf);
     }
 

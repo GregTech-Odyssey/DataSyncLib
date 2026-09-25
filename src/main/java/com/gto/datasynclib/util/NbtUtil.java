@@ -57,9 +57,13 @@ import java.util.function.Function;
 public class NbtUtil {
 
     /**
-     * Convenience function that exposes a {@link CompoundTag}'s backing map.
+     * Convenience function that exposes a {@link CompoundTag} as a live {@link Map}.
      * Used with {@link com.gto.datasynclib.annotations.Conversion @Conversion} to
      * manage a {@code CompoundTag} field as a {@code Map<String, Tag>} for sync/persistence.
+     *
+     * <p>1.21 has no access transformer, so this is a live view built on {@link TagMapView} over the
+     * tag's public API ({@code getAllKeys()}/{@code get}/{@code put}/{@code remove}) rather than a
+     * reference to the private backing map. Reads and writes still go straight to the tag.</p>
      *
      * <p>Usage:
      * <pre>{@code
@@ -67,7 +71,7 @@ public class NbtUtil {
      * private final CompoundTag data = new CompoundTag();
      * }</pre>
      */
-    public final Function<CompoundTag, Map<String, Tag>> COMPOUND_TAG_MAP = t -> t.tags;
+    public final Function<CompoundTag, Map<String, Tag>> COMPOUND_TAG_MAP = TagMapView::new;
 
     /**
      * Wraps any {@link Tag} with a 1-byte type-ID prefix for run-time dispatch.
@@ -98,18 +102,18 @@ public class NbtUtil {
         try {
             return switch (id) {
                 case Tag.TAG_END -> EndTag.INSTANCE;
-                case Tag.TAG_BYTE -> ByteTag.TYPE.load(in, 0, NbtAccounter.UNLIMITED);
-                case Tag.TAG_SHORT -> ShortTag.TYPE.load(in, 0, NbtAccounter.UNLIMITED);
-                case Tag.TAG_INT -> IntTag.TYPE.load(in, 0, NbtAccounter.UNLIMITED);
-                case Tag.TAG_LONG -> LongTag.TYPE.load(in, 0, NbtAccounter.UNLIMITED);
-                case Tag.TAG_FLOAT -> FloatTag.TYPE.load(in, 0, NbtAccounter.UNLIMITED);
-                case Tag.TAG_DOUBLE -> DoubleTag.TYPE.load(in, 0, NbtAccounter.UNLIMITED);
-                case Tag.TAG_BYTE_ARRAY -> ByteArrayTag.TYPE.load(in, 0, NbtAccounter.UNLIMITED);
-                case Tag.TAG_STRING -> StringTag.TYPE.load(in, 0, NbtAccounter.UNLIMITED);
-                case Tag.TAG_LIST -> ListTag.TYPE.load(in, 0, NbtAccounter.UNLIMITED);
-                case Tag.TAG_COMPOUND -> CompoundTag.TYPE.load(in, 0, NbtAccounter.UNLIMITED);
-                case Tag.TAG_INT_ARRAY -> IntArrayTag.TYPE.load(in, 0, NbtAccounter.UNLIMITED);
-                case Tag.TAG_LONG_ARRAY -> LongArrayTag.TYPE.load(in, 0, NbtAccounter.UNLIMITED);
+                case Tag.TAG_BYTE -> ByteTag.TYPE.load(in, NbtAccounter.create(2097152L));
+                case Tag.TAG_SHORT -> ShortTag.TYPE.load(in, NbtAccounter.create(2097152L));
+                case Tag.TAG_INT -> IntTag.TYPE.load(in, NbtAccounter.create(2097152L));
+                case Tag.TAG_LONG -> LongTag.TYPE.load(in, NbtAccounter.create(2097152L));
+                case Tag.TAG_FLOAT -> FloatTag.TYPE.load(in, NbtAccounter.create(2097152L));
+                case Tag.TAG_DOUBLE -> DoubleTag.TYPE.load(in, NbtAccounter.create(2097152L));
+                case Tag.TAG_BYTE_ARRAY -> ByteArrayTag.TYPE.load(in, NbtAccounter.create(2097152L));
+                case Tag.TAG_STRING -> StringTag.TYPE.load(in, NbtAccounter.create(2097152L));
+                case Tag.TAG_LIST -> ListTag.TYPE.load(in, NbtAccounter.create(2097152L));
+                case Tag.TAG_COMPOUND -> CompoundTag.TYPE.load(in, NbtAccounter.create(2097152L));
+                case Tag.TAG_INT_ARRAY -> IntArrayTag.TYPE.load(in, NbtAccounter.create(2097152L));
+                case Tag.TAG_LONG_ARRAY -> LongArrayTag.TYPE.load(in, NbtAccounter.create(2097152L));
                 default -> throw new IllegalArgumentException("Unknown tag id " + id);
             };
         } catch (IOException e) {
@@ -173,7 +177,16 @@ public class NbtUtil {
                 if (size == 0) yield new ListTag();
                 var tagList = new ObjectArrayList<Tag>(size);
                 dataList.forEach(d -> tagList.add(convertToTag(d)));
-                yield new ListTag(tagList, tagList.getFirst().getId());
+                // 1.21's ListTag no longer exposes a public typed constructor, so the list is
+                // rebuilt element by element; NBT requires every element to share one non-end type.
+                var list = new ListTag();
+                for (var tag : tagList) {
+                    if (tag.getId() == Tag.TAG_END
+                            || (!list.isEmpty() && list.getElementType() != tag.getId()))
+                        throw new IllegalArgumentException("NBT lists require one non-null element type");
+                    list.add(tag);
+                }
+                yield list;
             }
             case Data.STRING_MAP -> {
                 var tagMap = new CompoundTag();
@@ -202,8 +215,10 @@ public class NbtUtil {
      * <p><strong>Caveats:</strong> NBT lists are converted to heterogeneous
      * {@link com.gto.datasynclib.datastream.data.ListData} (the element type of the
      * {@code ListTag} is lost), and {@link #read(byte, io.netty.buffer.ByteBuf)} /
-     * {@link #read(byte, java.io.DataInput)} decode with {@code NbtAccounter.UNLIMITED}, i.e.
-     * with no depth or size limit — do not feed them untrusted input.</p>
+     * {@link #read(byte, java.io.DataInput)} decode with a bounded 2 MiB {@code NbtAccounter}
+     * ({@code NbtAccounter.create(2097152L)}); 1.21 removed the depth parameter from
+     * {@code TagType#load}, so nesting depth is no longer bounded by the accounter — do not
+     * feed them untrusted input.</p>
      *
      * <p>This method is mainly useful for compatibility/migration scenarios where
      * existing NBT data needs to be imported into the Data type system.</p>
@@ -232,8 +247,10 @@ public class NbtUtil {
             }
             case Tag.TAG_COMPOUND -> {
                 var compoundTag = (CompoundTag) tag;
-                var dataMap = new HashMap<String, Data>(compoundTag.tags.size());
-                compoundTag.tags.forEach((key, t) -> dataMap.put(key, convertToData(t)));
+                var dataMap = new HashMap<String, Data>(compoundTag.size());
+                for (var key : compoundTag.getAllKeys()) {
+                    dataMap.put(key, convertToData(compoundTag.get(key)));
+                }
                 yield new StringMapData(dataMap);
             }
             case Tag.TAG_BYTE_ARRAY -> ByteArrayData.valueOf(((ByteArrayTag) tag).getAsByteArray());

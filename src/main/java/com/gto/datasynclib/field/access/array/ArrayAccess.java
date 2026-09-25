@@ -8,7 +8,7 @@ import com.gto.datasynclib.datastream.data.ListData;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import it.unimi.dsi.fastutil.Hash;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -74,7 +74,7 @@ public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
     }
 
     @Override
-    protected void doWriteBuffer(@NotNull LogicalSide side, T @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, T @NotNull [] instance, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         for (var element : instance) {
             if (element == null) {
                 data.writeBoolean(false);
@@ -86,7 +86,7 @@ public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
     }
 
     @Override
-    protected void doReadBuffer(@NotNull LogicalSide side, T @NotNull [] instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, T @NotNull [] instance, @NotNull RegistryFriendlyByteBuf data) {
         var length = instance.length;
         for (int i = 0; i < length; i++) {
             if (data.readBoolean()) {

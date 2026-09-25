@@ -1,6 +1,5 @@
 package com.gto.datasynclib.datastream.data;
 
-import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.datastream.codec.DataDecoder;
 import com.gto.datasynclib.datastream.codec.DataEncoder;
@@ -8,7 +7,7 @@ import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.Decoder;
 import com.mojang.serialization.Encoder;
 import io.netty.buffer.ByteBuf;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.codec.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -23,20 +22,16 @@ public record StringMapData(Map<String, Data> value) implements MapData {
 
     public static final StringMapData EMPTY = new StringMapData(Collections.emptyMap());
 
-    public static final ByteStreamCodec<StringMapData> BYTE_STREAM_CODEC = new ByteStreamCodec<>() {
+    public static final StreamCodec<io.netty.buffer.ByteBuf, StringMapData> STREAM_CODEC = new StreamCodec<>() {
 
         @Override
-        public void encode(FriendlyByteBuf stream, StringMapData obj) {
+        public void encode(io.netty.buffer.ByteBuf stream, StringMapData obj) {
             obj.write(stream);
         }
 
         @Override
-        public StringMapData decode(FriendlyByteBuf stream) {
+        public StringMapData decode(io.netty.buffer.ByteBuf stream) {
             return Data.readData(STRING_MAP, stream).asStringMapData();
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(StringMapData.class, BYTE_STREAM_CODEC);
         }
     };
 
@@ -66,7 +61,7 @@ public record StringMapData(Map<String, Data> value) implements MapData {
     }
 
     public static StringMapData read(ByteBuf stream) {
-        var size = Data.readVarInt(stream);
+        var size = com.gto.datasynclib.DecodeLimits.size(Data.readVarInt(stream), stream, 0);
         var map = new HashMap<String, Data>(size);
         for (int i = 0; i < size; i++) {
             map.put(Data.readString(stream), Data.readData(stream));

@@ -8,6 +8,7 @@ import com.gto.datasynclib.annotations.SyncToClient;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.network.DataSyncNetwork;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityDimensions;
 import net.minecraft.world.entity.EntityType;
@@ -54,7 +55,7 @@ public class TestEntity extends Entity implements IFieldDataHolder {
     }
 
     @Override
-    protected void defineSynchedData() {
+    protected void defineSynchedData(SynchedEntityData.Builder builder) {
 
     }
 

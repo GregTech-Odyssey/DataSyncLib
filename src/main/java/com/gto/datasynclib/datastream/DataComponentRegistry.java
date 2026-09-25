@@ -1,14 +1,14 @@
 package com.gto.datasynclib.datastream;
 
 import com.gto.datasynclib.DataSyncCodec;
-import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import com.gto.datasynclib.datastream.codec.CombinedCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.StringMapData;
 import com.gto.datasynclib.util.Registry;
 import com.mojang.serialization.Codec;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.*;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.function.Consumer;
@@ -19,7 +19,7 @@ import java.util.function.Consumer;
  *
  * <p>Implements three codec interfaces simultaneously:
  * <ul>
- *   <li>{@link ByteStreamCodec}{@code <DataComponentMap>} — for network sync via {@link FriendlyByteBuf}</li>
+ *   <li>{@link StreamCodec}{@code <DataComponentMap>} — for network sync via {@link RegistryFriendlyByteBuf}</li>
  *   <li>{@link DataCodec}{@code <DataComponentMap>} — for disk persistence via {@link com.gto.datasynclib.datastream.data.StringMapData}</li>
  *   <li>{@link Codec}{@code <DataComponentMap>} — for Mojang's DFU codec integration (delegates to {@link Data#CODEC})</li>
  * </ul>
@@ -60,8 +60,8 @@ public final class DataComponentRegistry extends Registry<String, DataComponentK
     }
 
     @Override
-    public DataComponentMap decode(FriendlyByteBuf buf) {
-        var size = buf.readVarInt();
+    public DataComponentMap decode(RegistryFriendlyByteBuf buf) {
+        var size = com.gto.datasynclib.DecodeLimits.size(buf.readVarInt(), buf, 0);
         var map = new DataComponentMap(size);
         for (int i = 0; i < size; i++) {
             var keyId = buf.readVarInt();
@@ -75,7 +75,7 @@ public final class DataComponentRegistry extends Registry<String, DataComponentK
     }
 
     @Override
-    public void encode(FriendlyByteBuf buf, DataComponentMap obj) {
+    public void encode(RegistryFriendlyByteBuf buf, DataComponentMap obj) {
         buf.writeVarInt(obj.size());
         obj.fastForEach((k, v) -> {
             if (k.codec == null) return; // skip entries without a registered codec

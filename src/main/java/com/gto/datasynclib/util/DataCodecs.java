@@ -1,5 +1,6 @@
 package com.gto.datasynclib.util;
 
+import com.gto.datasynclib.RegistryContext;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.IntArrayData;
@@ -20,7 +21,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.fluids.FluidStack;
+import net.neoforged.neoforge.fluids.FluidStack;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -244,12 +245,12 @@ public class DataCodecs {
 
         @Override
         public ItemStack decode(@NotNull Data data, int dataVersion) {
-            return ItemStack.of(COMPOUND_TAG_CODEC.decode(data, dataVersion));
+            return ItemStack.parseOptional(RegistryContext.current(), COMPOUND_TAG_CODEC.decode(data, dataVersion));
         }
 
         @Override
         public @NotNull Data encode(ItemStack obj) {
-            return COMPOUND_TAG_CODEC.encode(obj.save(new CompoundTag()));
+            return COMPOUND_TAG_CODEC.encode((CompoundTag) obj.saveOptional(RegistryContext.current()));
         }
 
         static {
@@ -261,12 +262,12 @@ public class DataCodecs {
 
         @Override
         public FluidStack decode(@NotNull Data data, int dataVersion) {
-            return FluidStack.loadFluidStackFromNBT(COMPOUND_TAG_CODEC.decode(data, dataVersion));
+            return FluidStack.parseOptional(RegistryContext.current(), COMPOUND_TAG_CODEC.decode(data, dataVersion));
         }
 
         @Override
         public @NotNull Data encode(FluidStack obj) {
-            return COMPOUND_TAG_CODEC.encode(obj.writeToNBT(new CompoundTag()));
+            return COMPOUND_TAG_CODEC.encode((CompoundTag) obj.saveOptional(RegistryContext.current()));
         }
 
         static {
@@ -278,12 +279,12 @@ public class DataCodecs {
 
         @Override
         public Component decode(@NotNull Data data, int dataVersion) {
-            return Component.Serializer.fromJson(data.getString());
+            return Component.Serializer.fromJson(data.getString(), RegistryContext.current());
         }
 
         @Override
         public @NotNull Data encode(Component obj) {
-            return StringData.valueOf(Component.Serializer.toJson(obj));
+            return StringData.valueOf(Component.Serializer.toJson(obj, RegistryContext.current()));
         }
 
         static {

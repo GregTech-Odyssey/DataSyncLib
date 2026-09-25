@@ -1,6 +1,5 @@
 package com.gto.datasynclib.datastream.data;
 
-import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.Codec;
@@ -9,6 +8,7 @@ import com.mojang.serialization.DynamicOps;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.codec.*;
 import org.apache.commons.lang3.ArrayUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -59,7 +59,7 @@ import java.util.UUID;
  *
  * <h3>Serialization Paths</h3>
  * <ul>
- *   <li>{@link #BYTE_STREAM_CODEC} — network serialization via {@link FriendlyByteBuf} (VarInt length-prefixed)</li>
+ *   <li>{@link #STREAM_CODEC} — network serialization via {@link FriendlyByteBuf} (VarInt length-prefixed)</li>
  *   <li>{@link #DATA_CODEC} — persistence serialization via Data objects (identity pass-through)</li>
  *   <li>{@link #CODEC} — Mojang DFU {@link com.mojang.serialization.Codec} integration via {@link DynamicOps}</li>
  * </ul>
@@ -92,20 +92,16 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
         }
     };
 
-    ByteStreamCodec<Data> BYTE_STREAM_CODEC = new ByteStreamCodec<>() {
+    StreamCodec<io.netty.buffer.ByteBuf, Data> STREAM_CODEC = new StreamCodec<>() {
 
         @Override
-        public void encode(FriendlyByteBuf stream, Data obj) {
+        public void encode(io.netty.buffer.ByteBuf stream, Data obj) {
             Data.writeData(stream, obj);
         }
 
         @Override
-        public Data decode(FriendlyByteBuf stream) {
+        public Data decode(io.netty.buffer.ByteBuf stream) {
             return Data.readData(stream);
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(Data.class, BYTE_STREAM_CODEC);
         }
     };
 
@@ -150,27 +146,29 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
     // ===== Binary serialization (ByteBuf) =====
 
     static Data readData(byte id, ByteBuf stream) {
-        return switch (id) {
-            case NULL -> NullData.INSTANCE;
-            case BYTE -> ByteData.valueOf(stream.readByte());
-            case SHORT -> ShortData.valueOf(stream.readShort());
-            case CHAR -> CharData.valueOf(stream.readChar());
-            case INT -> IntData.valueOf(stream.readInt());
-            case LONG -> LongData.valueOf(stream.readLong());
-            case FLOAT -> FloatData.valueOf(stream.readFloat());
-            case DOUBLE -> DoubleData.valueOf(stream.readDouble());
-            case STRING -> StringData.valueOf(readString(stream));
-            case BYTE_ARRAY -> new ByteArrayData(readByteArray(stream));
-            case INT_ARRAY -> new IntArrayData(readIntArray(stream));
-            case LONG_ARRAY -> new LongArrayData(readLongArray(stream));
-            case LIST -> ListData.read(stream);
-            case STRING_MAP -> StringMapData.read(stream);
-            case CUSTOM -> CustomData.read(readVarInt(stream), stream);
-            case DATA_MAP -> DataMapData.read(stream);
-            case INT_MAP -> IntMapData.read(stream);
-            case LONG_MAP -> LongMapData.read(stream);
-            default -> throw new IllegalArgumentException("Unknown data type id: " + id);
-        };
+        try (var ignored = com.gto.datasynclib.DecodeLimits.enter()) {
+            return switch (id) {
+                case NULL -> NullData.INSTANCE;
+                case BYTE -> ByteData.valueOf(stream.readByte());
+                case SHORT -> ShortData.valueOf(stream.readShort());
+                case CHAR -> CharData.valueOf(stream.readChar());
+                case INT -> IntData.valueOf(stream.readInt());
+                case LONG -> LongData.valueOf(stream.readLong());
+                case FLOAT -> FloatData.valueOf(stream.readFloat());
+                case DOUBLE -> DoubleData.valueOf(stream.readDouble());
+                case STRING -> StringData.valueOf(readString(stream));
+                case BYTE_ARRAY -> new ByteArrayData(readByteArray(stream));
+                case INT_ARRAY -> new IntArrayData(readIntArray(stream));
+                case LONG_ARRAY -> new LongArrayData(readLongArray(stream));
+                case LIST -> ListData.read(stream);
+                case STRING_MAP -> StringMapData.read(stream);
+                case CUSTOM -> CustomData.read(readVarInt(stream), stream);
+                case DATA_MAP -> DataMapData.read(stream);
+                case INT_MAP -> IntMapData.read(stream);
+                case LONG_MAP -> LongMapData.read(stream);
+                default -> throw new IllegalArgumentException("Unknown data type id: " + id);
+            };
+        }
     }
 
     static Data readData(byte[] bytes) {
@@ -267,7 +265,7 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
     }
 
     static byte[] readByteArray(ByteBuf buf) {
-        byte[] array = new byte[readVarInt(buf)];
+        byte[] array = new byte[com.gto.datasynclib.DecodeLimits.size(readVarInt(buf), buf, 1)];
         buf.readBytes(array);
         return array;
     }
@@ -280,7 +278,7 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
     }
 
     static int[] readIntArray(ByteBuf buf) {
-        int i = readVarInt(buf);
+        int i = com.gto.datasynclib.DecodeLimits.size(readVarInt(buf), buf, 4);
         int[] aint = new int[i];
         for (int j = 0; j < i; ++j) {
             aint[j] = buf.readInt();
@@ -296,7 +294,7 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
     }
 
     static long[] readLongArray(ByteBuf buf) {
-        int i = readVarInt(buf);
+        int i = com.gto.datasynclib.DecodeLimits.size(readVarInt(buf), buf, 8);
         var array = new long[i];
         for (int j = 0; j < i; ++j) {
             array[j] = buf.readLong();

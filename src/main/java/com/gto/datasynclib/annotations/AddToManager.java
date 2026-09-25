@@ -1,7 +1,6 @@
 package com.gto.datasynclib.annotations;
 
 import com.gto.datasynclib.FieldDataManager;
-import com.gto.datasynclib.FieldDefinitionStorage;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

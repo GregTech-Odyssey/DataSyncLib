@@ -2,6 +2,7 @@ package com.gto.datasynclib.forge;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.RegistryContext;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
@@ -12,8 +13,8 @@ import net.minecraft.nbt.EndTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.Tag;
 import net.minecraft.nbt.TagTypes;
-import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.common.util.INBTSerializable;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.neoforged.neoforge.common.util.INBTSerializable;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
@@ -27,7 +28,9 @@ import java.io.IOException;
  * <h3>Wire format</h3>
  * <p>One NBT type byte followed by the payload, where {@code 0}/{@link EndTag} stands for "absent"
  * (a null serialized tag) — reading such a slot leaves the current value untouched. The payload is
- * loaded with {@link NbtAccounter#UNLIMITED}.</p>
+ * loaded with a bounded 2 MiB {@link NbtAccounter} ({@code NbtAccounter.create(2097152L)}); 1.21
+ * dropped the depth parameter from {@code TagType#load}, so this size bound is the only limit on a
+ * malformed payload.</p>
  *
  * <h3>Persistence format</h3>
  * <p>The tag goes through {@link DataCodecs#TAG_CODEC}; a null tag is written as
@@ -51,7 +54,7 @@ public final class TagSerializableAccess extends AbstractFieldAccess<INBTSeriali
 
     @Override
     protected boolean hasChange(@NotNull LogicalSide side, @NotNull INBTSerializable instance, boolean autoDetectOnly) {
-        var nbt = instance.serializeNBT();
+        var nbt = instance.serializeNBT(RegistryContext.current());
         var hashCode = nbt == null ? 0 : nbt.hashCode();
         // hasHash: an empty tag hashes to 0, which must not look like "unchanged" on the first check.
         if (!hasHash || hashCode != this.hashCode) {
@@ -63,8 +66,8 @@ public final class TagSerializableAccess extends AbstractFieldAccess<INBTSeriali
     }
 
     @Override
-    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull INBTSerializable instance, @NotNull FriendlyByteBuf data, boolean force) {
-        var nbt = instance.serializeNBT();
+    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull INBTSerializable instance, @NotNull RegistryFriendlyByteBuf data, boolean force) {
+        var nbt = instance.serializeNBT(RegistryContext.current());
         if (nbt == null) {
             data.writeByte(0);
         } else {
@@ -78,12 +81,12 @@ public final class TagSerializableAccess extends AbstractFieldAccess<INBTSeriali
     }
 
     @Override
-    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull INBTSerializable instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull INBTSerializable instance, @NotNull RegistryFriendlyByteBuf data) {
         var type = TagTypes.getType(data.readByte());
         if (type == EndTag.TYPE) return;
         try {
-            var nbt = type.load(new ByteBufInputStream(data), 0, NbtAccounter.UNLIMITED);
-            instance.deserializeNBT(nbt);
+            var nbt = type.load(new ByteBufInputStream(data), NbtAccounter.create(2097152L));
+            instance.deserializeNBT(RegistryContext.current(), nbt);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -91,7 +94,7 @@ public final class TagSerializableAccess extends AbstractFieldAccess<INBTSeriali
 
     @Override
     protected @NotNull Data doWriteData(@NotNull Object source, @NotNull INBTSerializable instance) {
-        var nbt = instance.serializeNBT();
+        var nbt = instance.serializeNBT(RegistryContext.current());
         if (nbt == null) {
             return NullData.INSTANCE;
         } else {
@@ -103,6 +106,6 @@ public final class TagSerializableAccess extends AbstractFieldAccess<INBTSeriali
     protected void doReadData(@NotNull INBTSerializable instance, @NotNull Data data, int dataVersion) {
         if (data.isNull()) return;
         var nbt = DataCodecs.TAG_CODEC.decode(data, dataVersion);
-        instance.deserializeNBT(nbt);
+        instance.deserializeNBT(RegistryContext.current(), nbt);
     }
 }

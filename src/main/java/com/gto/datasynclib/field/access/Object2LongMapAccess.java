@@ -1,6 +1,7 @@
 package com.gto.datasynclib.field.access;
 
 import com.gto.datasynclib.DataFieldDefinition;
+import com.gto.datasynclib.DecodeLimits;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.datastream.data.Data;
@@ -9,7 +10,7 @@ import com.gto.datasynclib.datastream.data.LongData;
 import com.gto.datasynclib.datastream.data.NullData;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongMaps;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -41,7 +42,7 @@ public class Object2LongMapAccess<K> extends AbstractFieldAccess<Object2LongMap>
     }
 
     @Override
-    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull Object2LongMap instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull Object2LongMap instance, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         data.writeVarInt(instance.size());
         Object2LongMaps.fastForEach(instance, e -> {
             keyCodec.streamWriter.encode(data, (K) e.getKey());
@@ -50,8 +51,8 @@ public class Object2LongMapAccess<K> extends AbstractFieldAccess<Object2LongMap>
     }
 
     @Override
-    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull Object2LongMap instance, @NotNull FriendlyByteBuf data) {
-        var length = data.readVarInt();
+    protected void doReadBuffer(@NotNull LogicalSide side, @NotNull Object2LongMap instance, @NotNull RegistryFriendlyByteBuf data) {
+        var length = DecodeLimits.size(data.readVarInt(), data, 0);
         instance.clear();
         for (int i = 0; i < length; i++) {
             var key = keyCodec.streamReader.decode(data);

@@ -1,7 +1,7 @@
 package com.gto.datasynclib.util;
 
 import it.unimi.dsi.fastutil.Hash;
-import net.minecraftforge.fluids.FluidStack;
+import net.neoforged.neoforge.fluids.FluidStack;
 
 /**
  * Array counterpart of {@link FluidStackHashStrategy}: the {@code FluidStack[]} change-detection

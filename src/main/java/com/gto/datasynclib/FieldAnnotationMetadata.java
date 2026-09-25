@@ -1,14 +1,15 @@
 package com.gto.datasynclib;
 
 import com.gto.datasynclib.annotations.*;
-import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.util.ReflectUtil;
+import com.gto.datasynclib.util.StreamCodecs;
 import it.unimi.dsi.fastutil.Hash;
 import lombok.Getter;
 import lombok.experimental.Accessors;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.codec.*;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -46,7 +47,7 @@ final class FieldAnnotationMetadata {
     private final Method syncToClientSkipWhen;
     private final Method syncToServerSkipWhen;
     private final Hash.Strategy strategy;
-    private final ByteStreamCodec streamCodec;
+    private final StreamCodec streamCodec;
     private final DataCodec dataCodec;
     private final Method writeToData;
     private final Method readFromData;
@@ -172,10 +173,10 @@ final class FieldAnnotationMetadata {
                     this.readFromData = null;
                 }
                 if (!codec.writeToBuffer().isEmpty()) {
-                    var m = ReflectUtil.getAccessibleMethod(clazz, codec.writeToBuffer(), FriendlyByteBuf.class, type);
+                    var m = ReflectUtil.getAccessibleMethod(clazz, codec.writeToBuffer(), RegistryFriendlyByteBuf.class, type);
                     m.setAccessible(true);
                     this.writeToBuffer = m;
-                    m = ReflectUtil.getAccessibleMethod(clazz, codec.readFromBuffer(), FriendlyByteBuf.class);
+                    m = ReflectUtil.getAccessibleMethod(clazz, codec.readFromBuffer(), RegistryFriendlyByteBuf.class);
                     m.setAccessible(true);
                     this.readFromBuffer = m;
                 } else {
@@ -192,9 +193,9 @@ final class FieldAnnotationMetadata {
                     if (!codec.syncCodec().isEmpty()) {
                         f = clazz.getDeclaredField(codec.syncCodec());
                         f.setAccessible(true);
-                        this.streamCodec = (ByteStreamCodec) f.get(null);
+                        this.streamCodec = (StreamCodec) f.get(null);
                     } else {
-                        this.streamCodec = ByteStreamCodec.of(dataCodec);
+                        this.streamCodec = StreamCodecs.fromData(dataCodec);
                     }
                     this.writeToData = null;
                     this.readFromData = null;

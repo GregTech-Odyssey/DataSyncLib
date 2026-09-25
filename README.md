@@ -21,7 +21,7 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 - **FieldDefinitionStorage**: Scans class hierarchy for annotated fields, caches metadata globally
 - **FieldDataManager**: Per-instance lifecycle manager — detects changes, serializes to network/disk
 - **DataField hierarchy**: `AbstractField` (primitive values), `ObjField` (objects with codecs), `AbstractFieldAccess` (collections/maps/arrays)
-- **DataSyncCodec**: Unified codec registry pairing `ByteStreamCodec` (network) with `DataCodec` (persistence)
+- **DataSyncCodec**: Unified codec registry pairing a native `StreamCodec<RegistryFriendlyByteBuf, T>` (network) with a `DataCodec` (persistence)
 - **Data type system**: 19-type sealed binary format, more compact than NBT, with VarInt encoding
 
 ## Key Features
@@ -32,7 +32,7 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 - **🔧 Extensible Codec** — Unified `DataSyncCodec` registry with 30+ pre-registered types, custom codec support via `@Codec`.
 - **📢 Change Notification** — Per-field listener callbacks + `NotifiableHolder` system for reactive updates.
 - **📦 DataComponent System** — Identity-keyed component data model via `DataComponentRegistry` + `DataComponentMap` with merge semantics.
-- **🗂️ Registry Utility** — Generic registry with freeze/unfreeze lifecycle and built-in serialization (ByteStream/Data/Mojang Codec).
+- **🗂️ Registry Utility** — Generic registry with freeze/unfreeze lifecycle and built-in serialization (Stream/Data/Mojang Codec).
 - **⚡ High Performance** — MethodHandle instead of reflection, FastUtil collections, multi-level caching, VarInt compact encoding.
 - **🗜️ Data Type System** — Custom 19-type binary Data system, more compact than NBT Tag, with custom type extension.
 - **🧩 Ready to Use** — Extend `FieldDataHolderBlockEntity` to get full capabilities out of the box.
@@ -173,6 +173,7 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 > - `autoDetect = false` fields need `markFieldsForSync()` calls to trigger sync.
 > - Persistence requires manual `setChanged()` calls on the BlockEntity.
 > - `syncBlockEntityToClient(be, false, true)`: `false` = incremental (only changed), `true` = only fields with `autoDetect=true`.
+> - Network reads/writes take an explicit `SyncContext` (registry access + connection type), because a `RegistryFriendlyByteBuf` can only be built from a `RegistryAccess`.
 > - See `TestBlockEntity` for a complete example with all features.
 
 ### Advanced: Registry Global Codec Auto-Registration
@@ -231,15 +232,14 @@ Server tick()
   │     ├── FieldDataManager.updateFieldDirtyFlags(SERVER, auto)
   │     │     └── Iterate syncToClientFields → detectChange()
   │     │           Compare current vs last snapshot → mark changed
-  │     ├── FieldDataManager.writeToNetworkBuffer(SERVER, writeAll)
+  │     ├── FieldDataManager.writeToNetworkBuffer(SERVER, sync, writeAll)
   │     │     ├── writeCustomSyncData()            → custom data
   │     │     └── Iterate: writeVarInt(index) + value → byte[]
-  │     └── CHANNEL.send(TRACKING_CHUNK, packet)
+  │     └── PacketDistributor.sendToPlayersTrackingChunk(level, chunk, packet)
   │
 Client receive
-  ├── handleBlockEntity()          (single handler; direction resolved from getOriginationSide())
-        ├── applyBlockEntitySyncData(level, pos, data, CLIENT)
-        │     └── FieldDataManager.readFromNetworkBuffer(CLIENT, data)
+  ├── receiveBlock()               (single handler; direction resolved from IPayloadContext.flow())
+        ├── readFromNetworkBuffer(CLIENT, sync, data)
         │           ├── readCustomSyncData()
         │           ├── while buf: readVarInt(index) → field.readFromBuffer()
         │           └── scheduleUpdate=true → scheduleUpdate()
@@ -248,19 +248,22 @@ Client receive
 ### Persistence Flow
 
 ```
-BlockEntity.saveAdditional(tag)
+BlockEntity.saveAdditional(tag, lookup)
   └── tag.putByteArray("field_save", writeToData().writeToBytes())
-        └── FieldDataManager.writeToData()
+        └── FieldDataManager.writeToData()        (inside RegistryContext.use(lookup))
               ├── writeCustomSaveData()
               └── Iterate saveFields → field.writeToData()
                     └── Produces StringMapData(key → Data)
 
-BlockEntity.load(tag)
-  ├── Prefer "field_sync" (chunk-load sync data)
-  └── Fallback "field_save" (disk persistence data)
-        └── FieldDataManager.readFromData(data, VERSION)
+BlockEntity.loadAdditional(tag, lookup)
+  └── "field_save" (disk persistence data)
+        └── FieldDataManager.readFromData(data, dataVersion())
               ├── readCustomSaveData()
               └── Iterate saveFields → field.readFromData()
+
+BlockEntity.handleUpdateTag(tag, lookup)
+  └── "field_sync" (chunk-load / block entity data packet)
+        └── FieldDataManager.readFromNetworkBuffer(CLIENT, sync, data)
 ```
 
 ## Documentation
@@ -285,10 +288,10 @@ not through the IDE's file viewer):
 
 | Component | Version |
 |-----------|---------|
-| Minecraft | 1.20.1 |
-| Forge | 47.4.21 |
+| Minecraft | 1.21.1 |
+| NeoForge | 21.1.234 |
 | Java | 21 |
-| FastUtil | (bundled with Forge) |
+| FastUtil | (bundled with NeoForge) |
 | Lombok | (compile-time only) |
 
 ## License

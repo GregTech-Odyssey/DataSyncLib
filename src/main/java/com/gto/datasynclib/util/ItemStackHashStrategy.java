@@ -19,7 +19,7 @@ import java.util.Objects;
 public interface ItemStackHashStrategy extends Hash.Strategy<ItemStack> {
 
     /**
-     * Item, count and NBT must all match. Registered by default for {@code ItemStack} fields.
+     * Item, count and components must all match. Registered by default for {@code ItemStack} fields.
      */
     ItemStackHashStrategy ALL = new ItemStackHashStrategy() {
 
@@ -28,7 +28,8 @@ public interface ItemStackHashStrategy extends Hash.Strategy<ItemStack> {
             if (o == null) return 0;
             var item = o.getItem();
             if (item == Items.AIR) return 0;
-            return Objects.hash(item, o.getCount(), o.getTag());
+            // 1.21 replaced the item's raw NBT tag with its data components.
+            return 31 * (31 * item.hashCode() + o.getCount()) + o.getComponents().hashCode();
         }
 
         @Override
@@ -38,12 +39,12 @@ public interface ItemStackHashStrategy extends Hash.Strategy<ItemStack> {
             if (b == null) return a.isEmpty();
             if (a.getCount() != b.getCount()) return false;
             if (a.getItem() != b.getItem()) return false;
-            return Objects.equals(a.getTag(), b.getTag());
+            return Objects.equals(a.getComponents(), b.getComponents());
         }
     };
 
     /**
-     * Item and NBT must match; the count is ignored.
+     * Item and components must match; the count is ignored.
      */
     ItemStackHashStrategy ITEM_AND_TAG = new ItemStackHashStrategy() {
 
@@ -52,7 +53,7 @@ public interface ItemStackHashStrategy extends Hash.Strategy<ItemStack> {
             if (o == null) return 0;
             var item = o.getItem();
             if (item == Items.AIR) return 0;
-            return Objects.hash(item, o.getTag());
+            return 31 * item.hashCode() + o.getComponents().hashCode();
         }
 
         @Override
@@ -61,12 +62,12 @@ public interface ItemStackHashStrategy extends Hash.Strategy<ItemStack> {
             if (a == null) return b.isEmpty();
             if (b == null) return a.isEmpty();
             if (a.getItem() != b.getItem()) return false;
-            return Objects.equals(a.getTag(), b.getTag());
+            return Objects.equals(a.getComponents(), b.getComponents());
         }
     };
 
     /**
-     * Only the item type must match; count and NBT are ignored.
+     * Only the item type must match; count and components are ignored.
      */
     ItemStackHashStrategy ITEM = new ItemStackHashStrategy() {
 

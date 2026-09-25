@@ -728,7 +728,7 @@ public class DataComponentKey<T> {
         return name;
     }
 
-    public final static class Builder<T> {
+    public static final class Builder<T> {
 
         private final String name;
         private DataSyncCodec<T> codec;

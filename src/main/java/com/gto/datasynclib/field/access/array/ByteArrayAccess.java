@@ -6,7 +6,7 @@ import com.gto.datasynclib.datastream.data.ByteArrayData;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.apache.commons.lang3.ArrayUtils;
 import org.jetbrains.annotations.NotNull;
 
@@ -52,14 +52,14 @@ public final class ByteArrayAccess extends AbstractFieldAccess<byte[]> {
     }
 
     @Override
-    protected void doWriteBuffer(@NotNull LogicalSide side, byte @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
+    protected void doWriteBuffer(@NotNull LogicalSide side, byte @NotNull [] instance, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         for (var element : instance) {
             data.writeByte(element);
         }
     }
 
     @Override
-    protected void doReadBuffer(@NotNull LogicalSide side, byte @NotNull [] instance, @NotNull FriendlyByteBuf data) {
+    protected void doReadBuffer(@NotNull LogicalSide side, byte @NotNull [] instance, @NotNull RegistryFriendlyByteBuf data) {
         var length = instance.length;
         for (int i = 0; i < length; i++) {
             instance[i] = data.readByte();

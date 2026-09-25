@@ -2,12 +2,13 @@ package com.gto.datasynclib.listener;
 
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.SnapshotScope;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.FloatData;
 import com.gto.datasynclib.util.holder.FloatHolder;
 import lombok.Setter;
 import lombok.experimental.Accessors;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -63,14 +64,14 @@ public final class FloatNotifiableHolder extends FloatHolder implements IDataSer
     }
 
     @Override
-    public void writeBuffer(LogicalSide side, @NotNull FriendlyByteBuf data) {
+    public void writeBuffer(LogicalSide side, @NotNull RegistryFriendlyByteBuf data) {
         data.writeFloat(value);
         senderListener.onSync(side, lastValue, value);
-        lastValue = value;
+        if (!SnapshotScope.active()) lastValue = value;
     }
 
     @Override
-    public void readBuffer(LogicalSide side, @NotNull FriendlyByteBuf data) {
+    public void readBuffer(LogicalSide side, @NotNull RegistryFriendlyByteBuf data) {
         var oldValue = value;
         value = data.readFloat();
         receiverListener.onSync(side, oldValue, value);

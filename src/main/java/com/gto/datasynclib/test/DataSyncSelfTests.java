@@ -4,6 +4,7 @@ import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.SyncContext;
 import com.gto.datasynclib.annotations.AdditionalHolder;
 import com.gto.datasynclib.annotations.SaveToDisk;
 import com.gto.datasynclib.annotations.SyncToClient;
@@ -33,13 +34,23 @@ import java.util.*;
  *
  * <p>Intended to run in a development client/server where Minecraft registries are available
  * (the {@code @SyncToClient} fields and item/fluid codecs require a real registry context).
- * Invoked via {@link #runAll()}.</p>
+ * 1.21 needs that context explicitly: the network paths take a {@link SyncContext}
+ * ({@code writeToNetworkBuffer(side, context, all)} / {@code readFromNetworkBuffer(side, context, bytes)}),
+ * so it is threaded through the harness instead of being read from a {@code Level}.
+ * Invoked via {@link #runAll(SyncContext)}.</p>
  */
 public final class DataSyncSelfTests {
 
     private static final String LOG = "[DataSyncSelfTests] ";
 
+    /** Registry/connection context of the side running the suite. */
+    private final SyncContext context;
+
     private final List<String> failures = new ArrayList<>();
+
+    private DataSyncSelfTests(SyncContext context) {
+        this.context = context;
+    }
 
     /**
      * A plain, non-holder POJO holding several annotated fields.
@@ -427,10 +438,10 @@ public final class DataSyncSelfTests {
         src.child.ticks = 321;
         src.child.facing = Direction.SOUTH;
 
-        byte[] bytes = src.manager.writeToNetworkBuffer(LogicalSide.SERVER, true);
+        byte[] bytes = src.manager.writeToNetworkBuffer(LogicalSide.SERVER, context, true);
 
         SyncHolder dst = new SyncHolder();
-        dst.manager.readFromNetworkBuffer(LogicalSide.CLIENT, bytes);
+        dst.manager.readFromNetworkBuffer(LogicalSide.CLIENT, context, bytes);
 
         expect("net.counter", src.counter, dst.counter);
         expect("net.name", src.name, dst.name);
@@ -495,8 +506,11 @@ public final class DataSyncSelfTests {
 
     /**
      * Convenience: run from anywhere.
+     *
+     * @param context the registries and connection type of the side running the suite (1.21: the
+     *                network codecs cannot be built without them)
      */
-    public static void runAll() {
-        new DataSyncSelfTests().run();
+    public static void runAll(SyncContext context) {
+        new DataSyncSelfTests(context).run();
     }
 }

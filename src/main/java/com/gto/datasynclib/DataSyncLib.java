@@ -26,11 +26,11 @@ import it.unimi.dsi.fastutil.objects.Reference2IntMap;
 import it.unimi.dsi.fastutil.objects.Reference2LongMap;
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.common.util.INBTSerializable;
-import net.minecraftforge.fluids.FluidStack;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import net.minecraftforge.fml.loading.FMLLoader;
+import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.loading.FMLLoader;
+import net.neoforged.neoforge.common.util.INBTSerializable;
+import net.neoforged.neoforge.fluids.FluidStack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,22 +41,24 @@ import java.util.Map;
 import static com.gto.datasynclib.FieldDefinitionStorage.*;
 
 /**
- * Main entry point for the DataSyncLib Forge mod.
+ * Main entry point for the DataSyncLib NeoForge mod.
  *
- * <p>During construction, this class initializes all subsystems in order:
+ * <p>During mod construction, this class initializes all subsystems in order:
  * <ol>
+ *   <li><strong>Payload types</strong> — {@link DataSyncNetwork#register} is added as a listener on
+ *       the mod event bus, which declares the sync payloads ({@code BlockEntitySyncPacket} /
+ *       {@code EntitySyncPacket}) and their handlers. NeoForge requires this to happen while the
+ *       mod is constructed, before any payload can be sent or received</li>
  *   <li><strong>Codec registry</strong> — every pre-registered codec registers itself while
  *       {@link DataSyncCodec} is class-initialized (primitive-payload types such as
  *       {@code Vec3i}/{@code SectionPos}/{@code AABB} use hand-written codec pairs, and
  *       {@code GlobalPos} is composed with {@code CombinedCodec.composite});
  *       {@link DataSyncCodec#init()} is a no-op kept for compatibility</li>
- *   <li><strong>Network channel</strong> — {@link DataSyncNetwork#init()} registers
- *       the Forge SimpleChannel and message handlers</li>
  *   <li><strong>Field factories</strong> — registers {@link DataField} factories for
  *       primitive types (exact match) and codec-backed object types (predicate match)</li>
  *   <li><strong>Access factories</strong> — registers factories for container types
  *       (collections, maps, arrays) and for the holder interfaces
- *       ({@link IFieldDataHolder}, {@link IDataSerializable}, Forge's
+ *       ({@link IFieldDataHolder}, {@link IDataSerializable}, NeoForge's
  *       {@code INBTSerializable}) with priority-based predicate matching.
  *       More specific types (e.g., {@code IntCollection}) get higher priority than
  *       general ones (e.g., {@code Collection})</li>
@@ -70,8 +72,8 @@ import static com.gto.datasynclib.FieldDefinitionStorage.*;
  * </ol>
  *
  * <h3>Factory priority system:</h3>
- * <p>When resolving a factory for an unknown field type, factories are checked in
- * descending priority order. Higher-priority predicates match first. For example,
+ * <p>When resolving a factory for an unknown field type, factories are checked in descending
+ * priority order. Higher-priority predicates match first. For example,
  * {@code IntCollection} (priority 1000) matches before {@code Collection} (priority 100),
  * ensuring the more specific handler is used.</p>
  *
@@ -98,14 +100,39 @@ public final class DataSyncLib {
 
     public static final Logger LOGGER = LoggerFactory.getLogger("Data Sync Lib");
 
+    /**
+     * Guards {@link #init()}, so a second construction (or a downstream mod calling it explicitly)
+     * does not re-register the built-in tables.
+     */
+    private static boolean initialized;
 
-    public DataSyncLib(FMLJavaModLoadingContext context) {
+    public DataSyncLib(IEventBus modEventBus) {
+        // Payload types and their handlers have to be declared on the mod event bus while the mod is
+        // being constructed; anything registered later is never sent to clients.
+        modEventBus.addListener(DataSyncNetwork::register);
+        init();
+
+        if (FMLLoader.isProduction()) return;
+        // Register test blocks, block entities, items and entities (development mode only)
+        ModBlocks.BLOCKS.register(modEventBus);
+        ModBlockEntities.BLOCK_ENTITIES.register(modEventBus);
+        ModItems.ITEMS.register(modEventBus);
+        ModEntityTypes.ENTITY_TYPES.register(modEventBus);
+    }
+
+    /**
+     * Populates the built-in registration tables (field factories, access factories, hash
+     * strategies, fixed enums).
+     *
+     * <p>Called once from the mod constructor, and callable by a downstream mod that embeds this
+     * library as a source set instead of loading it as a separate mod. All of it must happen during
+     * mod construction: {@link FieldDefinitionStorage} caches the resolved factory per field type on
+     * the first scan, so a registration that arrives later is ignored. Downstream mods extend the
+     * same tables from their own constructor (see FieldDefinitionStorage's registration methods).</p>
+     */
+    public static synchronized void init() {
+        if (initialized) return;
         DataSyncCodec.init();
-        DataSyncNetwork.init();
-        // Built-in registration below: all of it must happen here, in mod construction, because
-        // FieldDefinitionStorage caches the resolved factory per field type on first scan — a
-        // registration that arrives later is ignored. Downstream mods extend the same tables
-        // from their own constructor (see FieldDefinitionStorage's registration methods).
         // Primitive field factories (exact-type match)
         registerFactory(boolean.class, BooleanField::new);
         registerFactory(byte.class, ByteField::new);
@@ -138,7 +165,7 @@ public final class DataSyncLib {
         // Access-mode factories: IFieldDataHolder/IDataSerializable (highest priority for containers)
         registerAccessInterfaceFactory(IFieldDataHolder.class, k -> FieldDataHolderAccess::new, 2000);
         registerAccessInterfaceFactory(IDataSerializable.class, k -> SerializableAccess::new, 5000);
-        // Forge's INBTSerializable (ItemStackHandler, FluidTank, custom INBTSerializable POJOs).
+        // NeoForge's INBTSerializable (ItemStackHandler, FluidTank, custom INBTSerializable POJOs).
         // Priority sits below the two library interfaces above (so an explicit IFieldDataHolder/
         // IDataSerializable still wins) and above plain Collection/Map.
         // Note: change detection compares serializeNBT() deeply on every check, so on hot fields
@@ -160,7 +187,7 @@ public final class DataSyncLib {
         // Access-mode factories: non-primitive arrays (custom predicates with codec lookup)
         registerAccessCustomFactory(c -> c.isArray() && !c.componentType().isPrimitive() && IFieldDataHolder.class.isAssignableFrom(c.componentType()), c -> FieldDataHolderArrayAccess::new, 2000);
         registerAccessCustomFactory(c -> c.isArray() && !c.componentType().isPrimitive() && IDataSerializable.class.isAssignableFrom(c.componentType()), c -> SerializableArrayAccess::new, 5000);
-        // Forge INBTSerializable components (ItemStackHandler[], FluidTank[], ...). Priority mirrors
+        // NeoForge INBTSerializable components (ItemStackHandler[], FluidTank[], ...). Priority mirrors
         // the scalar registration: below the two library interfaces, above the generic codec-backed
         // array factory below, which would otherwise ask for a codec of the component type.
         registerAccessCustomFactory(c -> c.isArray() && !c.componentType().isPrimitive() && INBTSerializable.class.isAssignableFrom(c.componentType()), c -> TagSerializableArrayAccess::new, 1000);
@@ -189,13 +216,6 @@ public final class DataSyncLib {
         EnumUtil.addFixedEnum(Direction.class);
         EnumUtil.addFixedEnum(Direction.Axis.class);
         NbtUtil.init(); // no-op hook, kept for initialization ordering
-
-        if (FMLLoader.isProduction()) return;
-        // Register test blocks and block entities (development mode only)
-        var modEventBus = context.getModEventBus();
-        ModBlocks.BLOCKS.register(modEventBus);
-        ModBlockEntities.BLOCK_ENTITIES.register(modEventBus);
-        ModItems.ITEMS.register(modEventBus);
-        ModEntityTypes.ENTITY_TYPES.register(modEventBus);
+        initialized = true;
     }
 }

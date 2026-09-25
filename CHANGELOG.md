@@ -1,5 +1,49 @@
 # Changelog
 
+## 26.10.0-neoforge (2026-09-19) — Minecraft 1.21.1 / NeoForge
+
+Ported from Minecraft 1.20.1 / Forge. The 1.20.1 line continues on the `1.20.1` branch and keeps
+publishing its own `26.9.x` versions, so the two lines share the annotation API but not the loader.
+
+### Breaking Changes
+- **Loader and build**: ForgeGradle → **ModDevGradle 2.0.141**, Forge 47 → **NeoForge 21.1.234**,
+  official (Mojang) mappings, no reobfuscation step and no access transformer; the mod metadata moved
+  from `META-INF/mods.toml` to `META-INF/neoforge.mods.toml`, and the mod entry now receives an
+  `IEventBus` instead of a `FMLJavaModLoadingContext`.
+- **Networking**: the Forge `SimpleChannel` layer is gone. Sync packets are NeoForge payload types
+  (`CustomPacketPayload` + Mojang `StreamCodec`) declared through `RegisterPayloadHandlersEvent`, sent
+  with `PacketDistributor` and handled through `IPayloadContext` (`context.player()`, `context.flow()`,
+  `context.listener().getConnectionType()`). Server→client payloads are validated by dimension, chunk,
+  block-entity type and distance before they are applied.
+- **Codecs**: `ByteStreamCodec`, `ByteStreamEncoder` and `ByteStreamDecoder` are removed.
+  `CombinedCodec<T>` now extends `DataCodec<T>` **and** `StreamCodec<RegistryFriendlyByteBuf, T>`
+  (with the new `DecodeLimits` element/byte caps), and `StreamCodecs.fromData(DataCodec)` bridges the
+  data side. The built-in set is registered against 1.21's data-component based `ItemStack`/
+  `FluidStack`/`Component` handling.
+- **Sync context**: every network read/write takes a `SyncContext` (registry access + connection type)
+  because a `RegistryFriendlyByteBuf` can only be created with a `RegistryAccess`:
+  `FieldDataManager#writeToNetworkBuffer(LogicalSide, SyncContext, boolean)` /
+  `readFromNetworkBuffer(LogicalSide, SyncContext, byte[])`, and the same parameter reaches
+  `IFieldDataHolder`, `FieldDataCodec` and the per-field buffer methods.
+- **NBT/serialization**: `INBTSerializable` moved to `net.neoforged.neoforge.common.util`;
+  `FieldDataHolderBlockEntity` implements the 1.21 `saveAdditional(CompoundTag, HolderLookup.Provider)` /
+  `loadAdditional(CompoundTag, HolderLookup.Provider)` / `getUpdateTag(HolderLookup.Provider)` signatures.
+
+### New Features
+- `FieldDataManager#writeSnapshot(LogicalSide, SyncContext)`: a non-consuming full-state snapshot for a
+  single authorized observer, so sending to one player no longer clears the shared delta baseline.
+- `ClientSyncTarget`: client→server updates are applied to a detached request holder that the target
+  validates and merges, instead of decoding straight into live state.
+- `RegistryContext`, `SnapshotScope`, `TagMapView` and the `util/cache` helpers, used by the 1.21
+  codec/snapshot paths.
+
+### Notes
+- The 1.21 adaptations follow [MachineLib](https://github.com/GregTech-Odyssey/MachineLib)'s
+  `com.moakiee.machinelib.sync` package, which is itself derived from DataSyncLib 26.9.4 and carries the
+  same API names.
+
+---
+
 ## 26.9.4 (2026-09-19)
 
 ### Breaking Changes
