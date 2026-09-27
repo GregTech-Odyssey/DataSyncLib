@@ -9,6 +9,10 @@ import com.gto.datasynclib.util.StreamCodecs;
 import com.gto.datasynclib.util.cache.ConcurrentHashMapCache;
 import com.gto.datasynclib.util.cache.MapCache;
 import com.mojang.serialization.Codec;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongList;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import net.minecraft.core.*;
 import net.minecraft.core.particles.ParticleType;
@@ -512,6 +516,20 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     public static final DataSyncCodec<UUID> UUID_CODEC = register(UUID.class, StreamCodecs.UUID_CODEC, DataCodec.UUID_CODEC);
 
     public static final DataSyncCodec<BigInteger> BIG_INTEGER_CODEC = register(BigInteger.class, StreamCodecs.BIG_INTEGER_CODEC, DataCodec.BIG_INTEGER_CODEC);
+
+    // ---- FastUtil lists. A non-final list field is a value field, so it resolves its codec through
+    // this registry; without these, such a field (or an @Access(instanceAsValue = true) one) would
+    // find no codec at all. The disk side keeps the compact primitive array form (no boxing), the
+    // wire side a VarInt size followed by one VarInt per element. A final list field is unaffected:
+    // it is handled by the FastUtil collection access layer instead.
+
+    public static final DataSyncCodec<IntList> INT_LIST_CODEC = register(IntList.class,
+            ByteBufCodecs.collection(size -> new IntArrayList(size), INT_CODEC.toStreamCodec()),
+            DataCodec.of(list -> new IntArrayData(list.toIntArray()), (data, dataVersion) -> new IntArrayList(data.getIntArray())));
+
+    public static final DataSyncCodec<LongList> LONG_LIST_CODEC = register(LongList.class,
+            ByteBufCodecs.collection(size -> new LongArrayList(size), LONG_CODEC.toStreamCodec()),
+            DataCodec.of(list -> new LongArrayData(list.toLongArray()), (data, dataVersion) -> new LongArrayList(data.getLongArray())));
 
     // ---- Minecraft registry entries: the plain value codec and the Holder variant of each one.
     // Static registries write a VarInt registry id on the wire and the registry key on disk; the

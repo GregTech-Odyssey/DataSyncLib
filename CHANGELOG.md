@@ -54,12 +54,25 @@ publishing its own `26.9.x` versions, so the two lines share the annotation API 
   `BuiltInRegistries.ENCHANTMENT`, only the `Registries.ENCHANTMENT` key, and vanilla exchanges
   enchantments as holders.
 - `RegistryContext` and the `util/cache` helpers, used by the 1.21 codec paths.
+- **FastUtil list codecs**: `INT_LIST_CODEC` / `LONG_LIST_CODEC`. A non-final list field is a value
+  field, so it resolves its codec through the registry; without these, an `IntList`/`LongList` field —
+  and in particular an `@Access(instanceAsValue = true)` one — found no codec at all (it failed with a
+  null dereference). The wire side is a VarInt size plus one VarInt per element, the disk side keeps the
+  compact primitive-array form (`IntArrayData`/`LongArrayData`, no boxing). A `final` list field is
+  unaffected: it stays with the FastUtil collection access layer.
+- **Fix — spurious first delta for non-final access-mode fields**: `AbstractFieldAccess#detectChange`
+  only primed the container's content snapshot when `mustDetect()` was true, so a non-final access-mode
+  field (e.g. one whose `autoDetect` is disabled) reported one bogus change on the cycle after its first
+  detect+write, which cost an extra packet. `hasChange` is now always called when the instance reference
+  changed, so the snapshot can no longer lag behind.
 - **NeoForge GameTest suite**: `com.gto.datasynclib.test.DataSyncGameTests` drives the framework inside a
   real server (a placed test block entity, real registries) and covers the disk round trip of every field
   family, the chunk-load tag, full and incremental network sync, the dirty-flag/marking APIs, skip
   predicates and default-value skipping, codec lookups with data- and stream-side byte round trips, the
   registry/enum/strategy helpers and the entity paths. `gradlew runGameTestServer` fails unless the server
-  log reports `All N required tests passed`.
+  log reports `All N required tests passed`. The tests are grouped into batches per area (`disk`,
+  `network`, `codec`, `helpers`, `entity`, `devsuite`), so the progress log and the failure report are per
+  category.
 
 ### Changes
 - The 1.20.1 `dataVersion == -1` compatibility branches are gone (`AbstractFieldAccess#readFromData`,

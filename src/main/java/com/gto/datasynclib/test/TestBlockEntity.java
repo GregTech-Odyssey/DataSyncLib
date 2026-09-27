@@ -59,6 +59,8 @@ import java.util.function.Function;
  *   <li>{@code @AdditionalHolder(childManager = true)} → a plain POJO with its own manager</li>
  *   <li>{@code @Codec} / {@code @Conversion} → custom serialization and type adaptation</li>
  *   <li>{@code @SaveToDisk(listener)} / {@code @SyncToClient(listener)} → change-notification hooks</li>
+ *   <li>{@code @Access(instanceAsValue = true)} → a nullable container serialized as a whole
+ *       (instance plus contents, with an explicit null marker)</li>
  * </ul>
  * <p>{@code TestBlockEntityTests} is the executable documentation for all of it — read the two side by
  * side. Fields and nested types are package-private on purpose so the suite can read and mutate them
@@ -92,6 +94,14 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     @SaveToDisk
     @SyncToClient
     final ItemStack[] stacks = new ItemStack[9];
+
+    /**
+     * Every slot stays {@code null} on purpose: with {@code saveEmpty = true} the empty container is
+     * still written to disk, unlike the all-null {@link #stacks} array, whose empty state is skipped
+     * by default. Save-only, so the pair is observed in the disk tests.
+     */
+    @SaveToDisk(saveEmpty = true)
+    final ItemStack[] savedEmpty = new ItemStack[2];
 
     /** Scalar {@code ItemStack}: exercises the registered {@link com.gto.datasynclib.util.ItemStackHashStrategy}. */
     @SaveToDisk
@@ -175,6 +185,18 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     @SyncToClient
     final Object2IntMap<String> object2IntMap = new Object2IntOpenHashMap<>();
 
+    /**
+     * Nullable FastUtil list in {@code instanceAsValue} mode: the access layer encodes the container
+     * <em>instance</em> itself, so a {@code null} list travels as an explicit null marker (a null
+     * entry on disk, a {@code false} presence flag on the wire) and a non-null one is re-created on
+     * the receiving side instead of being filled in place. The instance codec comes from the global
+     * {@code DataSyncCodec.INT_LIST_CODEC} registration.
+     */
+    @SaveToDisk
+    @SyncToClient
+    @Access(instanceAsValue = true)
+    IntList optionalInts = null;
+
     /** NeoForge {@code INBTSerializable} → TagSerializableAccess / TagSerializableArrayAccess. */
     @SaveToDisk
     @SyncToClient
@@ -239,6 +261,27 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     @SaveToDisk
     @Conversion(toManaged = "COMPOUND_TAG_MAP_FUNCTION")
     final CompoundTag tagData = new CompoundTag();
+
+    /**
+     * {@code @Conversion} with the write-back path. The field is a {@link C} record but is managed
+     * as a {@code CompoundTag}, so the non-final field forces {@code DataFieldDefinition#set} to run
+     * the inverse function on every load and every network read — the path a {@code final} field
+     * (like {@link #tagData} above) cannot exercise.
+     */
+    static final Function<C, CompoundTag> C_TAG_FUNCTION = c -> {
+        var tag = new CompoundTag();
+        tag.putInt("a", c.a());
+        tag.putInt("b", c.b());
+        return tag;
+    };
+
+    static final Function<CompoundTag, C> TAG_C_FUNCTION = tag -> new C(tag.getInt("a"), tag.getInt("b"));
+
+    /** Writable conversion field: managed as a {@code CompoundTag}, stored as a {@link C}. */
+    @SaveToDisk
+    @SyncToClient
+    @Conversion(toManaged = "C_TAG_FUNCTION", toField = "TAG_C_FUNCTION")
+    C converted = new C(0, 0);
 
     TestBlockEntity(BlockPos worldPosition, BlockState blockState) {
         super(ModBlockEntities.TEST_BLOCK_ENTITY.get(), worldPosition, blockState);
@@ -452,6 +495,10 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
 
         @Getter
         final FieldDataManager fieldDataManager = new FieldDataManager(this);
+    }
+
+    /** Immutable payload of the writable {@code @Conversion} example ({@link #converted}). */
+    record C(int a, int b) {
     }
 
     /** Plain POJO with its own child manager (does not implement {@link IFieldDataHolder}). */

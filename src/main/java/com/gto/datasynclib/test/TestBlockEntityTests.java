@@ -20,6 +20,7 @@ import com.gto.datasynclib.util.ItemStackArrayHashStrategy;
 import com.gto.datasynclib.util.ItemStackHashStrategy;
 import com.gto.datasynclib.util.Registry;
 import it.unimi.dsi.fastutil.Hash;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.GlobalPos;
@@ -160,9 +161,9 @@ public final class TestBlockEntityTests {
         expect("definitions.syncedToServer", manager.hasSyncFields(LogicalSide.CLIENT), true);
 
         // Keys come from the field name unless @SaveToDisk(key = ...) overrides it.
-        for (var key : List.of("i", "uuids", "stacks", "stack", "fluid", "heldItem", "tanks", "directions", "uuidSet", "map", "aabb", "a",
-                "b", "ints", "floats", "intList", "object2IntMap", "handler", "handlerArray", "module",
-                "globalPos", "sectionPos", "vec3i", "withDefault", "skipped", "loaded", "tagData")) {
+        for (var key : List.of("i", "uuids", "stacks", "savedEmpty", "stack", "fluid", "heldItem", "tanks", "directions", "uuidSet", "map", "aabb", "a",
+                "b", "ints", "floats", "intList", "optionalInts", "object2IntMap", "handler", "handlerArray", "module",
+                "globalPos", "sectionPos", "vec3i", "withDefault", "skipped", "loaded", "tagData", "converted")) {
             expect("definitions.key." + key, manager.getFieldDefinition(key) != null, true);
         }
 
@@ -296,6 +297,17 @@ public final class TestBlockEntityTests {
         expect("disk.skipWhenWritten",
                 notSkipped.getFieldDataManager().writeToData() instanceof StringMapData written
                         && written.containsKey("skipped"), true);
+
+        // saveEmpty: an all-null array is written only when the field opts in. `stacks` is emptied
+        // on purpose here, so the pair isolates the attribute from the array being unwritable.
+        TestBlockEntity allNull = newEntity();
+        Arrays.fill(allNull.stacks, null);
+        if (allNull.getFieldDataManager().writeToData() instanceof StringMapData emptyMap) {
+            expect("disk.allNullArraySkipped", emptyMap.containsKey("stacks"), false);
+            expect("disk.allNullArrayWrittenWhenSaveEmpty", emptyMap.containsKey("savedEmpty"), true);
+        } else {
+            expect("disk.allNullArrayDataIsMap", true, false);
+        }
     }
 
     /**
@@ -392,6 +404,16 @@ public final class TestBlockEntityTests {
         receiver.b.receiverCalls = 0;
         receiver.getFieldDataManager().readFromNetworkBuffer(LogicalSide.SERVER, context, toServer);
         expect("netFull.toServer", sender.objectHolder.value, receiver.objectHolder.value);
+
+        // instanceAsValue: the null instance travels as an explicit marker. The receiver holds a
+        // list, so only a marker that is really read back can bring its field to null.
+        TestBlockEntity nullSource = newEntity();
+        nullSource.optionalInts = null;
+        byte[] nullBytes = nullSource.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, true);
+        TestBlockEntity nullReceiver = newEntity();
+        nullReceiver.optionalInts = new IntArrayList(new int[]{9});
+        nullReceiver.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, context, nullBytes);
+        expect("netFull.instanceAsValueNullMarker", nullReceiver.optionalInts, null);
     }
 
     /**
@@ -453,6 +475,7 @@ public final class TestBlockEntityTests {
         manual.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, true);
         manual.manual = 4711;
         manual.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true);
+        manual.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, false);
         expect("netIncremental.manualNotAutoDetected",
                 manual.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, false).length, 0);
         manual.getFieldDataManager().markFieldsForSync("manual");
@@ -630,6 +653,7 @@ public final class TestBlockEntityTests {
         src.module.values.add(3);
         src.module.values.add(4);
         src.tagData.putInt("converted", 21);
+        src.converted = new TestBlockEntity.C(11, 22);
 
         // Child manager: persisted and synced as one field.
         Data data = src.getFieldDataManager().writeToData();
@@ -651,6 +675,11 @@ public final class TestBlockEntityTests {
         // @Conversion: the CompoundTag is managed as a Map<String, Tag> and must survive both paths.
         expect("conversion.disk", dst.tagData.getInt("converted"), 21);
         expect("conversion.net", client.tagData.getInt("converted"), 21);
+
+        // @Conversion(toField): the non-final record field is restored through the inverse function
+        // on both paths, so the receiver holds a C again and not the managed CompoundTag.
+        expect("conversion.toFieldDisk", dst.converted, new TestBlockEntity.C(11, 22));
+        expect("conversion.toFieldNet", client.converted, new TestBlockEntity.C(11, 22));
     }
 
     /**
@@ -880,6 +909,8 @@ public final class TestBlockEntityTests {
         be.intList.clear();
         be.intList.add(11);
         be.intList.add(22);
+        // instanceAsValue: a non-null instance (with contents) must round-trip on both paths.
+        be.optionalInts = new IntArrayList(new int[]{1, 2});
         be.object2IntMap.clear();
         be.object2IntMap.put("x", 42);
         be.handler.setStackInSlot(0, new ItemStack(Items.GOLD_INGOT, 7));
@@ -898,6 +929,9 @@ public final class TestBlockEntityTests {
         // diskRoundTrip, which also proves the same field is written while the predicate is false).
         be.skipped = -1;
         be.tagData.putInt("aaa", 99);
+        // The writable @Conversion field, restored through its toField function on both paths.
+        be.converted = new TestBlockEntity.C(11, 22);
+        // savedEmpty stays all-null on purpose: the point of that field is the saveEmpty attribute.
         return be;
     }
 
@@ -910,6 +944,7 @@ public final class TestBlockEntityTests {
         be.i = 0;
         Arrays.fill(be.uuids, null);
         Arrays.fill(be.stacks, null);
+        Arrays.fill(be.savedEmpty, null);
         be.stack = ItemStack.EMPTY;
         Arrays.fill(be.tanks, null);
         be.fluid = FluidStack.EMPTY;
@@ -929,6 +964,7 @@ public final class TestBlockEntityTests {
         Arrays.fill(be.floats, 0F);
         be.intList.clear();
         be.object2IntMap.clear();
+        be.optionalInts = null;
         be.handler.setStackInSlot(0, ItemStack.EMPTY);
         be.handlerArray[1].setStackInSlot(1, ItemStack.EMPTY);
         be.module.ticks = 0;
@@ -940,6 +976,7 @@ public final class TestBlockEntityTests {
         be.loaded = 0;
         be.synced = 0;
         be.tagData.getAllKeys().clear();
+        be.converted = new TestBlockEntity.C(0, 0);
     }
 
     private void expectSaved(String prefix, TestBlockEntity src, TestBlockEntity dst) {
@@ -949,6 +986,10 @@ public final class TestBlockEntityTests {
         expect(prefix + ".stack", ItemStack.matches(src.stack, dst.stack), true);
         expect(prefix + ".uuids", Arrays.equals(src.uuids, dst.uuids), true);
         expect(prefix + ".stacks", stacksEqual(src.stacks, dst.stacks), true);
+        // saveEmpty keeps the all-null container in the payload, so the restored one matches slot by slot.
+        expect(prefix + ".savedEmpty", stacksEqual(src.savedEmpty, dst.savedEmpty), true);
+        // instanceAsValue: the instance itself is what the disk payload carries, contents included.
+        expect(prefix + ".optionalInts", src.optionalInts, dst.optionalInts);
         expect(prefix + ".fluid", fluidsEqual(src.fluid, dst.fluid), true);
         expect(prefix + ".heldItem", src.heldItem.value(), dst.heldItem.value());
         expect(prefix + ".tanks", fluidsEqual(src.tanks, dst.tanks), true);
@@ -973,6 +1014,7 @@ public final class TestBlockEntityTests {
         expect(prefix + ".vec3i", src.vec3i, dst.vec3i);
         expect(prefix + ".loaded", src.loaded, dst.loaded);
         expect(prefix + ".tagData", src.tagData, dst.tagData);
+        expect(prefix + ".converted", src.converted, dst.converted);
     }
 
     private void expectSynced(String prefix, TestBlockEntity src, TestBlockEntity dst) {
@@ -995,6 +1037,8 @@ public final class TestBlockEntityTests {
         expect(prefix + ".globalPos", src.globalPos, dst.globalPos);
         expect(prefix + ".synced", src.synced, dst.synced);
         expect(prefix + ".tagData", src.tagData, dst.tagData);
+        expect(prefix + ".optionalInts", src.optionalInts, dst.optionalInts);
+        expect(prefix + ".converted", src.converted, dst.converted);
     }
 
     private List<CompoundTag> handlerArrayTag(TestBlockEntity be) {

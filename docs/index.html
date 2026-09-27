@@ -935,7 +935,7 @@ CustomData 直接包装原始 NBT 对象（零拷贝），而 <code>convertToDat
 
 <!-- ===== USAGE ===== -->
 <h2 id="usage-blockentity">BlockEntity 用法（推荐）</h2>
-<p>参考 <code>TestBlockEntity</code>（位于 <code>com.gto.datasynclib.test</code>）获取完整示例；同包下的 <code>DataSyncGameTests</code> 是用 NeoForge GameTest 写的一套运行期测试，用 <code>gradlew runGameTestServer</code> 执行（日志没有 <code>All N required tests passed</code> 时任务会失败），<code>TestBlockEntityTests</code>/<code>DataSyncSelfTests</code> 则由 <code>TestBlockEntity.serverTick</code> 每 JVM 跑一次。</p>
+<p>参考 <code>TestBlockEntity</code>（位于 <code>com.gto.datasynclib.test</code>）获取完整示例；同包下的 <code>DataSyncGameTests</code> 是用 NeoForge GameTest 写的一套运行期测试，按类目分 batch（<code>disk</code>/<code>network</code>/<code>codec</code>/<code>helpers</code>/<code>entity</code>/<code>devsuite</code>），用 <code>gradlew runGameTestServer</code> 执行（日志没有 <code>All N required tests passed</code> 时任务会失败），<code>TestBlockEntityTests</code>/<code>DataSyncSelfTests</code> 则由 <code>TestBlockEntity.serverTick</code> 每 JVM 跑一次。</p>
 <pre><code><span class="kw">public class</span> <span class="typ">MyMachineBlockEntity</span> <span class="kw">extends</span> <span class="typ">FieldDataHolderBlockEntity</span> {
 
     <span class="an">@SyncToClient</span>(scheduleUpdate = <span class="kw">true</span>)
@@ -1192,6 +1192,9 @@ CustomData 直接包装原始 NBT 对象（零拷贝），而 <code>convertToDat
         <tr><td>String</td><td>STRING_CODEC</td><td>字符串</td></tr>
         <tr><td>UUID</td><td>UUID_CODEC</td><td>通用唯一标识符</td></tr>
         <tr><td>BigInteger</td><td>BIG_INTEGER_CODEC</td><td>大整数</td></tr>
+        <tr><td>IntList / LongList</td><td>INT_LIST_CODEC / LONG_LIST_CODEC</td><td>FastUtil 原始类型列表（非 final 的列表字段属于值模式，就在这里解析 codec；磁盘侧存紧凑的原始数组形式）</td></tr>
+        <tr><td>Holder&lt;X&gt;</td><td>X_HOLDER_CODEC</td><td>每个注册表项的 Holder 版本（ITEM/BLOCK/FLUID/ENTITY_TYPE/BLOCK_ENTITY_TYPE/MOB_EFFECT/SOUND_EVENT/ATTRIBUTE/PARTICLE_TYPE/MENU_TYPE/RECIPE_TYPE）；字段写 <code>Holder&lt;X&gt;</code> 即按 <code>(Holder.class, X.class)</code> 解析</td></tr>
+        <tr><td>Holder&lt;Enchantment&gt;</td><td>ENCHANTMENT_HOLDER_CODEC</td><td>数据驱动注册表：两条路径都传注册表键，分别由 buffer 的 registry access（网络）与 <code>RegistryContext.current()</code>（磁盘）解析</td></tr>
         <tr><td>Item</td><td>ITEM_CODEC</td><td>Minecraft 物品注册表项</td></tr>
         <tr><td>Block</td><td>BLOCK_CODEC</td><td>Minecraft 方块注册表项</td></tr>
         <tr><td>Fluid</td><td>FLUID_CODEC</td><td>Minecraft 流体注册表项</td></tr>

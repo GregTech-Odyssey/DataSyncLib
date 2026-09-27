@@ -5,17 +5,22 @@ import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.RegistryContext;
 import com.gto.datasynclib.SyncContext;
+import com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity;
+import com.gto.datasynclib.datastream.codec.CombinedCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.StringMapData;
+import com.gto.datasynclib.network.DataSyncNetwork;
 import com.gto.datasynclib.util.EnumUtil;
 import com.gto.datasynclib.util.FluidStackArrayHashStrategy;
 import com.gto.datasynclib.util.FluidStackHashStrategy;
 import com.gto.datasynclib.util.ItemStackArrayHashStrategy;
 import com.gto.datasynclib.util.ItemStackHashStrategy;
+import com.gto.datasynclib.util.NbtUtil;
 import com.gto.datasynclib.util.Registry;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import net.minecraft.core.BlockPos;
@@ -31,6 +36,8 @@ import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.nbt.ByteArrayTag;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.IntTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -41,6 +48,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.fluids.FluidStack;
@@ -48,10 +56,14 @@ import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import net.neoforged.neoforge.items.ItemStackHandler;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Runtime, real-level verification suite for DataSyncLib, driven by the NeoForge GameTest framework
@@ -114,7 +126,7 @@ public final class DataSyncGameTests {
      * {@code skipWhen} fields must stay out of the written map and the
      * {@code @SaveToDisk(listener)} hook must fire exactly once with the restored value.</p>
      */
-    @GameTest(template = "empty")
+    @GameTest(template = "empty", batch = "disk")
     public static void diskRoundTripPersistsEveryFieldFamily(GameTestHelper h) {
         var lookup = h.getLevel().registryAccess();
         var context = SyncContext.neoforge(lookup);
@@ -152,6 +164,28 @@ public final class DataSyncGameTests {
                 h.fail("field_save did not decode to a StringMapData");
             }
 
+            // saveEmpty: an all-null array is written only when the field opts in. `stacks` is emptied
+            // on purpose here, so the pair isolates the attribute from the array being unwritable.
+            TestBlockEntity allNull = newEntity();
+            Arrays.fill(allNull.stacks, null);
+            if (allNull.getFieldDataManager().writeToData() instanceof StringMapData emptyMap) {
+                h.assertFalse(emptyMap.containsKey("stacks"), "all-null array without saveEmpty was written");
+                h.assertTrue(emptyMap.containsKey("savedEmpty"), "all-null array with saveEmpty was skipped");
+            } else {
+                h.fail("writeToData did not decode to a StringMapData");
+            }
+
+            // instanceAsValue on disk: a null instance is not written at all (saveEmpty is off), so
+            // the field is simply absent from field_save — the explicit null marker is what the
+            // network path carries (see the network batch).
+            TestBlockEntity nullList = newEntity();
+            nullList.optionalInts = null;
+            if (Data.readData(nullList.saveToTag(lookup).getByteArray("field_save")) instanceof StringMapData nullMap) {
+                h.assertFalse(nullMap.containsKey("optionalInts"), "null instanceAsValue value was written to disk");
+            } else {
+                h.fail("field_save did not decode to a StringMapData");
+            }
+
             // Also drive a full network write from the placed entity so the registry context of the
             // level is really the one used for the wire format.
             TestBlockEntity client = newEntity();
@@ -175,7 +209,7 @@ public final class DataSyncGameTests {
      * the chunk-load tag does not contain the saved {@code field_save} payload, so a client can never
      * mistake saved state for synced state.</p>
      */
-    @GameTest(template = "empty")
+    @GameTest(template = "empty", batch = "disk")
     public static void chunkLoadSyncCarriesOnlySyncToClientState(GameTestHelper h) {
         var lookup = h.getLevel().registryAccess();
         var context = SyncContext.neoforge(lookup);
@@ -210,7 +244,7 @@ public final class DataSyncGameTests {
      * such as {@code CUSTOM_NAME}), containers with the comparisons the level-free suite uses, and the
      * listener on the receiving side must observe the new value.</p>
      */
-    @GameTest(template = "empty")
+    @GameTest(template = "empty", batch = "network")
     public static void fullNetworkRoundTripCarriesSyncedFamilies(GameTestHelper h) {
         var context = SyncContext.neoforge(h.getLevel().registryAccess());
         TestBlockEntity source = mutate(newEntity());
@@ -234,6 +268,15 @@ public final class DataSyncGameTests {
 
         // Save-only state must not travel with the sync payload.
         h.assertValueEqual(client.i, 0, "save-only field travelled over the wire");
+
+        // instanceAsValue: the null instance is an explicit marker on the wire, so a receiver that
+        // holds a list ends up with null instead of keeping it.
+        TestBlockEntity nullSource = newEntity();
+        byte[] nullInstance = nullSource.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, context, true);
+        TestBlockEntity nullTarget = newEntity();
+        nullTarget.optionalInts = new IntArrayList(new int[]{9});
+        nullTarget.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, context, nullInstance);
+        h.assertTrue(nullTarget.optionalInts == null, "instanceAsValue null marker did not travel");
         h.succeed();
     }
 
@@ -247,7 +290,7 @@ public final class DataSyncGameTests {
      * included until {@code markFieldsForSync("manual")} is called, after which it is sent and applied
      * correctly.</p>
      */
-    @GameTest(template = "empty")
+    @GameTest(template = "empty", batch = "network")
     public static void incrementalNetworkSyncSendsOnlyChangedFields(GameTestHelper h) {
         var context = SyncContext.neoforge(h.getLevel().registryAccess());
         TestBlockEntity source = mutate(newEntity());
@@ -308,7 +351,7 @@ public final class DataSyncGameTests {
      * {@code clearAllChangeMarks()} resets every field, and an unknown field name fails loudly instead
      * of being ignored.</p>
      */
-    @GameTest(template = "empty")
+    @GameTest(template = "empty", batch = "network")
     public static void dirtyFlagsAndMarkingApiBehaveAsDocumented(GameTestHelper h) {
         var context = SyncContext.neoforge(h.getLevel().registryAccess());
         TestBlockEntity testBlockEntity = newEntity();
@@ -350,6 +393,47 @@ public final class DataSyncGameTests {
     }
 
     /**
+     * Proves the real send path: {@code DataSyncNetwork.syncBlockEntityToClient(be, false, true)} runs
+     * against a block entity that is genuinely placed in the level and consumes the pending sync flags
+     * of the fields it serialized.
+     *
+     * <p>A GameTest server has no tracking player, so nothing receives the payload; what is asserted
+     * here is the send path itself — it must not throw, and after it has run the incremental dirty
+     * state must be gone (a following incremental write has nothing left to send). The block entity is
+     * placed first, mutated, and primed through {@link #prime} so the baseline is clean; the pending
+     * flags the send path has to consume are then produced by one more change. The assertion runs a
+     * couple of ticks later because the helper hands the work to the server executor.</p>
+     */
+    @GameTest(template = "empty", batch = "network", timeoutTicks = 60)
+    public static void networkSendPathConsumesPendingSyncFlags(GameTestHelper h) {
+        var context = SyncContext.neoforge(h.getLevel().registryAccess());
+        TestBlockEntity testBlockEntity = placeBlockEntity(h, BlockPos.ZERO);
+        mutate(testBlockEntity);
+        prime(testBlockEntity, context);
+        // A genuine change after the baseline, so the send path has something pending to consume.
+        testBlockEntity.synced = 4711;
+        h.assertTrue(testBlockEntity.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true),
+                "the placed block entity had no pending changes");
+
+        try {
+            DataSyncNetwork.syncBlockEntityToClient(testBlockEntity, false, true);
+        } catch (Throwable t) {
+            h.fail("syncBlockEntityToClient threw " + t);
+            return;
+        }
+
+        h.runAfterDelay(2, () -> {
+            h.assertFalse(testBlockEntity.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true),
+                    "pending sync flags were not consumed by the send path");
+            h.assertValueEqual(testBlockEntity.getFieldDataManager()
+                            .writeToNetworkBuffer(LogicalSide.SERVER, context, false).length, 0,
+                    "incremental write after the send path was not empty");
+            h.setBlock(BlockPos.ZERO, Blocks.AIR);
+            h.succeed();
+        });
+    }
+
+    /**
      * Proves that {@code @SaveToDisk(skipWhen)} and {@code @SaveToDisk(defaultValue)} keep fields out
      * of the written {@code field_save} map, and that flipping the condition makes them appear.
      *
@@ -359,7 +443,7 @@ public final class DataSyncGameTests {
      * makes the predicate fire (both hidden), while {@code withDefault = 8} and {@code skipped = 1}
      * (predicate false) are written.</p>
      */
-    @GameTest(template = "empty")
+    @GameTest(template = "empty", batch = "disk")
     public static void skipPredicatesAndDefaultsHideFields(GameTestHelper h) {
         var lookup = h.getLevel().registryAccess();
         try (var ignored = RegistryContext.use(lookup)) {
@@ -426,8 +510,18 @@ public final class DataSyncGameTests {
      * — and round-tripped on both paths: the static-registry {@code Holder<Item>} and the data-driven
      * {@code Holder<Enchantment>}, whose disk decode runs inside {@link RegistryContext#use} because the
      * enchantment registry has no static {@code Registry} to look the key up in.</p>
+     *
+     * <p>Also covered here: {@link NbtUtil#convertToData(net.minecraft.nbt.Tag)} /
+     * {@link NbtUtil#convertToTag(Data)} on a nested {@code CompoundTag}; the
+     * {@link CombinedCodec#list}/{@link CombinedCodec#set}/{@link CombinedCodec#map}/
+     * {@link CombinedCodec#collection}/{@link CombinedCodec#array} factories built from
+     * {@code STRING_CODEC}/{@code INT_CODEC}, each on both paths; the positive path of the single-field
+     * API ({@code writeFieldToData} → {@code readFieldFromData}); the
+     * {@code markFieldsForSync(DataFieldDefinition)} overload; and the
+     * {@code Registry.streamCodec()}/{@code dataCodec()}/{@code combinedCodec()} accessors of a frozen
+     * registry.</p>
      */
-    @GameTest(template = "empty")
+    @GameTest(template = "empty", batch = "codec")
     public static void codecLookupsAndByteRoundTripsSucceed(GameTestHelper h) {
         var context = SyncContext.neoforge(h.getLevel().registryAccess());
         try (var ignored = RegistryContext.use(h.getLevel().registryAccess())) {
@@ -540,6 +634,115 @@ public final class DataSyncGameTests {
                 }
             }
 
+            // NbtUtil: a nested CompoundTag (a list, an int array and a nested compound) survives the
+            // conversion into the Data type system and back.
+            CompoundTag nbtSource = new CompoundTag();
+            ListTag nbtList = new ListTag();
+            nbtList.add(IntTag.valueOf(3));
+            nbtList.add(IntTag.valueOf(4));
+            nbtSource.put("list", nbtList);
+            nbtSource.putIntArray("array", new int[]{5, 6, 7});
+            CompoundTag nbtNested = new CompoundTag();
+            nbtNested.putString("name", "inner");
+            nbtNested.putBoolean("flag", true);
+            nbtSource.put("nested", nbtNested);
+            Tag nbtBack = NbtUtil.convertToTag(NbtUtil.convertToData(nbtSource));
+            h.assertTrue(nbtBack instanceof CompoundTag, "NbtUtil round trip did not produce a CompoundTag");
+            if (nbtBack instanceof CompoundTag back) {
+                h.assertTrue(nbtEquals(nbtSource, back), "NbtUtil nested CompoundTag round trip");
+            }
+
+            // CombinedCodec container factories, data side (the disk layout of each container).
+            DataSyncCodec<List<String>> listCodec = CombinedCodec.list(DataSyncCodec.STRING_CODEC);
+            h.assertValueEqual(listCodec.dataReader.decode(listCodec.dataWriter.encode(List.of("a", "b")), 0),
+                    List.of("a", "b"), "CombinedCodec.list data round trip");
+            DataSyncCodec<Set<String>> setCodec = CombinedCodec.set(DataSyncCodec.STRING_CODEC);
+            Set<String> decodedSet = setCodec.dataReader.decode(setCodec.dataWriter.encode(Set.of("a", "b")), 0);
+            h.assertValueEqual(decodedSet.size(), 2, "CombinedCodec.set data round trip size");
+            DataSyncCodec<Map<String, Integer>> mapCodec =
+                    CombinedCodec.map(HashMap::new, DataSyncCodec.STRING_CODEC, DataSyncCodec.INT_CODEC);
+            h.assertValueEqual(mapCodec.dataReader.decode(mapCodec.dataWriter.encode(Map.of("a", 1)), 0),
+                    Map.of("a", 1), "CombinedCodec.map data round trip");
+            DataSyncCodec<Collection<String>> collectionCodec =
+                    CombinedCodec.collection(ArrayList::new, DataSyncCodec.STRING_CODEC);
+            h.assertValueEqual(new ArrayList<>(collectionCodec.dataReader
+                            .decode(collectionCodec.dataWriter.encode(new ArrayList<>(List.of("a"))), 0)),
+                    List.of("a"), "CombinedCodec.collection data round trip");
+            DataSyncCodec<String[]> containerArrayCodec = CombinedCodec.array(String.class, DataSyncCodec.STRING_CODEC);
+            h.assertTrue(Arrays.equals(new String[]{"a", "b"}, containerArrayCodec.dataReader
+                            .decode(containerArrayCodec.dataWriter.encode(new String[]{"a", "b"}), 0)),
+                    "CombinedCodec.array data round trip");
+
+            // The same factories on the stream side, through one registry-aware buffer released in a
+            // finally block.
+            ByteBuf containerBytes = Unpooled.buffer();
+            try {
+                RegistryFriendlyByteBuf containerWrapper = context.buffer(containerBytes);
+                listCodec.streamWriter.encode(containerWrapper, List.of("a", "b"));
+                h.assertValueEqual(listCodec.streamReader.decode(containerWrapper), List.of("a", "b"),
+                        "CombinedCodec.list stream round trip");
+                setCodec.streamWriter.encode(containerWrapper, Set.of("a", "b"));
+                h.assertValueEqual(setCodec.streamReader.decode(containerWrapper).size(), 2,
+                        "CombinedCodec.set stream round trip size");
+                mapCodec.streamWriter.encode(containerWrapper, Map.of("a", 1));
+                h.assertValueEqual(mapCodec.streamReader.decode(containerWrapper), Map.of("a", 1),
+                        "CombinedCodec.map stream round trip");
+                collectionCodec.streamWriter.encode(containerWrapper, new ArrayList<>(List.of("a")));
+                h.assertValueEqual(new ArrayList<>(collectionCodec.streamReader.decode(containerWrapper)), List.of("a"),
+                        "CombinedCodec.collection stream round trip");
+                containerArrayCodec.streamWriter.encode(containerWrapper, new String[]{"a", "b"});
+                h.assertTrue(Arrays.equals(new String[]{"a", "b"},
+                                containerArrayCodec.streamReader.decode(containerWrapper)),
+                        "CombinedCodec.array stream round trip");
+            } finally {
+                containerBytes.release();
+            }
+
+            // Single-field API positive path: one field written out and read back on its own.
+            TestBlockEntity singleSource = newEntity();
+            singleSource.i = 777;
+            Data singleField = singleSource.getFieldDataManager().writeFieldToData("i");
+            h.assertFalse(singleField.isNone(), "writeFieldToData returned an empty payload");
+            TestBlockEntity singleTarget = newEntity();
+            singleTarget.i = 0;
+            singleTarget.getFieldDataManager().readFieldFromData(singleField, FieldDataHolderBlockEntity.VERSION, "i");
+            h.assertValueEqual(singleTarget.i, 777, "readFieldFromData did not restore the field");
+
+            // markFieldsForSync(DataFieldDefinition): the definition overload — not just the name
+            // overload — is what makes a field with autoDetect = false travel.
+            TestBlockEntity marked = mutate(newEntity());
+            FieldDataManager markedManager = marked.getFieldDataManager();
+            prime(marked, context);
+            marked.manual = 1234;
+            markedManager.updateFieldDirtyFlags(LogicalSide.SERVER, true);
+            h.assertValueEqual(markedManager.writeToNetworkBuffer(LogicalSide.SERVER, context, false).length, 0,
+                    "autoDetect = false field was auto-detected");
+            h.assertTrue(markedManager.getFieldDefinition("manual") != null, "definition lookup by name failed");
+            markedManager.markFieldsForSync(markedManager.getFieldDefinition("manual"));
+            byte[] definitionMarked = markedManager.writeToNetworkBuffer(LogicalSide.SERVER, context, false);
+            h.assertTrue(definitionMarked.length > 0, "markFieldsForSync(definition) had no effect");
+            TestBlockEntity definitionTarget = newEntity();
+            clear(definitionTarget);
+            definitionTarget.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, context, definitionMarked);
+            h.assertValueEqual(definitionTarget.manual, 1234, "definition-marked field was not applied");
+
+            // Registry accessors: a frozen test registry exposes the stream half, the data half and the
+            // combined codec built from them.
+            record CodecTag(String name, int value) {
+            }
+            Registry<String, CodecTag> codecRegistry =
+                    new Registry<>("datasynclib:codec_tag", DataCodec.STRING_CODEC, CodecTag::name, CodecTag.class);
+            codecRegistry.unfreeze();
+            codecRegistry.register("one", new CodecTag("one", 1));
+            codecRegistry.register("two", new CodecTag("two", 2));
+            codecRegistry.freeze();
+            h.assertTrue(codecRegistry.streamCodec() != null, "Registry.streamCodec() was null");
+            h.assertTrue(codecRegistry.dataCodec() != null, "Registry.dataCodec() was null");
+            h.assertTrue(codecRegistry.combinedCodec() != null, "Registry.combinedCodec() was null");
+            h.assertValueEqual(codecRegistry.combinedCodec().dataReader
+                            .decode(codecRegistry.combinedCodec().dataWriter.encode(new CodecTag("two", 2)), 0).value(), 2,
+                    "Registry.combinedCodec() data round trip");
+
             // The annotated field codec (@Codec) is not part of the global registry.
             h.assertTrue(DataSyncCodec.get(TestBlockEntity.A.class) == null,
                     "@Codec codec leaked into the global registry");
@@ -558,7 +761,7 @@ public final class DataSyncGameTests {
      * a scalar {@code ItemStack} field and on an {@code ItemStack[]} field, which is exactly what an
      * unregistered array would miss.</p>
      */
-    @GameTest(template = "empty")
+    @GameTest(template = "empty", batch = "helpers")
     public static void registryEnumAndStrategyHelpersWork(GameTestHelper h) {
         var context = SyncContext.neoforge(h.getLevel().registryAccess());
         // Fixed enums are persisted by ordinal.
@@ -580,6 +783,10 @@ public final class DataSyncGameTests {
         h.assertTrue(registry.isFrozen(), "registry did not freeze");
         h.assertValueEqual(registry.values().size(), 2, "registry size");
         h.assertValueEqual(registry.get("two").value(), 2, "registry key lookup");
+        // The registry exposes both halves plus the combined codec built from them.
+        h.assertTrue(registry.streamCodec() != null, "registry streamCodec missing");
+        h.assertTrue(registry.dataCodec() != null, "registry dataCodec missing");
+        h.assertTrue(registry.combinedCodec() != null, "registry combinedCodec missing");
 
         DataSyncCodec<GameTestTag> globalCodec = DataSyncCodec.get(GameTestTag.class);
         h.assertTrue(globalCodec != null, "frozen registry did not register a global codec");
@@ -650,7 +857,7 @@ public final class DataSyncGameTests {
      * {@code writeToNetworkBuffer}/{@code readFromNetworkBuffer} on detached entities. Both the flat
      * fields and the {@code @AdditionalHolder(childManager = true)} sub-object must survive.</p>
      */
-    @GameTest(template = "empty")
+    @GameTest(template = "empty", batch = "entity")
     public static void entityDiskAndNetworkPathsWork(GameTestHelper h) {
         var context = SyncContext.neoforge(h.getLevel().registryAccess());
         try (var ignored = RegistryContext.use(h.getLevel().registryAccess())) {
@@ -716,7 +923,7 @@ public final class DataSyncGameTests {
      * lets the level tick it a few times and then asserts what the suite reported, which turns a
      * failure of that suite into a failing GameTest instead of a log line nobody gates on.</p>
      */
-    @GameTest(template = "empty", timeoutTicks = 60)
+    @GameTest(template = "empty", batch = "devsuite", timeoutTicks = 60)
     public static void devSuiteRunFromTheTickPathReportsClean(GameTestHelper h) {
         h.setBlock(BlockPos.ZERO, ModBlocks.TEST_BLOCK.get());
         h.assertTrue(h.getBlockEntity(BlockPos.ZERO) != null, "placed test block entity is missing");
@@ -746,11 +953,14 @@ public final class DataSyncGameTests {
      * Places a real {@code TestBlockEntity} in the level at the given relative position and returns it.
      *
      * <p>This is the one path the level-free suites cannot cover: the block, the block entity type and
-     * the passed-in block state all come from the live server registries.</p>
+     * the passed-in block state all come from the live server registries. The position is cleared
+     * first, so a test never inherits the block entity a previous test (or a previous batch) left
+     * behind at the same coordinates.</p>
      *
      * @throws net.minecraft.gametest.framework.GameTestAssertException if the block entity is missing
      */
     private static TestBlockEntity placeBlockEntity(GameTestHelper h, BlockPos relativePos) {
+        h.setBlock(relativePos, Blocks.AIR);
         h.setBlock(relativePos, ModBlocks.TEST_BLOCK.get());
         TestBlockEntity be = h.getBlockEntity(relativePos);
         h.assertTrue(be != null, "placed test block entity is missing");
@@ -801,6 +1011,8 @@ public final class DataSyncGameTests {
         be.intList.clear();
         be.intList.add(11);
         be.intList.add(22);
+        // instanceAsValue: a non-null instance (contents included) must round-trip on both paths.
+        be.optionalInts = new IntArrayList(new int[]{1, 2});
         be.object2IntMap.clear();
         be.object2IntMap.put("x", 42);
         be.handler.setStackInSlot(0, new ItemStack(Items.GOLD_INGOT, 7));
@@ -822,6 +1034,9 @@ public final class DataSyncGameTests {
         be.skipped = -3;
         be.tagData.putInt("aaa", 99);
         be.tagData.putString("bbb", "ccc");
+        // The writable @Conversion field, restored through its toField function on both paths.
+        be.converted = new TestBlockEntity.C(11, 22);
+        // savedEmpty is left all-null on purpose: the point of that field is the saveEmpty attribute.
         return be;
     }
 
@@ -834,6 +1049,7 @@ public final class DataSyncGameTests {
         be.i = 0;
         Arrays.fill(be.uuids, null);
         Arrays.fill(be.stacks, null);
+        Arrays.fill(be.savedEmpty, null);
         be.stack = ItemStack.EMPTY;
         Arrays.fill(be.tanks, null);
         be.fluid = FluidStack.EMPTY;
@@ -853,6 +1069,7 @@ public final class DataSyncGameTests {
         Arrays.fill(be.floats, 0F);
         be.intList.clear();
         be.object2IntMap.clear();
+        be.optionalInts = null;
         be.handler.setStackInSlot(0, ItemStack.EMPTY);
         be.handlerArray[0].setStackInSlot(1, ItemStack.EMPTY);
         be.handlerArray[1].setStackInSlot(1, ItemStack.EMPTY);
@@ -868,6 +1085,7 @@ public final class DataSyncGameTests {
         be.synced = 0;
         be.manual = 0;
         be.tagData.getAllKeys().clear();
+        be.converted = new TestBlockEntity.C(0, 0);
     }
 
     /**
@@ -902,6 +1120,8 @@ public final class DataSyncGameTests {
         h.assertTrue(Arrays.equals(source.ints, restored.ints), prefix + ".ints");
         h.assertTrue(Arrays.equals(source.floats, restored.floats), prefix + ".floats");
         h.assertValueEqual(restored.intList, source.intList, prefix + ".intList");
+        // instanceAsValue: the nullable container instance (and its contents) comes back as a whole.
+        h.assertValueEqual(restored.optionalInts, source.optionalInts, prefix + ".optionalInts (instanceAsValue)");
         h.assertValueEqual(restored.object2IntMap, source.object2IntMap, prefix + ".object2IntMap");
         h.assertValueEqual(restored.handler.serializeNBT(h.getLevel().registryAccess()),
                 source.handler.serializeNBT(h.getLevel().registryAccess()), prefix + ".handler");
@@ -916,7 +1136,9 @@ public final class DataSyncGameTests {
         // manual is @SyncToClient only (autoDetect = false), so it must not be in the disk payload;
         // the cleared receiver would otherwise show the mutated value.
         h.assertValueEqual(restored.manual, 0, prefix + ".manual (sync-only value persisted to disk)");
+        h.assertTrue(stacksEqual(source.savedEmpty, restored.savedEmpty), prefix + ".savedEmpty (saveEmpty)");
         h.assertTrue(nbtEquals(source.tagData, restored.tagData), prefix + ".tagData (@Conversion)");
+        h.assertValueEqual(restored.converted, source.converted, prefix + ".converted (toField)");
     }
 
     /** Asserts every {@code @SyncToClient} family of a network round trip. */
@@ -940,7 +1162,9 @@ public final class DataSyncGameTests {
         h.assertValueEqual(target.globalPos, source.globalPos, prefix + ".globalPos");
         h.assertValueEqual(target.synced, source.synced, prefix + ".synced");
         h.assertValueEqual(target.manual, source.manual, prefix + ".manual");
+        h.assertValueEqual(target.optionalInts, source.optionalInts, prefix + ".optionalInts (instanceAsValue)");
         h.assertTrue(nbtEquals(source.tagData, target.tagData), prefix + ".tagData (@Conversion)");
+        h.assertValueEqual(target.converted, source.converted, prefix + ".converted (toField)");
     }
 
     /** Compares an {@code ItemStackHandler[]} through the tags the framework itself uses. */

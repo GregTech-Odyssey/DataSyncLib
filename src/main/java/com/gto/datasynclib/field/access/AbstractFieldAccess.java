@@ -98,7 +98,10 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
         if (this.instance != instance) {
             this.instance = instance;
             markAsChanged(source);
-            if (instance != null && mustDetect()) hasChange(side, instance, autoDetectOnly);
+            // Prime the content snapshot as well: the return value is unused here (the reference
+            // change already marked the field), but if hasChange were skipped the snapshot would stay
+            // stale and the next check would report a spurious delta for this field.
+            if (instance != null) hasChange(side, instance, autoDetectOnly);
             return true;
         }
         if (instance == null) return changed;
@@ -198,8 +201,8 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
      *
      * <p>Called from {@link #detectChange} in two situations:</p>
      * <ol>
-     *   <li>the instance reference changed and {@link #mustDetect()} is {@code true} — the
-     *       field is already dirty, so the return value only feeds the internal snapshot;</li>
+     *   <li>the instance reference changed — the field is already dirty, so the return value only
+     *       feeds the internal snapshot (it is still called, so the snapshot cannot lag behind);</li>
      *   <li>the reference is unchanged — the return value decides whether the field counts
      *       as changed.</li>
      * </ol>
