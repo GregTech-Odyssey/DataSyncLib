@@ -21,10 +21,9 @@ import java.util.Arrays;
  * tracked.</p>
  *
  * <h3>Network format:</h3>
- * <p>Individual {@code long} elements, one per array slot ({@code writeLong}/{@code readLong}).
- * The array length is NOT transmitted — both sides must agree on the length (typically
- * fixed-size arrays). Each element is written/read in order, overwriting the existing array
- * contents in-place.</p>
+ * <p>Individual VarLong-encoded elements, one per array slot. The array length is NOT
+ * transmitted — both sides must agree on the length (typically fixed-size arrays).
+ * Each element is written/read in order, overwriting the existing array contents in-place.</p>
  *
  * <h3>Persistence format:</h3>
  * <p>Writes as {@link LongArrayData}. Skips writing if the array matches the configured
@@ -54,7 +53,7 @@ public final class LongArrayAccess extends AbstractFieldAccess<long[]> {
     @Override
     protected void doWriteBuffer(@NotNull LogicalSide side, long @NotNull [] instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
         for (var element : instance) {
-            data.writeLong(element);
+            data.writeVarLong(element);
         }
     }
 
@@ -62,7 +61,7 @@ public final class LongArrayAccess extends AbstractFieldAccess<long[]> {
     protected void doReadBuffer(@NotNull LogicalSide side, long @NotNull [] instance, @NotNull FriendlyByteBuf data) {
         var length = instance.length;
         for (int i = 0; i < length; i++) {
-            instance[i] = data.readLong();
+            instance[i] = data.readVarLong();
         }
     }
 
