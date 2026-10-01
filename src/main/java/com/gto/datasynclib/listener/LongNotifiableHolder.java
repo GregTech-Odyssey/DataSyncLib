@@ -64,7 +64,7 @@ public final class LongNotifiableHolder extends LongHolder implements IDataSeria
 
     @Override
     public void writeBuffer(LogicalSide side, @NotNull RegistryFriendlyByteBuf data) {
-        data.writeLong(value);
+        data.writeVarLong(value);
         senderListener.onSync(side, lastValue, value);
         lastValue = value;
     }
@@ -72,7 +72,7 @@ public final class LongNotifiableHolder extends LongHolder implements IDataSeria
     @Override
     public void readBuffer(LogicalSide side, @NotNull RegistryFriendlyByteBuf data) {
         var oldValue = value;
-        value = data.readLong();
+        value = data.readVarLong();
         receiverListener.onSync(side, oldValue, value);
     }
 

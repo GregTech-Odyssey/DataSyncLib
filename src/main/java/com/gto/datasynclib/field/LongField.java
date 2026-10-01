@@ -34,12 +34,12 @@ public final class LongField extends AbstractField<Long> {
     public void writeToBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull RegistryFriendlyByteBuf data, boolean writeAll) {
         var value = definition.getLong(source);
         lastValue = value;
-        data.writeLong(value);
+        data.writeVarLong(value);
     }
 
     @Override
     public void readFromBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull RegistryFriendlyByteBuf data) {
-        var value = data.readLong();
+        var value = data.readVarLong();
         definition.setLong(source, value);
         var listener = definition.getListener(side);
         if (listener != null) {
