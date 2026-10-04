@@ -19,6 +19,8 @@ import com.intellij.psi.PsiType
 object FieldContextResolver {
 
     const val CONVERSION_ANNOTATION = "com.gto.datasynclib.annotations.Conversion"
+    const val STRATEGY_ANNOTATION = "com.gto.datasynclib.annotations.Strategy"
+    const val ADDITIONAL_HOLDER_ANNOTATION = "com.gto.datasynclib.annotations.AdditionalHolder"
 
     /**
      * @return 字段的有效类型（托管类型或声明类型）。无法确定时返回声明类型。
@@ -63,5 +65,35 @@ object FieldContextResolver {
         } else {
             (field.type as? PsiClassType)?.parameters ?: emptyList()
         }
+    }
+
+    /**
+     * 解析 @Conversion.toManaged 指向的静态 Function 字段的泛型参数。
+     * @return [A, B]（第一/第二泛型），无法解析返回空列表。
+     */
+    fun conversionFunctionTypes(field: PsiField): List<PsiType> {
+        val conversion = field.getAnnotation(CONVERSION_ANNOTATION) ?: return emptyList()
+        val toManaged = conversion.findAttributeValue("toManaged")?.let {
+            (it as? com.intellij.psi.PsiLiteralExpression)?.value as? String
+        } ?: return emptyList()
+        val clazz = field.containingClass ?: return emptyList()
+        val fnField = clazz.findFieldByName(toManaged, true) ?: return emptyList()
+        val fnType = fnField.type as? PsiClassType ?: return emptyList()
+        return fnType.parameters
+    }
+
+    /**
+     * 解析 @Strategy.value 指向的静态 Hash.Strategy 字段的泛型参数（单个元素类型）。
+     * @return 泛型参数类型，无法解析返回 null。
+     */
+    fun strategyGenericType(field: PsiField): PsiType? {
+        val strategy = field.getAnnotation(STRATEGY_ANNOTATION) ?: return null
+        val value = strategy.findAttributeValue("value")?.let {
+            (it as? com.intellij.psi.PsiLiteralExpression)?.value as? String
+        } ?: return null
+        val clazz = field.containingClass ?: return null
+        val sf = clazz.findFieldByName(value, true) ?: return null
+        val st = sf.type as? PsiClassType ?: return null
+        return st.parameters.firstOrNull()
     }
 }

@@ -47,6 +47,10 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
                 if (qName == AnnotationContract.CODEC) {
                     checkCodecRedundancy(holder, annotation)
                 }
+                // 4) @Codec 成对解析（writeToData 需配 readFromData，writeToBuffer 需配 readFromBuffer）
+                if (qName == AnnotationContract.CODEC) {
+                    checkCodecPairs(holder, annotation)
+                }
             }
 
             override fun visitNameValuePair(pair: PsiNameValuePair) {
@@ -62,12 +66,16 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
             }
 
             override fun visitField(field: PsiField) {
-                // @Generic 无泛型检查（字段级）
+                // @Generic 无泛型检查
                 checkGeneric(holder, field)
+                // @Conversion 泛型方向检查（Function<A,B> 的 A 必须匹配字段类型）
+                checkConversionDirection(holder, field)
+                // @Strategy 泛型类型匹配检查（Hash.Strategy<T> 的 T 必须匹配字段类型）
+                checkStrategyGeneric(holder, field)
             }
 
             override fun visitClass(clazz: PsiClass) {
-                // @SaveToDisk.key 重复检测（类级，需聚合同 holder 内所有字段的 key）
+                // @SaveToDisk.key 重复检测（含嵌套 @AdditionalHolder 展平字段）
                 checkDuplicateKeys(holder, clazz)
             }
         }
@@ -148,6 +156,43 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
         }
     }
 
+    // ===== @Codec 成对解析 =====
+
+    private fun checkCodecPairs(holder: ProblemsHolder, annotation: PsiAnnotation) {
+        val saveCodec = annotation.findAttributeValue("saveCodec")?.let {
+            (it as? PsiLiteralExpression)?.value as? String
+        }
+        // saveCodec 非空时走静态分支，实例方法属性被忽略，无需成对校验
+        if (!saveCodec.isNullOrEmpty()) return
+
+        checkPair(holder, annotation, "writeToData", "readFromData",
+            "'writeToData' requires a matching 'readFromData' (runtime resolves readFromData unconditionally)")
+        checkPair(holder, annotation, "writeToBuffer", "readFromBuffer",
+            "'writeToBuffer' requires a matching 'readFromBuffer' (runtime resolves readFromBuffer unconditionally)")
+    }
+
+    private fun checkPair(
+        holder: ProblemsHolder,
+        annotation: PsiAnnotation,
+        writeAttr: String,
+        readAttr: String,
+        message: String,
+    ) {
+        val write = attrString(annotation, writeAttr)
+        val read = attrString(annotation, readAttr)
+        if (write.isNotEmpty() && read.isEmpty()) {
+            val pair = annotation.findAttributeValue(writeAttr) as? PsiLiteralExpression
+            holder.registerProblem(
+                pair ?: annotation,
+                message,
+                ProblemHighlightType.ERROR,
+            )
+        }
+    }
+
+    private fun attrString(annotation: PsiAnnotation, attr: String): String =
+        annotation.findAttributeValue(attr)?.let { (it as? PsiLiteralExpression)?.value as? String } ?: ""
+
     // ===== @Generic 无泛型 =====
 
     private fun checkGeneric(holder: ProblemsHolder, field: PsiField) {
@@ -162,26 +207,107 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
         }
     }
 
+    // ===== @Conversion 泛型方向 =====
+
+    private fun checkConversionDirection(holder: ProblemsHolder, field: PsiField) {
+        val conversion = field.getAnnotation(FieldContextResolver.CONVERSION_ANNOTATION) ?: return
+        val types = FieldContextResolver.conversionFunctionTypes(field)
+        if (types.size < 2) {
+            // 无法解析 Function 泛型（可能在别的文件/未解析），跳过（不误报）
+            return
+        }
+        // Function<A, B>：A（第一泛型）必须匹配字段声明类型
+        val a = types[0]
+        if (!typeCompatible(a, field.type)) {
+            val pair = conversion.findAttributeValue("toManaged") as? PsiLiteralExpression
+            holder.registerProblem(
+                pair ?: conversion,
+                "Conversion Function input type ${a.presentableText} does not match field type ${field.type.presentableText}",
+                ProblemHighlightType.WARNING,
+            )
+        }
+    }
+
+    private fun typeCompatible(a: PsiType, b: PsiType): Boolean {
+        if (a == b) return true
+        // 装箱/拆箱等价
+        val an = a.canonicalText
+        val bn = b.canonicalText
+        return box(an) == box(bn)
+    }
+
+    private fun box(t: String): String = when (t) {
+        "int" -> "java.lang.Integer"
+        "long" -> "java.lang.Long"
+        "boolean" -> "java.lang.Boolean"
+        "double" -> "java.lang.Double"
+        "float" -> "java.lang.Float"
+        "byte" -> "java.lang.Byte"
+        "short" -> "java.lang.Short"
+        "char" -> "java.lang.Character"
+        else -> t
+    }
+
+    // ===== @Strategy 泛型类型匹配 =====
+
+    private fun checkStrategyGeneric(holder: ProblemsHolder, field: PsiField) {
+        val strategy = field.getAnnotation(FieldContextResolver.STRATEGY_ANNOTATION) ?: return
+        val st = FieldContextResolver.strategyGenericType(field) ?: return
+        // Hash.Strategy<T> 的 T 需匹配字段类型（数组字段 T = 数组类型本身）
+        if (!typeCompatible(st, field.type)) {
+            val pair = strategy.findAttributeValue("value") as? PsiLiteralExpression
+            holder.registerProblem(
+                pair ?: strategy,
+                "Strategy generic type ${st.presentableText} does not match field type ${field.type.presentableText}",
+                ProblemHighlightType.WARNING,
+            )
+        }
+    }
+
     // ===== key 重复检测 =====
 
     private fun checkDuplicateKeys(holder: ProblemsHolder, clazz: PsiClass) {
-        // 收集本类声明字段的 key（含嵌套 @AdditionalHolder 展平的字段，以及继承链上的父类字段）
-        // 这里做「同类内 + 父类可见字段」的近似：遍历字段，解析 key，检测同 key 冲突。
-        // 完整镜像继承链合并在 IDE 单文件 inspection 中成本高，近似到「同一类及其可见字段」。
+        // 镜像 scanFields：遍历本类字段，对 @AdditionalHolder(flat) 字段递归展平其嵌套类型的字段，
+        // 所有「托管字段」的 key 进入同一个 definitionMap，冲突即运行时抛异常。
         val seen = HashMap<String, PsiField>()
+        collectKeys(clazz, seen, holder, 0)
+    }
+
+    private fun collectKeys(
+        clazz: PsiClass,
+        seen: MutableMap<String, PsiField>,
+        holder: ProblemsHolder,
+        depth: Int,
+    ) {
+        if (depth > 8) return // 防循环
         for (field in clazz.fields) {
             if (field.hasModifierProperty(PsiModifier.STATIC)) continue
-            val saveToDisk = field.getAnnotation("com.gto.datasynclib.annotations.SaveToDisk")
-            // 只有 @SaveToDisk（或有 key 语义）的字段参与？实际 definitionMap 覆盖所有托管字段。
-            // 关键：只有被 SaveToDisk/SyncToClient/SyncToServer/AddToManager 注解的字段才进 definitionMap。
+            // @AdditionalHolder（flat）字段：递归展平嵌套类型的字段（镜像 scanFields 递归）
+            val additionalHolder = field.getAnnotation(FieldContextResolver.ADDITIONAL_HOLDER_ANNOTATION)
+            if (additionalHolder != null) {
+                val childManager = additionalHolder.findAttributeValue("childManager")?.let {
+                    (it as? com.intellij.psi.PsiLiteralExpression)?.value as? Boolean
+                } ?: false
+                if (!childManager) {
+                    // flat：递归展开嵌套类型
+                    val nestedClass = (field.type as? PsiClassType)?.resolve()
+                    if (nestedClass != null) {
+                        collectKeys(nestedClass, seen, holder, depth + 1)
+                    }
+                    continue
+                }
+                // childManager=true：字段本身作为一个托管字段（若带 SaveToDisk/Sync 注解）
+            }
+            // 托管字段（进 definitionMap 的字段）
             if (!isManagedField(field)) continue
+            val saveToDisk = field.getAnnotation("com.gto.datasynclib.annotations.SaveToDisk")
             val key = resolveKey(field, saveToDisk)
             val prev = seen[key]
             if (prev != null && prev !== field) {
                 val target = (saveToDisk?.findAttributeValue("key") as? PsiLiteralExpression) ?: field.nameIdentifier
                 holder.registerProblem(
                     target ?: field,
-                    "Duplicate field key '$key' in ${clazz.name} (already used by '$prev') — runtime throws 'Duplicate sync field key'",
+                    "Duplicate field key '$key' (already used by '${prev.name}') — runtime throws 'Duplicate sync field key'",
                     ProblemHighlightType.ERROR,
                 )
             } else {

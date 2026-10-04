@@ -74,11 +74,26 @@ clazz.getDeclaredField(name)  —— 仅当前声明类，含 private
 
 | 检查 | 触发条件 | 源码依据 |
 |---|---|---|
-| key 重复 | 同 holder 内两字段解析出相同 key | `FieldDefinitionStorage` 构造器 `definitionMap.put != null → throw Duplicate` |
+| key 重复 | 同 holder 内两字段解析出相同 key（含嵌套 @AdditionalHolder flat 展平） | `FieldDefinitionStorage` 构造器 `definitionMap.put != null → throw Duplicate` |
 | defaultValue 格式 | `@SaveToDisk.defaultValue` 无法按有效类型解析 | `ReflectUtil.parse(type, value)` |
 | @Generic 无泛型 | `@Generic` 字段无泛型实参 | `createFieldDefinition` `genericType.length == 0 → throw` |
 | @Codec 无效果 | `saveCodec` 非空且实例方法属性也填了 | `FieldAnnotationMetadata` 互斥分支 |
+| @Codec 成对 | `saveCodec` 空且 `writeToData` 填了但 `readFromData` 空（或 writeToBuffer/readFromBuffer） | `FieldAnnotationMetadata` 163-171 / 175-183 行无条件解析 readXxx |
+| @Conversion 方向 | `Function<A,B>` 的 A 不匹配字段声明类型 | `Conversion` Javadoc 约定 A 必须=字段类型 |
+| @Strategy 泛型 | `Hash.Strategy<T>` 的 T 不匹配字段类型 | `Strategy` Javadoc 约定 T=字段类型 |
 | 托管类型提示 | `@Conversion` 字段 | `scanFields` type 替换 |
+| 生成方法 quick-fix | 引用的 listener/skipWhen 等方法不存在 | 补全缺失的签名方法 |
+| 嵌套导航 | `@AdditionalHolder` 图标跳转到嵌套类型 | `scanFields` 递归展开 |
+
+## 已实现的扩展点
+
+- `PsiReferenceContributor` — 字符串引用导航
+- `AbstractBaseJavaLocalInspectionTool` — 上述全部检查
+- `CompletionContributor` — 成员补全
+- `RelatedItemLineMarkerProvider` — gutter 图标 + tooltip + 嵌套导航
+- `IntentionAction` — 生成引用方法 quick-fix
+- `GlobalUsageHelper` — 消除未使用误报
+
 
 
 ## 插件需要规避的解析难点
