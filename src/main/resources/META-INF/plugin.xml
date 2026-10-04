@@ -46,6 +46,11 @@
                 language="JAVA"
                 implementationClass="com.gto.datasynclib.plugin.markup.DataSyncLibLineMarkerProvider"/>
 
+        <!-- 类 tooltip：显示被注解字段清单（含父类） -->
+        <lang.documentationProvider
+                language="JAVA"
+                implementationClass="com.gto.datasynclib.plugin.markup.DataSyncLibDocumentationProvider"/>
+
         <!-- Quick-fix：生成注解引用的方法 -->
         <intentionAction>
             <className>com.gto.datasynclib.plugin.inspection.GenerateReferencedMethodIntention</className>

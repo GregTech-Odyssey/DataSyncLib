@@ -84,6 +84,7 @@ clazz.getDeclaredField(name)  —— 仅当前声明类，含 private
 | 托管类型提示 | `@Conversion` 字段 | `scanFields` type 替换 |
 | 生成方法 quick-fix | 引用的 listener/skipWhen 等方法不存在 | 补全缺失的签名方法 |
 | 嵌套导航 | `@AdditionalHolder` 图标跳转到嵌套类型 | `scanFields` 递归展开 |
+| 类 tooltip 摘要 | hover 类名显示本类+父类的被注解字段清单 | `get()` 继承链合并 |
 
 ## 已实现的扩展点
 
@@ -91,6 +92,7 @@ clazz.getDeclaredField(name)  —— 仅当前声明类，含 private
 - `AbstractBaseJavaLocalInspectionTool` — 上述全部检查
 - `CompletionContributor` — 成员补全
 - `RelatedItemLineMarkerProvider` — gutter 图标 + tooltip + 嵌套导航
+- `DocumentationProvider` — 类 tooltip 显示被注解字段（含父类）
 - `IntentionAction` — 生成引用方法 quick-fix
 - `GlobalUsageHelper` — 消除未使用误报
 
