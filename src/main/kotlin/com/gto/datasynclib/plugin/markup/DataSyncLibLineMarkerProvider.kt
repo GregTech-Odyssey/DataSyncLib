@@ -31,6 +31,7 @@ class DataSyncLibLineMarkerProvider : RelatedItemLineMarkerProvider() {
 
         for (annotation in annotations) {
             val icon = iconFor(annotation) ?: continue
+            val tooltip = tooltipFor(element, annotation)
             val builder = RelatedItemLineMarkerInfo(
                 element.nameIdentifier ?: element,
                 element.textRange,
@@ -43,12 +44,26 @@ class DataSyncLibLineMarkerProvider : RelatedItemLineMarkerProvider() {
         }
     }
 
+    /** 托管类型提示：字段有 @Conversion 时，tooltip 显示有效（托管）类型 */
+    private fun tooltipFor(field: PsiField, annotation: PsiAnnotation): String? {
+        val qName = annotation.qualifiedName ?: return null
+        if (qName != "com.gto.datasynclib.annotations.Conversion") return null
+        val effective = com.gto.datasynclib.plugin.registry.FieldContextResolver.effectiveType(field)
+        if (effective == field.type) return null
+        return "托管类型（@Conversion 后）: ${effective.presentableText}"
+    }
+
     private fun iconFor(annotation: PsiAnnotation): Icon? {
         val qName = annotation.qualifiedName ?: return null
         return when (qName.substringAfterLast('.')) {
             "SyncToClient" -> AllIcons.Actions.Upload
             "SyncToServer" -> AllIcons.Actions.Download
             "SaveToDisk" -> AllIcons.Actions.MenuSaveall
+            "Conversion" -> AllIcons.Actions.Refresh
+            "Codec" -> AllIcons.Nodes.Record
+            "Strategy" -> AllIcons.Nodes.Function
+            "AdditionalHolder" -> AllIcons.Nodes.Tree
+            "Generic" -> AllIcons.Nodes.Type
             else -> null
         }
     }

@@ -63,6 +63,24 @@ clazz.getDeclaredField(name)  —— 仅当前声明类，含 private
 
 5. **`Conversion` 的 `toField` 缺失时「静默跳过」**，不报错；`toManaged` 缺失则必然空指针/崩溃。插件对 `toManaged` 应标「必填缺失」错误。
 
+## 关键类型流转（@Conversion 托管类型）
+
+- `scanFields` 里 `@Conversion(toManaged="X")` 存在时，字段的「有效类型」被替换为 `X` 所指向的静态 `Function<A, B>` 字段的**第二泛型参数 B**（托管类型）。
+- 后续 `listener`/`skipWhen`/`@Codec` 方法的签名匹配，用的都是**托管类型**，而非字段声明类型。
+- 插件必须用 `FieldContextResolver.effectiveType()` 镜像此规则，否则有 `@Conversion` 的字段会误报签名不匹配。
+- `@Generic` 检查同理：有 `@Conversion` 时泛型实参来自 `Function` 字段的第二泛型，而非字段自身。
+
+## 插件检查项清单（与代码一一对应）
+
+| 检查 | 触发条件 | 源码依据 |
+|---|---|---|
+| key 重复 | 同 holder 内两字段解析出相同 key | `FieldDefinitionStorage` 构造器 `definitionMap.put != null → throw Duplicate` |
+| defaultValue 格式 | `@SaveToDisk.defaultValue` 无法按有效类型解析 | `ReflectUtil.parse(type, value)` |
+| @Generic 无泛型 | `@Generic` 字段无泛型实参 | `createFieldDefinition` `genericType.length == 0 → throw` |
+| @Codec 无效果 | `saveCodec` 非空且实例方法属性也填了 | `FieldAnnotationMetadata` 互斥分支 |
+| 托管类型提示 | `@Conversion` 字段 | `scanFields` type 替换 |
+
+
 ## 插件需要规避的解析难点
 
 - **重载**：`skipWhen="foo"` 若有多个 `foo`，`getDeclaredMethod(name, type)` 靠参数精确匹配消歧；插件应按「签名精确匹配」过滤，多个候选时提示歧义。

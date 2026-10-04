@@ -31,7 +31,7 @@
         <localInspection
                 language="JAVA"
                 groupName="DataSyncLib"
-                displayName="DataSyncLib annotation reference checks"
+                displayName="DataSyncLib annotation checks"
                 enabledByDefault="true"
                 level="ERROR"
                 implementationClass="com.gto.datasynclib.plugin.inspection.AnnotationContractInspection"/>

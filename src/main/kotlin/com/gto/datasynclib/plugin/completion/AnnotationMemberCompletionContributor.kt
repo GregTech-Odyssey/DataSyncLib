@@ -52,7 +52,10 @@ class MemberCompletionProvider : CompletionProvider<CompletionParameters>() {
             }
             RefKind.INSTANCE_METHOD -> {
                 val methods = clazz.allMethods
-                val matcher = com.gto.datasynclib.plugin.inspection.MethodSignatureMatcher(contract, field.type)
+                val matcher = com.gto.datasynclib.plugin.inspection.MethodSignatureMatcher(
+                    contract,
+                    com.gto.datasynclib.plugin.registry.FieldContextResolver.effectiveType(field),
+                )
                 methods
                     .filter { matcher.matches(it) }
                     .distinctBy { it.name }

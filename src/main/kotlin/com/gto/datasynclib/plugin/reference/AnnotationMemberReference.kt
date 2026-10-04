@@ -2,6 +2,7 @@ package com.gto.datasynclib.plugin.reference
 
 import com.gto.datasynclib.plugin.registry.AnnotationContract
 import com.gto.datasynclib.plugin.registry.AnnotationContractRegistry
+import com.gto.datasynclib.plugin.registry.FieldContextResolver
 import com.gto.datasynclib.plugin.registry.RefKind
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.*
@@ -31,9 +32,9 @@ class AnnotationMemberReference(
     private val clazz: PsiClass?
         get() = owner.containingClass
 
-    /** 字段类型 T */
+    /** 字段类型 T（含 @Conversion 时的托管类型） */
     private val fieldType: PsiType
-        get() = owner.type
+        get() = FieldContextResolver.effectiveType(owner)
 
     private fun resolveField(): PsiField? {
         val clazz = clazz ?: return null
