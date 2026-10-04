@@ -1,0 +1,52 @@
+<idea-plugin>
+    <id>com.gto.datasynclib.plugin</id>
+    <name>DataSyncLib Support</name>
+    <vendor>GregTech Odyssey</vendor>
+
+    <description><![CDATA[
+        IntelliJ IDEA support for the DataSyncLib annotation-driven DSL.
+
+        Provides:
+        - Navigation (Ctrl/Cmd + Click) from annotation string references to the referenced method/field.
+        - Contract validation: unresolved references, signature mismatches, static/instance mismatches,
+          and missing required attributes.
+        - Suppression of "unused" warnings for annotation-referenced members.
+        - Code completion for method/field names matching each annotation's expected signature.
+        - Data-flow visualization (gutter icons for sync / persistence annotations).
+
+        The plugin mirrors the resolution rules of
+        com.gto.datasynclib.FieldAnnotationMetadata / FieldDefinitionStorage / ReflectUtil.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.java</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- 引用解析 + 导航 -->
+        <psi.referenceContributor
+                language="JAVA"
+                implementation="com.gto.datasynclib.plugin.reference.AnnotationReferenceContributor"/>
+
+        <!-- 契约校验 inspection -->
+        <localInspection
+                language="JAVA"
+                groupName="DataSyncLib"
+                displayName="DataSyncLib annotation reference checks"
+                enabledByDefault="true"
+                level="ERROR"
+                implementationClass="com.gto.datasynclib.plugin.inspection.AnnotationContractInspection"/>
+
+        <!-- 补全 -->
+        <completion.contributor
+                language="JAVA"
+                implementationClass="com.gto.datasynclib.plugin.completion.AnnotationMemberCompletionContributor"/>
+
+        <!-- 数据流可视化：gutter 图标 -->
+        <codeInsight.lineMarkerProvider
+                language="JAVA"
+                implementationClass="com.gto.datasynclib.plugin.markup.DataSyncLibLineMarkerProvider"/>
+
+        <!-- 消除「未使用」误报 -->
+        <globalUsageHelper implementation="com.gto.datasynclib.plugin.inspection.AnnotationGlobalUsageHelper"/>
+    </extensions>
+</idea-plugin>

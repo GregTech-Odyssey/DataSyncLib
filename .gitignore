@@ -1,0 +1,6 @@
+# 由 IntelliJ 自动生成的目标目录
+.gradle/
+build/
+.idea/
+
+# 注：gradle/wrapper/gradle-wrapper.jar 需要提交，保证他人 clone 后 ./gradlew 可用
