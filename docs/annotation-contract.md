@@ -46,7 +46,7 @@ clazz.getDeclaredField(name)  —— 仅当前声明类，含 private
 | `Codec.writeToBuffer` | 实例方法 | `(FriendlyByteBuf, T) -> void` | 非静态 | 否 |
 | `Codec.readFromBuffer` | 实例方法 | `(FriendlyByteBuf) -> T` | 非静态 | 否 |
 | `SaveToDisk.key` | —（字符串键） | 非符号引用，仅可校验 key 唯一性（可选） | — | 否 |
-| `SaveToDisk.defaultValue` | —（字面量） | 经 `ReflectUtil.parse(type, value)` 解析，可校验格式 | — | 否 |
+| `SaveToDisk.defaultValue` | —（字面量） | 经 `ReflectUtil.parse(type, value)` 解析，按类型精确校验 | — | 否 |
 
 ## 关键细节
 
@@ -74,27 +74,47 @@ clazz.getDeclaredField(name)  —— 仅当前声明类，含 private
 
 | 检查 | 触发条件 | 源码依据 |
 |---|---|---|
-| key 重复 | 同 holder 内两字段解析出相同 key（含嵌套 @AdditionalHolder flat 展平） | `FieldDefinitionStorage` 构造器 `definitionMap.put != null → throw Duplicate` |
-| defaultValue 格式 | `@SaveToDisk.defaultValue` 无法按有效类型解析 | `ReflectUtil.parse(type, value)` |
+| key 重复 | 同 holder 内两字段解析出相同 key，**含继承链**（子类不得复用父类 key）与嵌套 `@AdditionalHolder` flat 展平 | `FieldDefinitionStorage.of(clazz, parentStorage)` 合并父类 `definitionMap`；构造器 `definitionMap.put != null → throw Runtime("Duplicate sync field key: …")` |
+| defaultValue 格式 | `@SaveToDisk.defaultValue` 无法按**有效类型**解析 | `ReflectUtil.parse(type, value)` |
 | @Generic 无泛型 | `@Generic` 字段无泛型实参 | `createFieldDefinition` `genericType.length == 0 → throw` |
 | @Codec 无效果 | `saveCodec` 非空且实例方法属性也填了 | `FieldAnnotationMetadata` 互斥分支 |
-| @Codec 成对 | `saveCodec` 空且 `writeToData` 填了但 `readFromData` 空（或 writeToBuffer/readFromBuffer） | `FieldAnnotationMetadata` 163-171 / 175-183 行无条件解析 readXxx |
+| @Codec 整体失效 | `@Codec` 用在 **final 字段**或 **`@Access(instanceAsValue = false)`** 上 | `createFieldDefinition` 先走 `hasAccessAnnotation() \|\| isFinal` 分支；`DataFieldDefinition.codec = (isFinal \|\| !instanceAsValue) ? null : …`，实例方法句柄仅在 `instanceAsValue == true` 时调用 |
+| @Codec 成对（单向） | **有写无读** → ERROR（运行期无条件解析读方法，找不到即崩）；**有读无写** → WARNING（运行期根本不解析读方法，静默无效） | `FieldAnnotationMetadata` L164-170 / L175-185 |
+| @Codec 读方法返回类型 | `readFromData` / `readFromBuffer` 返回类型必须 = T | `DataFieldDefinition` 把返回值直接当 T 用（`AbstractFieldAccess` read 路径） |
 | @Conversion 方向 | `Function<A,B>` 的 A 不匹配字段声明类型 | `Conversion` Javadoc 约定 A 必须=字段类型 |
+| @Conversion.toField 可选 | 指向的字段不存在时只报 WARNING（运行期 `catch (NoSuchFieldException ignored)` 静默跳过） | `scanFields` `catch (NoSuchFieldException ignored)` |
 | @Strategy 泛型 | `Hash.Strategy<T>` 的 T 不匹配字段类型 | `Strategy` Javadoc 约定 T=字段类型 |
+| 静态字段类型 | 引用的静态字段类型须匹配契约（比较**解析后的类**，参数化类型按裸类型比较） | `getDeclaredField` + `(DataCodec/Hash.Strategy/Function) f.get(null)` 强转 |
+| 实例方法非静态 | listener/skipWhen/defaultValueGetter/codec 实例方法不得为 static | `lookup.unreflect(staticMethod)` 得到的句柄无接收者，调用处是 `invokeExact(source, value)` → WrongMethodTypeException |
 | 托管类型提示 | `@Conversion` 字段 | `scanFields` type 替换 |
 | 生成方法 quick-fix | 引用的 listener/skipWhen 等方法不存在 | 补全缺失的签名方法 |
 | 嵌套导航 | `@AdditionalHolder` 图标跳转到嵌套类型 | `scanFields` 递归展开 |
-| 类 tooltip 摘要 | hover 类名显示本类+父类的被注解字段清单 | `get()` 继承链合并 |
+
+## defaultValue 的类型规则（镜像 `ReflectUtil.parse`）
+
+`FieldAnnotationMetadata` 构造期执行 `ReflectUtil.parse(type, saveToDisk.defaultValue())`，
+`type` 是**有效类型**（含 `@Conversion` 托管类型）。按类型分三档后果：
+
+| 类型 | 运行期行为 | 填错后果 | 插件级别 |
+|---|---|---|---|
+| `int`/`long`/`double`/`float`/`byte`/`short`（含装箱） | `Integer.parseInt` 等 | 抛 `NumberFormatException`，**mod 加载期崩溃** | ERROR |
+| `boolean` | `Boolean.parseBoolean` | **不抛异常，静默变 `false`**（`"flase"`/`"TRUE"` 都是 false） | ERROR |
+| 枚举 | `EnumUtil.getEnum` → `Map.get` | 未知名返回 `null`，**静默无默认值** | ERROR |
+| 其他引用类型 | `throw IllegalArgumentException` | **mod 加载期崩溃** | ERROR |
+| `char`/`Character` | `value.charAt(0)` | 非空即成立，长串只取首字符 | 不报错，仅提示 |
+| `String` | 原样返回 | 永不失败 | — |
+| 空串 `""` | 直接 `return null` | 不解析、不失败 | — |
 
 ## 已实现的扩展点
 
 - `PsiReferenceContributor` — 字符串引用导航
 - `AbstractBaseJavaLocalInspectionTool` — 上述全部检查
-- `CompletionContributor` — 成员补全
 - `RelatedItemLineMarkerProvider` — gutter 图标 + tooltip + 嵌套导航
-- `DocumentationProvider` — 类 tooltip 显示被注解字段（含父类）
 - `IntentionAction` — 生成引用方法 quick-fix
 - `GlobalUsageHelper` — 消除未使用误报
+
+> 注：曾实现过的 `DocumentationProvider`（类 tooltip 字段清单）与 `CompletionContributor`
+> （成员名补全）已移除 —— 前者会顶掉光标处原有的文档显示，后者未能可靠触发。
 
 
 

@@ -2,7 +2,6 @@ package com.gto.datasynclib.plugin
 
 import com.gto.datasynclib.plugin.inspection.AnnotationContractInspection
 import com.gto.datasynclib.plugin.inspection.AnnotationGlobalUsageHelper
-import com.gto.datasynclib.plugin.markup.DataSyncLibDocumentationProvider
 import com.gto.datasynclib.plugin.registry.FieldContextResolver
 
 import com.intellij.codeInsight.daemon.ImplicitUsageProvider
@@ -79,6 +78,75 @@ class PlatformCompatibilityTest : LightJavaCodeInsightFixtureTestCase() {
         assertTrue(myFixture.doHighlighting().any { it.description == "Cannot resolve method 'missing'" })
     }
 
+    /**
+     * 回归：defaultValue 校验曾因 `tryParseNumber` 里的 `return try { ...; true }`
+     * 恒为 true 而完全失效，任何错值都不报错。
+     */
+    fun testInspectionReportsInvalidDefaultValueForBoolean() {
+        myFixture.enableInspections(AnnotationContractInspection())
+        myFixture.addClass(
+            """
+            package com.gto.datasynclib.annotations;
+            public @interface SaveToDisk { String defaultValue() default ""; }
+            """.trimIndent(),
+        )
+        configureClass(
+            """
+            class Holder {
+                @com.gto.datasynclib.annotations.SaveToDisk(defaultValue = "flase")
+                private boolean flag;
+            }
+        """,
+        )
+        val problems = myFixture.doHighlighting()
+        assertTrue(
+            "拼错的 boolean 默认值必须被报出来，实际 problems=$problems",
+            problems.any { it.description?.contains("flase") == true },
+        )
+    }
+
+    fun testInspectionReportsInvalidDefaultValueForInt() {
+        myFixture.enableInspections(AnnotationContractInspection())
+        myFixture.addClass(
+            """
+            package com.gto.datasynclib.annotations;
+            public @interface SaveToDisk { String defaultValue() default ""; }
+            """.trimIndent(),
+        )
+        configureClass(
+            """
+            class Holder {
+                @com.gto.datasynclib.annotations.SaveToDisk(defaultValue = "4a2")
+                private int count;
+            }
+        """,
+        )
+        assertTrue(
+            "非法 int 默认值必须被报出来",
+            myFixture.doHighlighting().any { it.description?.contains("4a2") == true },
+        )
+    }
+
+    fun testInspectionAcceptsValidDefaultValue() {
+        myFixture.enableInspections(AnnotationContractInspection())
+        myFixture.addClass(
+            """
+            package com.gto.datasynclib.annotations;
+            public @interface SaveToDisk { String defaultValue() default ""; }
+            """.trimIndent(),
+        )
+        configureClass(
+            """
+            class Holder {
+                @com.gto.datasynclib.annotations.SaveToDisk(defaultValue = "true")
+                private boolean flag;
+            }
+        """,
+        )
+        val problems = myFixture.doHighlighting().filter { it.description?.contains("defaultValue") == true }
+        assertEmpty("合法默认值不应报错，实际=$problems", problems)
+    }
+
     fun testAnnotationReferencedFieldIsReadButNotWritten() {
         val clazz =
             configureClass(
@@ -128,30 +196,32 @@ class PlatformCompatibilityTest : LightJavaCodeInsightFixtureTestCase() {
         assertEmpty(FieldContextResolver.genericArguments(clazz.findFieldByName("primitive", false)!!))
     }
 
-    fun testClassDocumentationLinksToClassesAndFields() {
-        val clazz =
-            (
-                myFixture.configureByText(
-                    "Holder.java",
-                    """
-            class Holder extends BaseHolder {
-                @com.gto.datasynclib.annotations.SyncToClient
+    /**
+     * 实参契约要求非静态。运行期 `lookup.unreflect(staticMethod)` 得到的 handle 没有接收者，
+     * 而调用处是 `invokeExact(source, value)`，参数个数不匹配 → WrongMethodTypeException。
+     */
+    fun testInspectionReportsStaticListenerAsSignatureMismatch() {
+        myFixture.enableInspections(AnnotationContractInspection())
+        myFixture.addClass(
+            """
+            package com.gto.datasynclib.annotations;
+            public @interface SaveToDisk { String listener() default ""; }
+            """.trimIndent(),
+        )
+        configureClass(
+            """
+            class Holder {
+                @com.gto.datasynclib.annotations.SaveToDisk(listener = "onLoaded")
                 private int value;
+                private static void onLoaded(int v) {}
             }
-            class BaseHolder {
-                @com.gto.datasynclib.annotations.SyncToClient
-                private long inherited;
-            }
-                    """.trimIndent(),
-                ) as PsiJavaFile
-                ).classes.first()
-
-        val documentation = DataSyncLibDocumentationProvider().generateDoc(clazz, clazz)!!
-
-        assertTrue(documentation.contains("href=\"psi_element://Holder\""))
-        assertTrue(documentation.contains("href=\"psi_element://Holder#value\""))
-        assertTrue(documentation.contains("href=\"psi_element://BaseHolder\""))
-        assertTrue(documentation.contains("href=\"psi_element://BaseHolder#inherited\""))
+        """,
+        )
+        val problems = myFixture.doHighlighting()
+        assertTrue(
+            "静态方法不能用作 listener，应报签名不匹配，实际 problems=$problems",
+            problems.any { it.description?.contains("onLoaded") == true },
+        )
     }
 
     private fun configureClass(source: String) = (myFixture.configureByText("Holder.java", source.trimIndent()) as PsiJavaFile).classes.last()

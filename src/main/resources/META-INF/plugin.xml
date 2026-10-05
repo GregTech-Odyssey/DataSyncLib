@@ -11,7 +11,6 @@
         - Contract validation: unresolved references, signature mismatches, static/instance mismatches,
           and missing required attributes.
         - Suppression of "unused" warnings for annotation-referenced members.
-        - Code completion for method/field names matching each annotation's expected signature.
         - Data-flow visualization (gutter icons for sync / persistence annotations).
 
         The plugin mirrors the resolution rules of
@@ -36,23 +35,10 @@
                 level="ERROR"
                 implementationClass="com.gto.datasynclib.plugin.inspection.AnnotationContractInspection"/>
 
-        <!-- 补全 -->
-        <completion.contributor
-                language="JAVA"
-                implementationClass="com.gto.datasynclib.plugin.completion.AnnotationMemberCompletionContributor"/>
-
         <!-- 数据流可视化：gutter 图标 -->
         <codeInsight.lineMarkerProvider
                 language="JAVA"
                 implementationClass="com.gto.datasynclib.plugin.markup.DataSyncLibLineMarkerProvider"/>
-
-        <!-- 类 tooltip：显示被注解字段清单（含父类）
-             order="first" 让本 provider 先于内置 JavaDocumentationProvider 被问到，
-             否则类名这种「已有 JavaDoc 目标」的位置轮不到我们。 -->
-        <lang.documentationProvider
-                language="JAVA"
-                order="first"
-                implementationClass="com.gto.datasynclib.plugin.markup.DataSyncLibDocumentationProvider"/>
 
         <!-- Quick-fix：生成注解引用的方法 -->
         <intentionAction>

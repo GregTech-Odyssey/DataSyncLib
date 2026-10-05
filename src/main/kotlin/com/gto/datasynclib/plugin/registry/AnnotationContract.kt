@@ -38,6 +38,21 @@ data class AnnotationContract(
     val fixedParamTypes: List<String?>? = null,
     /** 参数个数；-1 表示由 fixedParamTypes 决定，否则表示「字段类型的重复次数」 */
     val paramCountFromFieldType: Int = 0,
+    /**
+     * 返回类型必须等于**有效类型 T**。
+     *
+     * 运行期把这些方法的返回值直接赋给/转型为 T，例如
+     * `DataFieldDefinition.decode` 用 `readFromData` / `readFromBuffer` 的结果当 T 用，
+     * 返回别的类型会在运行期 ClassCastException。见 `AbstractFieldAccess` 的 read 路径。
+     */
+    val returnIsFieldType: Boolean = false,
+    /**
+     * 引用缺失是否只是"静默无效"而不是"立即崩溃"。
+     *
+     * `true` 表示运行期用 try/catch 吞掉找不到的情况（如 `@Conversion.toField`：
+     * `catch (NoSuchFieldException ignored)`），此时插件应给 WARNING 而非 ERROR。
+     */
+    val optionalRef: Boolean = false,
 ) {
     /** 方法引用时的期望参数类型列表（含哨兵 FIELD_TYPE） */
     val expectedParamTypes: List<String?>?
@@ -134,6 +149,8 @@ object AnnotationContractRegistry {
                 "toField",
                 RefKind.STATIC_FIELD,
                 staticFieldType = "java.util.function.Function",
+                // 运行期 catch (NoSuchFieldException ignored) 静默跳过，不是崩溃
+                optionalRef = true,
             ),
             // ---- Strategy（静态 Hash.Strategy 字段） ----
             AnnotationContract(
@@ -167,6 +184,8 @@ object AnnotationContractRegistry {
                 "readFromData",
                 RefKind.INSTANCE_METHOD,
                 fixedParamTypes = listOf("com.gto.datasynclib.datastream.data.Data", "int"),
+                // 运行期把返回值当 T 用
+                returnIsFieldType = true,
             ),
             AnnotationContract(
                 AnnotationContract.CODEC,
@@ -180,6 +199,8 @@ object AnnotationContractRegistry {
                 "readFromBuffer",
                 RefKind.INSTANCE_METHOD,
                 fixedParamTypes = listOf(BUFFER_FIELD_TYPE),
+                // 运行期把返回值当 T 用
+                returnIsFieldType = true,
             ),
         )
 

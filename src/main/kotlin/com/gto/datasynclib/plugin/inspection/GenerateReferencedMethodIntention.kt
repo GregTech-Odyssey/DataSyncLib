@@ -36,16 +36,21 @@ class GenerateReferencedMethodIntention : PsiElementBaseIntentionAction() {
         val matcher = MethodSignatureMatcher(ctx.contract, ctx.effectiveType)
         val body = generateMethodSource(ctx.contract, ctx.name, ctx.effectiveType, matcher)
         val factory = JavaPsiFacade.getElementFactory(project)
-        val method = factory.createMethodFromText(body, clazz)
+        // createMethodFromText 需要可直接解析的方法声明：不能带类内缩进，也不能缺尾换行
+        val method = factory.createMethodFromText(body.trimIndent() + "\n", clazz)
         clazz.add(method)
     }
 
     private data class Ctx(val field: PsiField, val contract: com.gto.datasynclib.plugin.registry.AnnotationContract, val name: String, val effectiveType: PsiType)
 
     private fun resolveContext(element: PsiElement): Ctx? {
-        if (element !is PsiLiteralExpression) return null
-        if (element.value !is String) return null
-        val pair = PsiTreeUtil.getParentOfType(element, PsiNameValuePair::class.java, false) ?: return null
+        // 平台把「光标处的叶子元素」传给 isAvailable/invoke —— 在字符串字面量里就是
+        // 内部的 token（PsiJavaToken），而不是 PsiLiteralExpression 本身。
+        // 早先写成 `element !is PsiLiteralExpression` 直接返回，导致本 quick-fix
+        // 在任何正常位置都不可用。这里向上找最近的 PsiLiteralExpression。
+        val literal = PsiTreeUtil.getParentOfType(element, PsiLiteralExpression::class.java, false) ?: return null
+        if (literal.value !is String) return null
+        val pair = PsiTreeUtil.getParentOfType(literal, PsiNameValuePair::class.java, false) ?: return null
         val annotation = PsiTreeUtil.getParentOfType(pair, PsiAnnotation::class.java, false) ?: return null
         val contract = AnnotationContractRegistry.find(
             annotation.qualifiedName ?: return null,
@@ -53,7 +58,8 @@ class GenerateReferencedMethodIntention : PsiElementBaseIntentionAction() {
         ) ?: return null
         if (contract.kind != com.gto.datasynclib.plugin.registry.RefKind.INSTANCE_METHOD) return null
         val field = PsiTreeUtil.getParentOfType(annotation, PsiField::class.java, false) ?: return null
-        val name = element.value as String
+        val name = literal.value as String
+        if (name.isEmpty()) return null
         val effectiveType = FieldContextResolver.effectiveType(field)
         return Ctx(field, contract, name, effectiveType)
     }
@@ -75,10 +81,10 @@ class GenerateReferencedMethodIntention : PsiElementBaseIntentionAction() {
             else -> fieldType.canonicalText
         }
         val returnStmt = when {
-            contract.returnIsBoolean -> "return false;"
-            contract.returnIsVoid -> ""
-            returnType == "void" -> ""
-            returnType.startsWith("boolean") -> "return false;"
+            contract.returnIsBoolean || returnType.startsWith("boolean") -> "return false;"
+            contract.returnIsVoid || returnType == "void" -> ""
+            // 基本类型必须给字面量，否则生成 return null; 编译不过
+            returnType.startsWith("char") -> "return '\\0';"
             returnType.startsWith("int") ||
                 returnType.startsWith("long") ||
                 returnType.startsWith("short") ||

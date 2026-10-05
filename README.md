@@ -62,7 +62,6 @@ public void onEnergyChange(long newValue, long oldValue) { ... }
 
 | 功能 | 说明 |
 |---|---|
-| 成员补全 | 字符串字面量内输入时，按契约签名过滤列出方法名/字段名 |
 | 生成方法 quick-fix | Alt+Enter 为引用的 `listener`/`skipWhen`/`defaultValueGetter` 等方法生成签名正确的骨架 |
 | 消除「未使用」误报 | 被注解字符串引用的成员不再被 `UnusedDeclarationInspection` 标灰 |
 
@@ -72,18 +71,6 @@ public void onEnergyChange(long newValue, long oldValue) { ... }
 |---|---|
 | gutter 图标 | 为 `@SyncToClient`/`@SyncToServer`/`@SaveToDisk`/`@Conversion`/`@Codec`/`@Strategy`/`@AdditionalHolder`/`@Generic` 字段显示对应图标 |
 | 托管类型提示 | `@Conversion` 字段的图标 tooltip 显示「声明类型 → 托管类型」 |
-| 类 tooltip 字段清单 | hover 类名时，展示本类**及各级父类**中被注解字段的清单（字段名、类型、注解标签） |
-
-类 tooltip 示例：
-
-```
-DataSyncLib 字段
-─── 本类 (MyHolder) ───
-  energy : long  [SyncToClient, SaveToDisk]
-  inventory : InventoryData → 托管类型  [SaveToDisk, AdditionalHolder]
-─── 父类 (BaseHolder) ───
-  id : int  [SaveToDisk]
-```
 
 ---
 
@@ -108,10 +95,8 @@ src/main/kotlin/com/gto/datasynclib/plugin/
 │   ├── AnnotationContractInspection.kt   # 契约 + 语义校验
 │   ├── AnnotationGlobalUsageHelper.kt    # 消除未使用误报
 │   └── GenerateReferencedMethodIntention.kt  # 生成方法 quick-fix
-├── completion/                      # 成员补全
 └── markup/
-    ├── DataSyncLibLineMarkerProvider.kt   # gutter 图标 + tooltip + 嵌套导航
-    └── DataSyncLibDocumentationProvider.kt # 类 tooltip 字段清单
+    └── DataSyncLibLineMarkerProvider.kt   # gutter 图标 + tooltip + 嵌套导航
 ```
 
 ## 构建

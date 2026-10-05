@@ -2,12 +2,14 @@ package com.gto.datasynclib.plugin.inspection
 
 import com.gto.datasynclib.plugin.registry.AnnotationContract
 import com.gto.datasynclib.plugin.registry.AnnotationContractRegistry
+import com.gto.datasynclib.plugin.registry.DefaultValueTypeResolver
 import com.gto.datasynclib.plugin.registry.FieldContextResolver
 import com.gto.datasynclib.plugin.registry.RefKind
 
 import com.intellij.codeInspection.*
 import com.intellij.psi.*
 import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.psi.util.PsiUtil
 
 /**
  * DataSyncLib 注解契约校验 + 语义检查。
@@ -51,6 +53,10 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
             if (qName == AnnotationContract.CODEC) {
                 checkCodecPairs(holder, annotation)
             }
+            // 5) @Codec 在 final / @Access(instanceAsValue=false) 字段上整体失效
+            if (qName == AnnotationContract.CODEC) {
+                checkCodecInert(holder, annotation)
+            }
         }
 
         override fun visitNameValuePair(pair: PsiNameValuePair) {
@@ -88,54 +94,19 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
         val text = literal.value as? String ?: return
         if (text.isEmpty()) return
         val field = PsiTreeUtil.getParentOfType(annotation, PsiField::class.java, false) ?: return
+        // 与运行期一致：ReflectUtil.parse 的入参是「有效类型」（含 @Conversion 托管类型）
         val type = FieldContextResolver.effectiveType(field)
-        if (!isParsable(type, text)) {
+        val result = DefaultValueTypeResolver.validate(type, text)
+        if (!result.compatible) {
             holder.registerProblem(
                 literal,
-                "Cannot parse '$text' as ${type.presentableText}",
+                result.message ?: "Cannot parse '$text' as ${type.presentableText}",
                 ProblemHighlightType.ERROR,
             )
-        }
-    }
-
-    private fun isParsable(type: PsiType, text: String): Boolean {
-        // 镜像 ReflectUtil.parse：支持 String/枚举/基本类型。枚举与 String 不校验格式。
-        if (type is PsiPrimitiveType || isBoxedNumber(type) || type is PsiArrayType) {
-            return tryParseNumber(type, text)
-        }
-        // String / 枚举 / 其它引用类型：不强制校验（parse 只对基本类型抛格式异常）
-        return true
-    }
-
-    private fun isBoxedNumber(type: PsiType): Boolean {
-        val name = type.canonicalText
-        return name == "java.lang.Integer" ||
-            name == "java.lang.Long" ||
-            name == "java.lang.Boolean" ||
-            name == "java.lang.Double" ||
-            name == "java.lang.Float" ||
-            name == "java.lang.Byte" ||
-            name == "java.lang.Short" ||
-            name == "java.lang.Character"
-    }
-
-    private fun tryParseNumber(type: PsiType, text: String): Boolean {
-        val c = type.canonicalText
-        return try {
-            when (c) {
-                "int", "java.lang.Integer" -> text.toInt()
-                "long", "java.lang.Long" -> text.toLong()
-                "boolean", "java.lang.Boolean" -> text.toBooleanStrictOrNull() != null || text == "true" || text == "false"
-                "double", "java.lang.Double" -> text.toDouble()
-                "float", "java.lang.Float" -> text.toFloat()
-                "byte", "java.lang.Byte" -> text.toByte()
-                "short", "java.lang.Short" -> text.toShort()
-                "char", "java.lang.Character" -> text.length == 1
-                else -> true
+        } else {
+            result.message?.let {
+                holder.registerProblem(literal, it, ProblemHighlightType.WEAK_WARNING)
             }
-            true
-        } catch (e: Exception) {
-            false
         }
     }
 
@@ -169,36 +140,72 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
         // saveCodec 非空时走静态分支，实例方法属性被忽略，无需成对校验
         if (!saveCodec.isNullOrEmpty()) return
 
-        checkPair(
-            holder,
-            annotation,
-            "writeToData",
-            "readFromData",
-            "'writeToData' requires a matching 'readFromData' (runtime resolves readFromData unconditionally)",
-        )
-        checkPair(
-            holder,
-            annotation,
-            "writeToBuffer",
-            "readFromBuffer",
-            "'writeToBuffer' requires a matching 'readFromBuffer' (runtime resolves readFromBuffer unconditionally)",
-        )
+        // 运行期只在「写方法非空」时才去解析对应的读方法
+        // （FieldAnnotationMetadata: readFromData 仅在 writeToData 非空时解析，
+        //   readFromBuffer 仅在 writeToBuffer 非空时解析）。
+        // 因此：
+        //  - 有写无读 → 运行期无条件 getAccessibleMethod(read) 找不到方法 → 崩溃，必须报 ERROR
+        //  - 有读无写 → 该方法根本不会被解析，静默无效 → 只报 WARNING
+        checkCodecPair(holder, annotation, writeAttr = "writeToData", readAttr = "readFromData")
+        checkCodecPair(holder, annotation, writeAttr = "writeToBuffer", readAttr = "readFromBuffer")
     }
 
-    private fun checkPair(holder: ProblemsHolder, annotation: PsiAnnotation, writeAttr: String, readAttr: String, message: String) {
+    private fun checkCodecPair(holder: ProblemsHolder, annotation: PsiAnnotation, writeAttr: String, readAttr: String) {
         val write = attrString(annotation, writeAttr)
         val read = attrString(annotation, readAttr)
-        if (write.isNotEmpty() && read.isEmpty()) {
-            val pair = annotation.findAttributeValue(writeAttr) as? PsiLiteralExpression
-            holder.registerProblem(
-                pair ?: annotation,
-                message,
-                ProblemHighlightType.ERROR,
-            )
+        when {
+            write.isNotEmpty() && read.isEmpty() ->
+                holder.registerProblem(
+                    annotation.findAttributeValue(writeAttr) as? PsiLiteralExpression ?: annotation,
+                    "'$writeAttr' requires a matching '$readAttr' (runtime resolves $readAttr unconditionally in this branch)",
+                    ProblemHighlightType.ERROR,
+                )
+
+            write.isEmpty() && read.isNotEmpty() ->
+                holder.registerProblem(
+                    annotation.findAttributeValue(readAttr) as? PsiLiteralExpression ?: annotation,
+                    "'$readAttr' has no effect without '$writeAttr' (runtime only resolves $readAttr when $writeAttr is set)",
+                    ProblemHighlightType.WARNING,
+                )
         }
     }
 
     private fun attrString(annotation: PsiAnnotation, attr: String): String = annotation.findAttributeValue(attr)?.let { (it as? PsiLiteralExpression)?.value as? String } ?: ""
+
+    // ===== @Codec 整体失效 =====
+
+    /**
+     * 运行期 `FieldDefinitionStorage.createFieldDefinition` 先判 `hasAccessAnnotation() || isFinal`
+     * 走 access 分支，`@Codec` 分支根本到不了；且 `DataFieldDefinition` 里
+     * `codec = (isFinal || !instanceAsValue) ? null : ...`，实例版
+     * writeToData/readFromData/writeToBuffer/readFromBuffer 也只在
+     * `instanceAsValue == true` 时才被调用（AbstractFieldAccess 的 read/write 路径）。
+     *
+     * 所以在 final 字段或 `@Access(instanceAsValue = false)` 上，`@Codec` 的 6 个字符串属性
+     * 全部无效果 —— 无警告、无异常，纯静默失效。
+     */
+    private fun checkCodecInert(holder: ProblemsHolder, annotation: PsiAnnotation) {
+        val field = PsiTreeUtil.getParentOfType(annotation, PsiField::class.java, false) ?: return
+        val isFinal = field.hasModifierProperty(PsiModifier.FINAL)
+        val access = field.getAnnotation("com.gto.datasynclib.annotations.Access")
+        val instanceAsValue =
+            access?.findAttributeValue("instanceAsValue")?.let {
+                (it as? PsiLiteralExpression)?.value as? Boolean
+            } ?: false
+        if (!isFinal && !(access != null && !instanceAsValue)) return
+
+        val reason =
+            if (isFinal) {
+                "'@Codec' has no effect on a final field"
+            } else {
+                "'@Codec' has no effect when '@Access(instanceAsValue = false)'"
+            }
+        holder.registerProblem(
+            annotation,
+            "$reason — the runtime takes the access/final branch and never reads the codec attributes",
+            ProblemHighlightType.WARNING,
+        )
+    }
 
     // ===== @Generic 无泛型 =====
 
@@ -274,10 +281,17 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
     // ===== key 重复检测 =====
 
     private fun checkDuplicateKeys(holder: ProblemsHolder, clazz: PsiClass) {
-        // 镜像 scanFields：遍历本类字段，对 @AdditionalHolder(flat) 字段递归展平其嵌套类型的字段，
+        // 镜像 scanFields + FieldDefinitionStorage：定义收集是**继承感知**的
+        // （get(clazz) 会用父类 storage 调 of(clazz, parentStorage)，
+        //   把父类 definitionMap 一并放入），因此子类复用父类的 key 同样会抛异常。
         // 所有「托管字段」的 key 进入同一个 definitionMap，冲突即运行时抛异常。
         val seen = HashMap<String, PsiField>()
-        collectKeys(clazz, seen, holder, 0)
+        var level: PsiClass? = clazz
+        var guard = 0
+        while (level != null && guard++ < 32) {
+            collectKeys(level, seen, holder, 0)
+            level = level.superClass
+        }
     }
 
     private fun collectKeys(clazz: PsiClass, seen: MutableMap<String, PsiField>, holder: ProblemsHolder, depth: Int) {
@@ -306,7 +320,13 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
             val key = resolveKey(field, saveToDisk)
             val prev = seen[key]
             if (prev != null && prev !== field) {
-                val target = (saveToDisk?.findAttributeValue("key") as? PsiLiteralExpression) ?: field.nameIdentifier
+                // 锚点优先用用户真实写的 key 字面量。注意：
+                // - `@SaveToDisk` 未写 key 时，findAttributeValue 会**合成**一个默认值
+                //   字面量（DummyHolder 里的非物理元素），不能当锚点；
+                // - field.nameIdentifier 在某些解析路径下同样非物理。
+                // registerProblem 需要物理元素，否则抛 "Non-physical PsiElement"。
+                val literal = saveToDisk?.findAttributeValue("key") as? PsiLiteralExpression
+                val target = literal?.takeIf { it.isPhysical } ?: field
                 holder.registerProblem(
                     target,
                     "Duplicate field key '$key' (already used by '${prev.name}') — runtime throws 'Duplicate sync field key'",
@@ -344,18 +364,60 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
     private fun checkField(holder: ProblemsHolder, literal: PsiLiteralExpression, clazz: PsiClass, name: String, contract: AnnotationContract) {
         val target = clazz.findFieldByName(name, false)
         if (target == null) {
-            holder.registerProblem(literal, "Cannot resolve field '$name' in ${clazz.name}", ProblemHighlightType.ERROR)
+            // 运行期对可选引用（如 @Conversion.toField）用 catch(NoSuchFieldException ignored)
+            // 静默跳过，不是崩溃 —— 只用 WARNING 提示"写了但无效果"
+            if (contract.optionalRef) {
+                holder.registerProblem(
+                    literal,
+                    "Field '$name' does not exist; this optional reference has no effect (runtime silently skips it)",
+                    ProblemHighlightType.WARNING,
+                )
+            } else {
+                holder.registerProblem(literal, "Cannot resolve field '$name' in ${clazz.name}", ProblemHighlightType.ERROR)
+            }
             return
         }
         if (!target.hasModifierProperty(PsiModifier.STATIC)) {
             holder.registerProblem(literal, "Referenced field '$name' must be static", ProblemHighlightType.ERROR)
         }
         contract.staticFieldType?.let { expected ->
-            if (!target.type.canonicalText.let { it == expected || it.substringAfterLast('.') == expected.substringAfterLast('.') }) {
+            if (!fieldTypeMatches(target.type, expected, clazz)) {
                 holder.registerProblem(literal, "Field '$name' should be of type $expected", ProblemHighlightType.WARNING)
             }
         }
     }
+
+    /**
+     * 判断字段类型是否匹配契约要求的类型。
+     *
+     * 不能按 `canonicalText` 做字符串比较：参数化类型的 canonicalText 带泛型实参
+     * （`java.util.function.Function<A,B>`），永远不等于裸类型名
+     * `java.util.function.Function`，会把所有带泛型的静态字段误报
+     * （`DataCodec<T>`、`Hash.Strategy<T>` 同理）。
+     *
+     * 这里优先比较**解析后的类**；解析不到时退化为「剥掉泛型实参后比较全限定名」。
+     */
+    private fun fieldTypeMatches(actual: PsiType, expectedFqn: String, context: PsiClass): Boolean {
+        val actualClass = PsiUtil.resolveClassInClassTypeOnly(actual)
+        val expectedClass = resolveClass(context, expectedFqn)
+        if (actualClass != null && expectedClass != null) return actualClass == expectedClass
+        // 任一侧解析不到时退化：两边都剥掉泛型实参再比全限定名。
+        // 必须剥泛型，否则 `Function<A,B>` (canonicalText 带实参) 永远不等于 `Function`。
+        val actualRaw = rawTypeName(actual.canonicalText)
+        val expectedRaw = rawTypeName(expectedFqn)
+        return actualRaw == expectedRaw || actualRaw.substringAfterLast('.') == expectedRaw.substringAfterLast('.')
+    }
+
+    /** 在字段所在处解析期望类型；用短名兜底，便于只有简单名的场景。 */
+    private fun resolveClass(context: PsiClass, fqn: String): PsiClass? {
+        val project = context.project
+        JavaPsiFacade.getInstance(project).findClass(fqn, context.resolveScope)?.let { return it }
+        return JavaPsiFacade.getInstance(project)
+            .findClass(fqn.substringAfterLast('.'), context.resolveScope)
+    }
+
+    /** 剥掉泛型实参，只留全限定名。 */
+    private fun rawTypeName(typeText: String): String = typeText.substringBefore('<').trim()
 
     private fun checkMethod(holder: ProblemsHolder, literal: PsiLiteralExpression, clazz: PsiClass, name: String, owner: PsiField, contract: AnnotationContract) {
         val methods = clazz.findMethodsByName(name, true)
@@ -383,6 +445,11 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
  */
 class MethodSignatureMatcher(private val contract: AnnotationContract, private val fieldType: PsiType) {
     fun matches(method: PsiMethod): Boolean {
+        // 实例方法契约要求非静态：运行期 createDirectMethodHandle 用 lookup.unreflect(method)，
+        // 静态方法得到的 handle 是 (T)void（无接收者），而调用处是 invokeExact(source, value)，
+        // 参数个数不匹配 → WrongMethodTypeException。见 DataFieldDefinition.skipSave/skipSync。
+        if (contract.kind == RefKind.INSTANCE_METHOD && method.hasModifierProperty(PsiModifier.STATIC)) return false
+
         val params = contract.expectedParamTypes ?: emptyList()
         val actual = method.parameterList.parameters.map { it.type }
         if (actual.size != params.size) return false
@@ -403,6 +470,11 @@ class MethodSignatureMatcher(private val contract: AnnotationContract, private v
             if (rt != PsiTypes.booleanType() && rt.canonicalText != "boolean") return false
         }
         if (contract.returnIsVoid && method.returnType != PsiTypes.voidType()) return false
+        if (contract.returnIsFieldType) {
+            val rt = method.returnType ?: return false
+            // 运行期把返回值直接当 T 用，类型不符会在运行期 ClassCastException
+            if (!typesCompatible(rt, fieldType)) return false
+        }
         return true
     }
 
