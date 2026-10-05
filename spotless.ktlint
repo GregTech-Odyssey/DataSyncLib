@@ -4,7 +4,7 @@ insert_final_newline = true
 max_line_length = 10000000
 
 ij_kotlin_imports_layout =  com.gto.**,|,net.**,|,*,|,java.**,javax.**,kotlin.**,|,^
-ij_kotlin_packages_to_use_import_on_demand = java.util.*,com.gtocore.**
+ij_kotlin_packages_to_use_import_on_demand = java.util.*,com.gto.**
 ktlint_standard_class-naming = disabled
 ktlint_standard_function-naming = disabled
 ktlint_standard_property-naming = disabled

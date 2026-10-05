@@ -2,6 +2,7 @@ package com.gto.datasynclib.plugin
 
 import com.gto.datasynclib.plugin.inspection.AnnotationContractInspection
 import com.gto.datasynclib.plugin.inspection.AnnotationGlobalUsageHelper
+import com.gto.datasynclib.plugin.markup.DataSyncLibDocumentationProvider
 import com.gto.datasynclib.plugin.registry.FieldContextResolver
 
 import com.intellij.codeInsight.daemon.ImplicitUsageProvider
@@ -125,6 +126,32 @@ class PlatformCompatibilityTest : LightJavaCodeInsightFixtureTestCase() {
         val arguments = FieldContextResolver.genericArguments(clazz.findFieldByName("generic", false)!!)
         assertEquals(listOf("java.lang.String"), arguments.map { it.canonicalText })
         assertEmpty(FieldContextResolver.genericArguments(clazz.findFieldByName("primitive", false)!!))
+    }
+
+    fun testClassDocumentationLinksToClassesAndFields() {
+        val clazz =
+            (
+                myFixture.configureByText(
+                    "Holder.java",
+                    """
+            class Holder extends BaseHolder {
+                @com.gto.datasynclib.annotations.SyncToClient
+                private int value;
+            }
+            class BaseHolder {
+                @com.gto.datasynclib.annotations.SyncToClient
+                private long inherited;
+            }
+                    """.trimIndent(),
+                ) as PsiJavaFile
+                ).classes.first()
+
+        val documentation = DataSyncLibDocumentationProvider().generateDoc(clazz, clazz)!!
+
+        assertTrue(documentation.contains("href=\"psi_element://Holder\""))
+        assertTrue(documentation.contains("href=\"psi_element://Holder#value\""))
+        assertTrue(documentation.contains("href=\"psi_element://BaseHolder\""))
+        assertTrue(documentation.contains("href=\"psi_element://BaseHolder#inherited\""))
     }
 
     private fun configureClass(source: String) = (myFixture.configureByText("Holder.java", source.trimIndent()) as PsiJavaFile).classes.last()

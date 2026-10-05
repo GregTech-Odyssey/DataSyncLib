@@ -33,7 +33,7 @@ class DataSyncLibDocumentationProvider : AbstractDocumentationProvider() {
     }
 
     /** 按继承层级收集被注解字段：返回 (层级名, 字段列表) 的有序列表，父类在前 */
-    private fun collectManagedFields(clazz: PsiClass): List<Pair<String, List<PsiField>>> {
+    private fun collectManagedFields(clazz: PsiClass): List<Pair<PsiClass, List<PsiField>>> {
         // 从根（最顶层父类）到当前类，逐层收集，镜像 get() 的递归合并（父类字段先注册）
         val hierarchy = ArrayList<PsiClass>()
         var c: PsiClass? = clazz
@@ -41,12 +41,11 @@ class DataSyncLibDocumentationProvider : AbstractDocumentationProvider() {
             hierarchy.add(0, c) // 头部插入，保证父类在前
             c = c.superClass
         }
-        val result = ArrayList<Pair<String, List<PsiField>>>()
+        val result = ArrayList<Pair<PsiClass, List<PsiField>>>()
         for (level in hierarchy) {
             val fields = level.fields.filter { isManagedField(it) }
             if (fields.isNotEmpty()) {
-                val label = if (level == clazz) "本类 (${level.name})" else "父类 (${level.name})"
-                result.add(label to fields)
+                result.add(level to fields)
             }
         }
         return result
@@ -59,15 +58,18 @@ class DataSyncLibDocumentationProvider : AbstractDocumentationProvider() {
 
     private fun isDataSyncLibAnnotation(qName: String?): Boolean = qName?.startsWith("com.gto.datasynclib.annotations.") == true
 
-    private fun render(clazz: PsiClass, managed: List<Pair<String, List<PsiField>>>): String {
+    private fun render(clazz: PsiClass, managed: List<Pair<PsiClass, List<PsiField>>>): String {
         val sb = StringBuilder()
         sb.append("<b>DataSyncLib 字段</b>")
-        for ((label, fields) in managed) {
+        for ((level, fields) in managed) {
+            val kind = if (level == clazz) "本类" else "父类"
             sb
                 .append("<br/>")
                 .append("<b>─── ")
-                .append(escapeHtml(label))
-                .append(" ───</b>")
+                .append(kind)
+                .append(" (")
+                .append(link(level.qualifiedName, level.name ?: ""))
+                .append(") ───</b>")
             for (field in fields) {
                 sb.append("<br/>")
                 sb.append("&nbsp;&nbsp;")
@@ -90,7 +92,13 @@ class DataSyncLibDocumentationProvider : AbstractDocumentationProvider() {
                 field.type.presentableText
             }
         val annText = if (anns.isNotEmpty()) "&nbsp;<code>[${anns.joinToString(", ")}]</code>" else ""
-        return "<code>${escapeHtml(field.name)}</code> : ${escapeHtml(typeText)}$annText"
+        val fieldLink = field.containingClass?.qualifiedName?.let { "$it#${field.name}" }
+        return "<code>${link(fieldLink, field.name)}</code> : ${escapeHtml(typeText)}$annText"
+    }
+
+    private fun link(target: String?, label: String): String {
+        val text = escapeHtml(label)
+        return if (target == null) text else "<a href=\"psi_element://${escapeHtml(target)}\">$text</a>"
     }
 
     private fun escapeHtml(s: String): String = s

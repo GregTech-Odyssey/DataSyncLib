@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.gto.datasynclib"
-version = "0.1.0"
+version = "26.10.1"
 
 repositories {
     mavenCentral()
