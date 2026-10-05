@@ -122,10 +122,19 @@ src/main/kotlin/com/gto/datasynclib/plugin/
 ```
 
 > 构建需要 JDK 21 与可访问 Maven Central / JetBrains 仓库的网络环境。
-> 使用 IntelliJ Platform Gradle Plugin 2.x、Kotlin 2.3，目标平台为 IntelliJ IDEA 2026.1.1；插件最低支持 IDEA 2026.1（build 261）。
-> IDEA 中的 Gradle JVM 也应设为 JDK 21；命令行构建需设置 `JAVA_HOME`。
-> 如需复用本机 IDEA 2026.1.1 SDK，可添加 `-PlocalPlatformPath=<IDEA 安装目录>`，避免重新下载平台。
-> 测试或启动沙盒 IDE 时，可用 `-PlocalRuntimePath=<IDEA 安装目录>/jbr` 复用 JetBrains Runtime。
+> **Gradle JVM 必须是 JDK 21**：Gradle 8.14.5 内嵌的 Kotlin 解析不了 JDK 25 的版本号
+> （报 `IllegalArgumentException: 25.0.4.1`）。命令行构建请设置 `JAVA_HOME`，
+> 或在 IDEA 中把 *Settings → Build Tools → Gradle → Gradle JVM* 设为 JDK 21。
+> 使用 IntelliJ Platform Gradle Plugin 2.19.0、Kotlin 2.3，目标平台为 IntelliJ IDEA 2026.2（build 262）；
+> 插件最低支持 IDEA 2026.2。注意 2.16.0 之前的插件无法解析 262 的新模块描述格式
+> （`$legacy_jps_module` namespace），会导致 `test` 任务依赖解析失败。
+> **推荐直接复用本机已安装的 IDEA，彻底避免下载约 1.5G 的平台包**（在 `gradle.properties` 中配置，该文件未被 git 跟踪）：
+> ```properties
+> localPlatformPath=D:\\Program Files\\JetBrains\\IntelliJ IDEA
+> localRuntimePath=D:\\Program Files\\JetBrains\\IntelliJ IDEA\\jbr
+> ```
+> 也可临时用 `-PlocalPlatformPath=<IDEA 安装目录>` 覆盖；测试或启动沙盒 IDE 时用
+> `-PlocalRuntimePath=<IDEA 安装目录>/jbr` 复用 JetBrains Runtime。
 > iSH 环境不支持运行 JVM（`getcpu` 系统调用缺失），请在本地 IDE / CI 中构建。
 
 ## 事实来源

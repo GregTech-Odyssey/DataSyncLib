@@ -109,10 +109,14 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
 
     private fun isBoxedNumber(type: PsiType): Boolean {
         val name = type.canonicalText
-        return name == "java.lang.Integer" || name == "java.lang.Long" ||
-            name == "java.lang.Boolean" || name == "java.lang.Double" ||
-            name == "java.lang.Float" || name == "java.lang.Byte" ||
-            name == "java.lang.Short" || name == "java.lang.Character"
+        return name == "java.lang.Integer" ||
+            name == "java.lang.Long" ||
+            name == "java.lang.Boolean" ||
+            name == "java.lang.Double" ||
+            name == "java.lang.Float" ||
+            name == "java.lang.Byte" ||
+            name == "java.lang.Short" ||
+            name == "java.lang.Character"
     }
 
     private fun tryParseNumber(type: PsiType, text: String): Boolean {

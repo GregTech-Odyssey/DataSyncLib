@@ -79,8 +79,12 @@ class GenerateReferencedMethodIntention : PsiElementBaseIntentionAction() {
             contract.returnIsVoid -> ""
             returnType == "void" -> ""
             returnType.startsWith("boolean") -> "return false;"
-            returnType.startsWith("int") || returnType.startsWith("long") || returnType.startsWith("short") ||
-                returnType.startsWith("byte") || returnType.startsWith("double") || returnType.startsWith("float") -> "return 0;"
+            returnType.startsWith("int") ||
+                returnType.startsWith("long") ||
+                returnType.startsWith("short") ||
+                returnType.startsWith("byte") ||
+                returnType.startsWith("double") ||
+                returnType.startsWith("float") -> "return 0;"
             else -> "return null;"
         }
         return buildString {

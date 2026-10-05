@@ -3,7 +3,8 @@ import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "2.3.21"
-    id("org.jetbrains.intellij.platform") version "2.10.5"
+    // 2.16.0+ 才支持 IntelliJ Platform 262 的新模块描述格式（$legacy_jps_module namespace）
+    id("org.jetbrains.intellij.platform") version "2.19.0"
     id("com.diffplug.spotless") version "7.2.1"
 }
 
@@ -67,7 +68,8 @@ intellijPlatform {
 
     pluginConfiguration {
         ideaVersion {
-            sinceBuild.set("261")
+            // 2026.2 平台 (build 262)；本机 SDK 通过 localPlatformPath 指向 IDEA 2026.2.1
+            sinceBuild.set("262")
         }
     }
 
