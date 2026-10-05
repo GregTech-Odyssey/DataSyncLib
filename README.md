@@ -121,7 +121,11 @@ src/main/kotlin/com/gto/datasynclib/plugin/
 ./gradlew runIde             # 启动带插件的沙盒 IDE
 ```
 
-> 构建需要 JDK 17 与可访问 JetBrains 插件的网络环境。
+> 构建需要 JDK 21 与可访问 Maven Central / JetBrains 仓库的网络环境。
+> 使用 IntelliJ Platform Gradle Plugin 2.x、Kotlin 2.3，目标平台为 IntelliJ IDEA 2026.1.1；插件最低支持 IDEA 2026.1（build 261）。
+> IDEA 中的 Gradle JVM 也应设为 JDK 21；命令行构建需设置 `JAVA_HOME`。
+> 如需复用本机 IDEA 2026.1.1 SDK，可添加 `-PlocalPlatformPath=<IDEA 安装目录>`，避免重新下载平台。
+> 测试或启动沙盒 IDE 时，可用 `-PlocalRuntimePath=<IDEA 安装目录>/jbr` 复用 JetBrains Runtime。
 > iSH 环境不支持运行 JVM（`getcpu` 系统调用缺失），请在本地 IDE / CI 中构建。
 
 ## 事实来源

@@ -1,0 +1,6 @@
+import com.gto.datasynclib.annotations.SyncToClient;
+
+class Holder {
+    @SyncToClient(listener = "onEnergyChange")
+    private long energy;
+}

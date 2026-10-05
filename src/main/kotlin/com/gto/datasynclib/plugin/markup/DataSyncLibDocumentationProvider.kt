@@ -1,6 +1,7 @@
 package com.gto.datasynclib.plugin.markup
 
 import com.gto.datasynclib.plugin.registry.FieldContextResolver
+
 import com.intellij.lang.documentation.AbstractDocumentationProvider
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiElement
@@ -23,7 +24,6 @@ import com.intellij.psi.util.PsiTreeUtil
  * ```
  */
 class DataSyncLibDocumentationProvider : AbstractDocumentationProvider() {
-
     override fun generateDoc(element: PsiElement?, originalElement: PsiElement?): String? {
         val target = element ?: originalElement ?: return null
         val clazz = target as? PsiClass ?: PsiTreeUtil.getParentOfType(target, PsiClass::class.java, false) ?: return null
@@ -57,14 +57,17 @@ class DataSyncLibDocumentationProvider : AbstractDocumentationProvider() {
         return field.annotations.any { isDataSyncLibAnnotation(it.qualifiedName) }
     }
 
-    private fun isDataSyncLibAnnotation(qName: String?): Boolean =
-        qName?.startsWith("com.gto.datasynclib.annotations.") == true
+    private fun isDataSyncLibAnnotation(qName: String?): Boolean = qName?.startsWith("com.gto.datasynclib.annotations.") == true
 
     private fun render(clazz: PsiClass, managed: List<Pair<String, List<PsiField>>>): String {
         val sb = StringBuilder()
         sb.append("<b>DataSyncLib 字段</b>")
         for ((label, fields) in managed) {
-            sb.append("<br/>").append("<b>─── ").append(escapeHtml(label)).append(" ───</b>")
+            sb
+                .append("<br/>")
+                .append("<b>─── ")
+                .append(escapeHtml(label))
+                .append(" ───</b>")
             for (field in fields) {
                 sb.append("<br/>")
                 sb.append("&nbsp;&nbsp;")
@@ -75,15 +78,17 @@ class DataSyncLibDocumentationProvider : AbstractDocumentationProvider() {
     }
 
     private fun fieldShortDesc(field: PsiField): String {
-        val anns = field.annotations
-            .mapNotNull { it.qualifiedName?.substringAfterLast('.') }
-            .filter { it in ANNOTATION_SHORT_NAMES }
+        val anns =
+            field.annotations
+                .mapNotNull { it.qualifiedName?.substringAfterLast('.') }
+                .filter { it in ANNOTATION_SHORT_NAMES }
         val effective = FieldContextResolver.effectiveType(field)
-        val typeText = if (effective != field.type) {
-            "${field.type.presentableText} → ${effective.presentableText}"
-        } else {
-            field.type.presentableText
-        }
+        val typeText =
+            if (effective != field.type) {
+                "${field.type.presentableText} → ${effective.presentableText}"
+            } else {
+                field.type.presentableText
+            }
         val annText = if (anns.isNotEmpty()) "&nbsp;<code>[${anns.joinToString(", ")}]</code>" else ""
         return "<code>${escapeHtml(field.name)}</code> : ${escapeHtml(typeText)}$annText"
     }
@@ -94,10 +99,18 @@ class DataSyncLibDocumentationProvider : AbstractDocumentationProvider() {
         .replace(">", "&gt;")
 
     companion object {
-        private val ANNOTATION_SHORT_NAMES = setOf(
-            "SaveToDisk", "SyncToClient", "SyncToServer",
-            "Conversion", "Codec", "Strategy", "AdditionalHolder",
-            "Generic", "Access", "AddToManager",
-        )
+        private val ANNOTATION_SHORT_NAMES =
+            setOf(
+                "SaveToDisk",
+                "SyncToClient",
+                "SyncToServer",
+                "Conversion",
+                "Codec",
+                "Strategy",
+                "AdditionalHolder",
+                "Generic",
+                "Access",
+                "AddToManager",
+            )
     }
 }

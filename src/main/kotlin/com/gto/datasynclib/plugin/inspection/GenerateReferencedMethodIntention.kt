@@ -2,12 +2,12 @@ package com.gto.datasynclib.plugin.inspection
 
 import com.gto.datasynclib.plugin.registry.AnnotationContractRegistry
 import com.gto.datasynclib.plugin.registry.FieldContextResolver
+
 import com.intellij.codeInsight.intention.PsiElementBaseIntentionAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
 import com.intellij.psi.*
 import com.intellij.psi.util.PsiTreeUtil
-import com.intellij.util.IncorrectOperationException
 
 /**
  * Quick-fix：为注解字符串引用的 listener / skipWhen / defaultValueGetter / Codec 方法
@@ -40,12 +40,7 @@ class GenerateReferencedMethodIntention : PsiElementBaseIntentionAction() {
         clazz.add(method)
     }
 
-    private data class Ctx(
-        val field: PsiField,
-        val contract: com.gto.datasynclib.plugin.registry.AnnotationContract,
-        val name: String,
-        val effectiveType: PsiType,
-    )
+    private data class Ctx(val field: PsiField, val contract: com.gto.datasynclib.plugin.registry.AnnotationContract, val name: String, val effectiveType: PsiType)
 
     private fun resolveContext(element: PsiElement): Ctx? {
         if (element !is PsiLiteralExpression) return null
@@ -63,12 +58,7 @@ class GenerateReferencedMethodIntention : PsiElementBaseIntentionAction() {
         return Ctx(field, contract, name, effectiveType)
     }
 
-    private fun generateMethodSource(
-        contract: com.gto.datasynclib.plugin.registry.AnnotationContract,
-        name: String,
-        fieldType: PsiType,
-        matcher: MethodSignatureMatcher,
-    ): String {
+    private fun generateMethodSource(contract: com.gto.datasynclib.plugin.registry.AnnotationContract, name: String, fieldType: PsiType, matcher: MethodSignatureMatcher): String {
         val paramTypes = contract.expectedParamTypes ?: emptyList()
         val params = paramTypes.mapIndexed { i, e ->
             val t = when {

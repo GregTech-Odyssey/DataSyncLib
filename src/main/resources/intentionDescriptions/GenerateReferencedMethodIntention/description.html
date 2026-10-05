@@ -1,0 +1,13 @@
+<html>
+<body>
+<p>Generates a method skeleton for a method referenced by a DataSyncLib annotation string.</p>
+<p>Place the caret on a method-name string, such as <code>listener = "onEnergyChange"</code>,
+    and invoke <b>Generate referenced method</b> when no method with the expected signature exists.</p>
+<p>The method is added to the class declaring the annotated field. Its parameters and return type
+    follow the annotation contract, using the effective managed type for fields with
+    <code>@Conversion</code>. The body contains a default return value when needed.</p>
+<p>Supported references include <code>listener</code>, <code>skipWhen</code>,
+    <code>defaultValueGetter</code>, and instance <code>@Codec</code> methods.
+    Implement the generated method body to provide the intended behavior.</p>
+</body>
+</html>

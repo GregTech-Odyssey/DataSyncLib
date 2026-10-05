@@ -1,15 +1,15 @@
 package com.gto.datasynclib.plugin.completion
 
-import com.gto.datasynclib.plugin.registry.AnnotationContract
 import com.gto.datasynclib.plugin.registry.AnnotationContractRegistry
 import com.gto.datasynclib.plugin.registry.RefKind
+
 import com.intellij.codeInsight.completion.*
 import com.intellij.codeInsight.lookup.LookupElementBuilder
 import com.intellij.patterns.PlatformPatterns
-import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiField
 import com.intellij.psi.PsiLiteralExpression
 import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.util.ProcessingContext
 
 /**
  * P3：注解字符串属性的补全。
@@ -29,11 +29,7 @@ class AnnotationMemberCompletionContributor : CompletionContributor() {
 
 class MemberCompletionProvider : CompletionProvider<CompletionParameters>() {
 
-    override fun addCompletions(
-        parameters: CompletionParameters,
-        context: ProcessingContext,
-        result: CompletionResultSet,
-    ) {
+    override fun addCompletions(parameters: CompletionParameters, context: ProcessingContext, result: CompletionResultSet) {
         val literal = parameters.position.parent as? PsiLiteralExpression ?: return
         val pair = PsiTreeUtil.getParentOfType(literal, com.intellij.psi.PsiNameValuePair::class.java, false) ?: return
         val annotation = PsiTreeUtil.getParentOfType(pair, com.intellij.psi.PsiAnnotation::class.java, false) ?: return

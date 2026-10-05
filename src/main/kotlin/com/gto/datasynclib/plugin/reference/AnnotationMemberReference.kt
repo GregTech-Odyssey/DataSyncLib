@@ -4,10 +4,13 @@ import com.gto.datasynclib.plugin.registry.AnnotationContract
 import com.gto.datasynclib.plugin.registry.AnnotationContractRegistry
 import com.gto.datasynclib.plugin.registry.FieldContextResolver
 import com.gto.datasynclib.plugin.registry.RefKind
+
 import com.intellij.openapi.util.TextRange
+import com.intellij.patterns.PlatformPatterns
 import com.intellij.psi.*
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.util.IncorrectOperationException
+import com.intellij.util.ProcessingContext
 
 /**
  * 把注解里的字符串字面量解析到被引用的 PsiMethod / PsiField。
@@ -15,11 +18,7 @@ import com.intellij.util.IncorrectOperationException
  * 精确镜像 `ReflectUtil.getAccessibleMethod`（先 getDeclaredMethod 再 getMethod）和
  * `FieldDefinitionStorage.scanFields`（getDeclaredField，不跨父类）的查找规则。
  */
-class AnnotationMemberReference(
-    element: PsiLiteralExpression,
-    private val owner: PsiField,
-    private val contract: AnnotationContract,
-) : PsiReferenceBase<PsiLiteralExpression>(element, TextRange(1, element.textLength - 1)) {
+class AnnotationMemberReference(element: PsiLiteralExpression, private val owner: PsiField, private val contract: AnnotationContract) : PsiReferenceBase<PsiLiteralExpression>(element, TextRange(1, element.textLength - 1)) {
 
     override fun resolve(): PsiElement? = when (contract.kind) {
         RefKind.STATIC_FIELD -> resolveField()
@@ -27,7 +26,7 @@ class AnnotationMemberReference(
     }
 
     private val name: String
-        get() = element.value as? String ?: return ""
+        get() = element.value as? String ?: ""
 
     private val clazz: PsiClass?
         get() = owner.containingClass
@@ -57,11 +56,7 @@ class AnnotationMemberReference(
             ?: clazz.findMethodsByName(name, true).firstOrNull()
     }
 
-    private fun findMethodWithSignature(
-        clazz: PsiClass,
-        name: String,
-        onlyDeclared: Boolean,
-    ): PsiMethod? {
+    private fun findMethodWithSignature(clazz: PsiClass, name: String, onlyDeclared: Boolean): PsiMethod? {
         val candidates = clazz.findMethodsByName(name, !onlyDeclared)
         if (candidates.isEmpty()) return null
         // 按契约的期望签名过滤
@@ -93,19 +88,19 @@ class AnnotationMemberReference(
             if (method.returnType != PsiTypes.booleanType()) return false
         }
         if (contract.returnIsVoid) {
-            if (method.returnType != PsiType.VOID) return false
+            if (method.returnType != PsiTypes.voidType()) return false
         }
         return true
     }
 
     private fun isBufferType(type: PsiType?): Boolean = when (type?.canonicalText) {
         "net.minecraft.network.FriendlyByteBuf",
-        "net.minecraft.network.RegistryFriendlyByteBuf" -> true
+        "net.minecraft.network.RegistryFriendlyByteBuf",
+        -> true
         else -> false
     }
 
-    private fun isAssignableToFixed(actual: PsiType?, fixedName: String): Boolean =
-        actual?.canonicalText == fixedName || actual?.canonicalText?.substringAfterLast('.') == fixedName.substringAfterLast('.')
+    private fun isAssignableToFixed(actual: PsiType?, fixedName: String): Boolean = actual?.canonicalText == fixedName || actual?.canonicalText?.substringAfterLast('.') == fixedName.substringAfterLast('.')
 
     override fun handleElementRename(newElementName: String): PsiElement {
         val literal = element.text
@@ -115,8 +110,7 @@ class AnnotationMemberReference(
         return element.replace(newElement)
     }
 
-    override fun bindToElement(elementToBindTo: PsiElement): PsiElement =
-        throw IncorrectOperationException("Not supported")
+    override fun bindToElement(elementToBindTo: PsiElement): PsiElement = throw IncorrectOperationException("Not supported")
 }
 
 /**

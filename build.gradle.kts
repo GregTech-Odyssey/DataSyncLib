@@ -1,7 +1,10 @@
+import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+
 plugins {
     id("java")
-    id("org.jetbrains.kotlin.jvm") version "1.9.22"
-    id("org.jetbrains.intellij") version "1.17.3"
+    id("org.jetbrains.kotlin.jvm") version "2.3.21"
+    id("org.jetbrains.intellij.platform") version "2.10.5"
+    id("com.diffplug.spotless") version "7.2.1"
 }
 
 group = "com.gto.datasynclib"
@@ -9,35 +12,72 @@ version = "0.1.0"
 
 repositories {
     mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
 }
 
 dependencies {
+    intellijPlatform {
+        val localPlatformPath = providers.gradleProperty("localPlatformPath")
+        if (localPlatformPath.isPresent) {
+            local(localPlatformPath.get())
+        } else {
+            intellijIdea("2026.1.1") {
+                useInstaller = false
+            }
+        }
+        bundledPlugin("com.intellij.java")
+        providers.gradleProperty("localRuntimePath").orNull?.let {
+            jetbrainsRuntimeLocal(it)
+        }
+        testFramework(TestFrameworkType.Platform)
+        testFramework(TestFrameworkType.Plugin.Java)
+    }
     testImplementation("junit:junit:4.13.2")
 }
 
-intellij {
-    version.set("2023.3.7")
-    type.set("IC") // IntelliJ IDEA Community Edition
-    plugins.set(listOf("com.intellij.java"))
-}
-
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(21)
 }
 
-tasks {
-    patchPluginXml {
-        sinceBuild.set("233")
-        untilBuild.set("243.*")
+spotless {
+    kotlin {
+        target("src/**/*.kt")
+        ktlint().setEditorConfigPath("$rootDir/spotless.ktlint")
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+    kotlinGradle {
+        target("*.gradle.kts")
+        ktlint()
+    }
+}
+
+if (providers.gradleProperty("localRuntimePath").isPresent) {
+    // 2.10.x also adds a downloadable runtime when a local runtime is configured.
+    configurations.named("jetbrainsRuntime") {
+        setExtendsFrom(listOf(configurations.getByName("jetbrainsRuntimeLocalInstance")))
+    }
+}
+
+intellijPlatform {
+    // No custom settings UI to index; packaging does not need to launch an IDE.
+    buildSearchableOptions = false
+
+    pluginConfiguration {
+        ideaVersion {
+            sinceBuild.set("261")
+        }
     }
 
-    signPlugin {
+    signing {
         certificateChain.set(System.getenv("CERTIFICATE_CHAIN"))
         privateKey.set(System.getenv("PRIVATE_KEY"))
         password.set(System.getenv("PRIVATE_KEY_PASSWORD"))
     }
 
-    publishPlugin {
+    publishing {
         token.set(System.getenv("PUBLISH_TOKEN"))
     }
 }

@@ -41,9 +41,12 @@ data class AnnotationContract(
 ) {
     /** 方法引用时的期望参数类型列表（含哨兵 FIELD_TYPE） */
     val expectedParamTypes: List<String?>?
-        get() = fixedParamTypes ?: if (paramCountFromFieldType > 0) {
-            List(paramCountFromFieldType) { FIELD_TYPE }
-        } else emptyList()
+        get() =
+            fixedParamTypes ?: if (paramCountFromFieldType > 0) {
+                List(paramCountFromFieldType) { FIELD_TYPE }
+            } else {
+                emptyList()
+            }
 
     companion object {
         /** 哨兵：表示「字段的类型 T」 */
@@ -62,101 +65,127 @@ data class AnnotationContract(
  * 全部注解属性契约的注册表，与 `docs/annotation-contract.md` 一一对应。
  */
 object AnnotationContractRegistry {
-
-    val ALL: List<AnnotationContract> = listOf(
-        // ---- SyncToClient ----
-        AnnotationContract(
-            AnnotationContract.SYNC_TO_CLIENT, "skipWhen",
-            RefKind.INSTANCE_METHOD, returnIsBoolean = true, paramCountFromFieldType = 1,
-        ),
-        AnnotationContract(
-            AnnotationContract.SYNC_TO_CLIENT, "listener",
-            RefKind.INSTANCE_METHOD, returnIsVoid = true, paramCountFromFieldType = 2,
-        ),
-
-        // ---- SyncToServer ----
-        AnnotationContract(
-            AnnotationContract.SYNC_TO_SERVER, "skipWhen",
-            RefKind.INSTANCE_METHOD, returnIsBoolean = true, paramCountFromFieldType = 1,
-        ),
-        AnnotationContract(
-            AnnotationContract.SYNC_TO_SERVER, "listener",
-            RefKind.INSTANCE_METHOD, returnIsVoid = true, paramCountFromFieldType = 2,
-        ),
-
-        // ---- SaveToDisk ----
-        AnnotationContract(
-            AnnotationContract.SAVE_TO_DISK, "skipWhen",
-            RefKind.INSTANCE_METHOD, returnIsBoolean = true, paramCountFromFieldType = 1,
-        ),
-        AnnotationContract(
-            AnnotationContract.SAVE_TO_DISK, "listener",
-            RefKind.INSTANCE_METHOD, returnIsVoid = true, paramCountFromFieldType = 1,
-        ),
-        AnnotationContract(
-            AnnotationContract.SAVE_TO_DISK, "defaultValueGetter",
-            RefKind.INSTANCE_METHOD, paramCountFromFieldType = 0,
-        ),
-
-        // ---- Conversion（静态 Function 字段） ----
-        AnnotationContract(
-            AnnotationContract.CONVERSION, "toManaged",
-            RefKind.STATIC_FIELD, required = true,
-            staticFieldType = "java.util.function.Function",
-        ),
-        AnnotationContract(
-            AnnotationContract.CONVERSION, "toField",
-            RefKind.STATIC_FIELD,
-            staticFieldType = "java.util.function.Function",
-        ),
-
-        // ---- Strategy（静态 Hash.Strategy 字段） ----
-        AnnotationContract(
-            AnnotationContract.STRATEGY, "value",
-            RefKind.STATIC_FIELD, required = true,
-            staticFieldType = "it.unimi.dsi.fastutil.Hash.Strategy",
-        ),
-
-        // ---- Codec（静态 codec 字段 或 实例方法，互斥分支） ----
-        AnnotationContract(
-            AnnotationContract.CODEC, "saveCodec",
-            RefKind.STATIC_FIELD,
-            staticFieldType = "com.gto.datasynclib.datastream.codec.DataCodec",
-        ),
-        AnnotationContract(
-            AnnotationContract.CODEC, "syncCodec",
-            RefKind.STATIC_FIELD,
-            staticFieldType = "com.gto.datasynclib.datastream.codec.ByteStreamCodec",
-        ),
-        AnnotationContract(
-            AnnotationContract.CODEC, "writeToData",
-            RefKind.INSTANCE_METHOD, paramCountFromFieldType = 1,
-        ),
-        AnnotationContract(
-            AnnotationContract.CODEC, "readFromData",
-            RefKind.INSTANCE_METHOD,
-            fixedParamTypes = listOf("com.gto.datasynclib.datastream.data.Data", "int"),
-        ),
-        AnnotationContract(
-            AnnotationContract.CODEC, "writeToBuffer",
-            RefKind.INSTANCE_METHOD, returnIsVoid = true,
-            fixedParamTypes = listOf(BUFFER_FIELD_TYPE, AnnotationContract.FIELD_TYPE),
-        ),
-        AnnotationContract(
-            AnnotationContract.CODEC, "readFromBuffer",
-            RefKind.INSTANCE_METHOD,
-            fixedParamTypes = listOf(BUFFER_FIELD_TYPE),
-        ),
-    )
-
     /** buffer 类型哨兵：1.20.1 用 FriendlyByteBuf，1.21 用 RegistryFriendlyByteBuf */
     const val BUFFER_FIELD_TYPE: String = "\u0000BUFFER\u0000"
 
-    fun findByAnnotation(annotationQualifiedName: String): List<AnnotationContract> =
-        ALL.filter { it.annotationQualifiedName == annotationQualifiedName }
+    val ALL: List<AnnotationContract> =
+        listOf(
+            // ---- SyncToClient ----
+            AnnotationContract(
+                AnnotationContract.SYNC_TO_CLIENT,
+                "skipWhen",
+                RefKind.INSTANCE_METHOD,
+                returnIsBoolean = true,
+                paramCountFromFieldType = 1,
+            ),
+            AnnotationContract(
+                AnnotationContract.SYNC_TO_CLIENT,
+                "listener",
+                RefKind.INSTANCE_METHOD,
+                returnIsVoid = true,
+                paramCountFromFieldType = 2,
+            ),
+            // ---- SyncToServer ----
+            AnnotationContract(
+                AnnotationContract.SYNC_TO_SERVER,
+                "skipWhen",
+                RefKind.INSTANCE_METHOD,
+                returnIsBoolean = true,
+                paramCountFromFieldType = 1,
+            ),
+            AnnotationContract(
+                AnnotationContract.SYNC_TO_SERVER,
+                "listener",
+                RefKind.INSTANCE_METHOD,
+                returnIsVoid = true,
+                paramCountFromFieldType = 2,
+            ),
+            // ---- SaveToDisk ----
+            AnnotationContract(
+                AnnotationContract.SAVE_TO_DISK,
+                "skipWhen",
+                RefKind.INSTANCE_METHOD,
+                returnIsBoolean = true,
+                paramCountFromFieldType = 1,
+            ),
+            AnnotationContract(
+                AnnotationContract.SAVE_TO_DISK,
+                "listener",
+                RefKind.INSTANCE_METHOD,
+                returnIsVoid = true,
+                paramCountFromFieldType = 1,
+            ),
+            AnnotationContract(
+                AnnotationContract.SAVE_TO_DISK,
+                "defaultValueGetter",
+                RefKind.INSTANCE_METHOD,
+                paramCountFromFieldType = 0,
+            ),
+            // ---- Conversion（静态 Function 字段） ----
+            AnnotationContract(
+                AnnotationContract.CONVERSION,
+                "toManaged",
+                RefKind.STATIC_FIELD,
+                required = true,
+                staticFieldType = "java.util.function.Function",
+            ),
+            AnnotationContract(
+                AnnotationContract.CONVERSION,
+                "toField",
+                RefKind.STATIC_FIELD,
+                staticFieldType = "java.util.function.Function",
+            ),
+            // ---- Strategy（静态 Hash.Strategy 字段） ----
+            AnnotationContract(
+                AnnotationContract.STRATEGY,
+                "value",
+                RefKind.STATIC_FIELD,
+                required = true,
+                staticFieldType = "it.unimi.dsi.fastutil.Hash.Strategy",
+            ),
+            // ---- Codec（静态 codec 字段 或 实例方法，互斥分支） ----
+            AnnotationContract(
+                AnnotationContract.CODEC,
+                "saveCodec",
+                RefKind.STATIC_FIELD,
+                staticFieldType = "com.gto.datasynclib.datastream.codec.DataCodec",
+            ),
+            AnnotationContract(
+                AnnotationContract.CODEC,
+                "syncCodec",
+                RefKind.STATIC_FIELD,
+                staticFieldType = "com.gto.datasynclib.datastream.codec.ByteStreamCodec",
+            ),
+            AnnotationContract(
+                AnnotationContract.CODEC,
+                "writeToData",
+                RefKind.INSTANCE_METHOD,
+                paramCountFromFieldType = 1,
+            ),
+            AnnotationContract(
+                AnnotationContract.CODEC,
+                "readFromData",
+                RefKind.INSTANCE_METHOD,
+                fixedParamTypes = listOf("com.gto.datasynclib.datastream.data.Data", "int"),
+            ),
+            AnnotationContract(
+                AnnotationContract.CODEC,
+                "writeToBuffer",
+                RefKind.INSTANCE_METHOD,
+                returnIsVoid = true,
+                fixedParamTypes = listOf(BUFFER_FIELD_TYPE, AnnotationContract.FIELD_TYPE),
+            ),
+            AnnotationContract(
+                AnnotationContract.CODEC,
+                "readFromBuffer",
+                RefKind.INSTANCE_METHOD,
+                fixedParamTypes = listOf(BUFFER_FIELD_TYPE),
+            ),
+        )
 
-    fun find(annotationQualifiedName: String, attributeName: String): AnnotationContract? =
-        ALL.firstOrNull {
-            it.annotationQualifiedName == annotationQualifiedName && it.attributeName == attributeName
-        }
+    fun findByAnnotation(annotationQualifiedName: String): List<AnnotationContract> = ALL.filter { it.annotationQualifiedName == annotationQualifiedName }
+
+    fun find(annotationQualifiedName: String, attributeName: String): AnnotationContract? = ALL.firstOrNull {
+        it.annotationQualifiedName == annotationQualifiedName && it.attributeName == attributeName
+    }
 }

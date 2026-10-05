@@ -17,7 +17,6 @@ import com.intellij.psi.PsiType
  *   而不是字段声明类型。
  */
 object FieldContextResolver {
-
     const val CONVERSION_ANNOTATION = "com.gto.datasynclib.annotations.Conversion"
     const val STRATEGY_ANNOTATION = "com.gto.datasynclib.annotations.Strategy"
     const val ADDITIONAL_HOLDER_ANNOTATION = "com.gto.datasynclib.annotations.AdditionalHolder"
@@ -27,9 +26,10 @@ object FieldContextResolver {
      */
     fun effectiveType(field: PsiField): PsiType {
         val conversion = field.getAnnotation(CONVERSION_ANNOTATION) ?: return field.type
-        val toManaged = conversion.findAttributeValue("toManaged")?.let {
-            (it as? com.intellij.psi.PsiLiteralExpression)?.value as? String
-        } ?: return field.type
+        val toManaged =
+            conversion.findAttributeValue("toManaged")?.let {
+                (it as? com.intellij.psi.PsiLiteralExpression)?.value as? String
+            } ?: return field.type
         val clazz = field.containingClass ?: return field.type
         val fnField = clazz.findFieldByName(toManaged, true) ?: return field.type
         val fnType = fnField.type as? PsiClassType ?: return field.type
@@ -42,8 +42,7 @@ object FieldContextResolver {
     /**
      * 是否有 @Conversion（用于 @Generic 检查的分支镜像）。
      */
-    fun hasConversion(field: PsiField): Boolean =
-        field.getAnnotation(CONVERSION_ANNOTATION) != null
+    fun hasConversion(field: PsiField): Boolean = field.getAnnotation(CONVERSION_ANNOTATION) != null
 
     /**
      * 解析字段的泛型实参（用于 @Generic 检查），镜像 `createFieldDefinition`：
@@ -55,15 +54,16 @@ object FieldContextResolver {
     fun genericArguments(field: PsiField): List<PsiType> {
         val conversion = field.getAnnotation(CONVERSION_ANNOTATION)
         return if (conversion != null) {
-            val toManaged = conversion.findAttributeValue("toManaged")?.let {
-                (it as? com.intellij.psi.PsiLiteralExpression)?.value as? String
-            }
+            val toManaged =
+                conversion.findAttributeValue("toManaged")?.let {
+                    (it as? com.intellij.psi.PsiLiteralExpression)?.value as? String
+                }
             val clazz = field.containingClass
             val fnField = clazz?.findFieldByName(toManaged ?: "", true)
             val fnType = fnField?.type as? PsiClassType
             fnType?.parameters?.drop(1) ?: emptyList() // Function<A, B> 的 B 的实参
         } else {
-            (field.type as? PsiClassType)?.parameters ?: emptyList()
+            (field.type as? PsiClassType)?.parameters?.toList() ?: emptyList()
         }
     }
 
@@ -73,13 +73,14 @@ object FieldContextResolver {
      */
     fun conversionFunctionTypes(field: PsiField): List<PsiType> {
         val conversion = field.getAnnotation(CONVERSION_ANNOTATION) ?: return emptyList()
-        val toManaged = conversion.findAttributeValue("toManaged")?.let {
-            (it as? com.intellij.psi.PsiLiteralExpression)?.value as? String
-        } ?: return emptyList()
+        val toManaged =
+            conversion.findAttributeValue("toManaged")?.let {
+                (it as? com.intellij.psi.PsiLiteralExpression)?.value as? String
+            } ?: return emptyList()
         val clazz = field.containingClass ?: return emptyList()
         val fnField = clazz.findFieldByName(toManaged, true) ?: return emptyList()
         val fnType = fnField.type as? PsiClassType ?: return emptyList()
-        return fnType.parameters
+        return fnType.parameters.toList()
     }
 
     /**
@@ -88,9 +89,10 @@ object FieldContextResolver {
      */
     fun strategyGenericType(field: PsiField): PsiType? {
         val strategy = field.getAnnotation(STRATEGY_ANNOTATION) ?: return null
-        val value = strategy.findAttributeValue("value")?.let {
-            (it as? com.intellij.psi.PsiLiteralExpression)?.value as? String
-        } ?: return null
+        val value =
+            strategy.findAttributeValue("value")?.let {
+                (it as? com.intellij.psi.PsiLiteralExpression)?.value as? String
+            } ?: return null
         val clazz = field.containingClass ?: return null
         val sf = clazz.findFieldByName(value, true) ?: return null
         val st = sf.type as? PsiClassType ?: return null

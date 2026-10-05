@@ -1,0 +1,30 @@
+<html>
+<body>
+<p>Reports invalid DataSyncLib annotation contracts and field configuration in Java code.</p>
+<ul>
+    <li>Unresolved method or field references, non-static referenced fields, missing required attributes,
+        and method signatures that do not match the annotation contract.</li>
+    <li>Duplicate managed field keys, including fields flattened through <code>@AdditionalHolder</code>.</li>
+    <li>Invalid <code>@SaveToDisk.defaultValue</code> numeric literals and
+        <code>@Generic</code> fields without resolvable generic type arguments.</li>
+    <li>Missing <code>@Codec</code> read methods when corresponding write methods are configured,
+        and instance codec attributes ignored when <code>saveCodec</code> is set.</li>
+    <li><code>@Conversion</code> function input types and <code>@Strategy</code> generic types
+        that do not match the declared field type.</li>
+</ul>
+<p>Method signature checks use the effective managed type when a field has <code>@Conversion</code>.</p>
+<p>For example, the listener below cannot be resolved because the holder has no matching method:</p>
+<pre><code>
+class Holder {
+    @SyncToClient(listener = "onEnergyChange")
+    private long energy;
+}
+</code></pre>
+<p>Add a matching method such as <code>void onEnergyChange(long newValue, long oldValue)</code>,
+    or update the annotation to reference an existing method. Place the caret on the method-name
+    string and use <b>Generate referenced method</b> to create a method skeleton.</p>
+<!-- tooltip end -->
+<p>The checks mirror DataSyncLib's annotation member resolution and field configuration rules
+    to help identify runtime reflection and configuration errors in the editor.</p>
+</body>
+</html>

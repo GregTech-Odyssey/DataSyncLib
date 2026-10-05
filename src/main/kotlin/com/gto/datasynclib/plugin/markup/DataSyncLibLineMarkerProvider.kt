@@ -1,15 +1,17 @@
 package com.gto.datasynclib.plugin.markup
 
 import com.gto.datasynclib.plugin.registry.FieldContextResolver
+
 import com.intellij.codeInsight.daemon.RelatedItemLineMarkerInfo
 import com.intellij.codeInsight.daemon.RelatedItemLineMarkerProvider
 import com.intellij.codeInsight.navigation.NavigationGutterIconBuilder
 import com.intellij.icons.AllIcons
 import com.intellij.psi.PsiAnnotation
 import com.intellij.psi.PsiClassType
-import com.intellij.psi.PsiField
 import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiField
 import com.intellij.psi.util.PsiTreeUtil
+
 import javax.swing.Icon
 
 /**
@@ -21,30 +23,27 @@ import javax.swing.Icon
  *   - Refresh：@Conversion
  *   - Record：@Codec
  *   - Function：@Strategy
- *   - Tree：@AdditionalHolder
+ *   - Class：@AdditionalHolder
  *   - Type：@Generic
  *
  * 每个图标的 tooltip 显示该注解的摘要；@Conversion 字段额外显示托管类型。
  */
 class DataSyncLibLineMarkerProvider : RelatedItemLineMarkerProvider() {
-
-    override fun collectNavigationMarkers(
-        element: com.intellij.psi.PsiElement,
-        result: MutableCollection<in RelatedItemLineMarkerInfo<*>>,
-    ) {
+    override fun collectNavigationMarkers(element: com.intellij.psi.PsiElement, result: MutableCollection<in RelatedItemLineMarkerInfo<*>>) {
         if (element !is PsiField) return
         val annotations = element.annotations
         if (annotations.isEmpty()) return
 
-        val target = element.nameIdentifier ?: element
+        val target = element.nameIdentifier
         for (annotation in annotations) {
             val icon = iconFor(annotation) ?: continue
             val tooltip = tooltipFor(element, annotation)
             val navigationTarget = navigationTarget(element, annotation)
-            val builder = NavigationGutterIconBuilder
-                .create(icon)
-                .setTarget(navigationTarget)
-                .setTooltipText(tooltip)
+            val builder =
+                NavigationGutterIconBuilder
+                    .create(icon)
+                    .setTarget(navigationTarget)
+                    .setTooltipText(tooltip)
             result.add(builder.createLineMarkerInfo(target))
         }
     }
@@ -53,9 +52,10 @@ class DataSyncLibLineMarkerProvider : RelatedItemLineMarkerProvider() {
     private fun navigationTarget(field: PsiField, annotation: PsiAnnotation): PsiElement {
         val short = annotation.qualifiedName?.substringAfterLast('.') ?: ""
         if (short == "AdditionalHolder") {
-            val childManager = annotation.findAttributeValue("childManager")?.let {
-                (it as? com.intellij.psi.PsiLiteralExpression)?.value as? Boolean
-            } ?: false
+            val childManager =
+                annotation.findAttributeValue("childManager")?.let {
+                    (it as? com.intellij.psi.PsiLiteralExpression)?.value as? Boolean
+                } ?: false
             if (!childManager) {
                 (field.type as? PsiClassType)?.resolve()?.let { return it }
             }
@@ -86,7 +86,7 @@ class DataSyncLibLineMarkerProvider : RelatedItemLineMarkerProvider() {
             "Conversion" -> AllIcons.Actions.Refresh
             "Codec" -> AllIcons.Nodes.Record
             "Strategy" -> AllIcons.Nodes.Function
-            "AdditionalHolder" -> AllIcons.Nodes.Tree
+            "AdditionalHolder" -> AllIcons.Nodes.Class
             "Generic" -> AllIcons.Nodes.Type
             else -> null
         }

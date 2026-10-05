@@ -58,6 +58,6 @@
         </intentionAction>
 
         <!-- 消除「未使用」误报 -->
-        <globalUsageHelper implementation="com.gto.datasynclib.plugin.inspection.AnnotationGlobalUsageHelper"/>
+        <implicitUsageProvider implementation="com.gto.datasynclib.plugin.inspection.AnnotationGlobalUsageHelper"/>
     </extensions>
 </idea-plugin>

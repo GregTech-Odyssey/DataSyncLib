@@ -4,6 +4,7 @@ import com.gto.datasynclib.plugin.registry.AnnotationContract
 import com.gto.datasynclib.plugin.registry.AnnotationContractRegistry
 import com.gto.datasynclib.plugin.registry.FieldContextResolver
 import com.gto.datasynclib.plugin.registry.RefKind
+
 import com.intellij.codeInspection.*
 import com.intellij.psi.*
 import com.intellij.psi.util.PsiTreeUtil
@@ -22,63 +23,62 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
 
     override fun getDisplayName(): String = "DataSyncLib annotation checks"
 
-    override fun buildVisitor(holder: ProblemsHolder, isOnTheFly: Boolean): PsiElementVisitor =
-        object : JavaElementVisitor() {
+    override fun buildVisitor(holder: ProblemsHolder, isOnTheFly: Boolean): PsiElementVisitor = object : JavaElementVisitor() {
 
-            override fun visitAnnotation(annotation: PsiAnnotation) {
-                val qName = annotation.qualifiedName ?: return
-                // 1) required 属性缺失
-                AnnotationContractRegistry.findByAnnotation(qName)
-                    .filter { it.required }
-                    .forEach { contract ->
-                        if (annotation.findAttributeValue(contract.attributeName) == null) {
-                            holder.registerProblem(
-                                annotation,
-                                "Missing required attribute '${contract.attributeName}'",
-                                ProblemHighlightType.ERROR,
-                            )
-                        }
+        override fun visitAnnotation(annotation: PsiAnnotation) {
+            val qName = annotation.qualifiedName ?: return
+            // 1) required 属性缺失
+            AnnotationContractRegistry.findByAnnotation(qName)
+                .filter { it.required }
+                .forEach { contract ->
+                    if (annotation.findAttributeValue(contract.attributeName) == null) {
+                        holder.registerProblem(
+                            annotation,
+                            "Missing required attribute '${contract.attributeName}'",
+                            ProblemHighlightType.ERROR,
+                        )
                     }
-                // 2) defaultValue 字面量格式
-                if (qName == AnnotationContract.SAVE_TO_DISK) {
-                    checkDefaultValue(holder, annotation)
                 }
-                // 3) @Codec 无效果警告
-                if (qName == AnnotationContract.CODEC) {
-                    checkCodecRedundancy(holder, annotation)
-                }
-                // 4) @Codec 成对解析（writeToData 需配 readFromData，writeToBuffer 需配 readFromBuffer）
-                if (qName == AnnotationContract.CODEC) {
-                    checkCodecPairs(holder, annotation)
-                }
+            // 2) defaultValue 字面量格式
+            if (qName == AnnotationContract.SAVE_TO_DISK) {
+                checkDefaultValue(holder, annotation)
             }
-
-            override fun visitNameValuePair(pair: PsiNameValuePair) {
-                val value = pair.value as? PsiLiteralExpression ?: return
-                if (value.value !is String) return
-                val annotation = PsiTreeUtil.getParentOfType(pair, PsiAnnotation::class.java, false) ?: return
-                val contract = AnnotationContractRegistry.find(
-                    annotation.qualifiedName ?: return,
-                    pair.name ?: "value",
-                ) ?: return
-                val field = PsiTreeUtil.getParentOfType(annotation, PsiField::class.java, false) ?: return
-                checkContract(holder, value, field, contract)
+            // 3) @Codec 无效果警告
+            if (qName == AnnotationContract.CODEC) {
+                checkCodecRedundancy(holder, annotation)
             }
-
-            override fun visitField(field: PsiField) {
-                // @Generic 无泛型检查
-                checkGeneric(holder, field)
-                // @Conversion 泛型方向检查（Function<A,B> 的 A 必须匹配字段类型）
-                checkConversionDirection(holder, field)
-                // @Strategy 泛型类型匹配检查（Hash.Strategy<T> 的 T 必须匹配字段类型）
-                checkStrategyGeneric(holder, field)
-            }
-
-            override fun visitClass(clazz: PsiClass) {
-                // @SaveToDisk.key 重复检测（含嵌套 @AdditionalHolder 展平字段）
-                checkDuplicateKeys(holder, clazz)
+            // 4) @Codec 成对解析（writeToData 需配 readFromData，writeToBuffer 需配 readFromBuffer）
+            if (qName == AnnotationContract.CODEC) {
+                checkCodecPairs(holder, annotation)
             }
         }
+
+        override fun visitNameValuePair(pair: PsiNameValuePair) {
+            val value = pair.value as? PsiLiteralExpression ?: return
+            if (value.value !is String) return
+            val annotation = PsiTreeUtil.getParentOfType(pair, PsiAnnotation::class.java, false) ?: return
+            val contract = AnnotationContractRegistry.find(
+                annotation.qualifiedName ?: return,
+                pair.name ?: "value",
+            ) ?: return
+            val field = PsiTreeUtil.getParentOfType(annotation, PsiField::class.java, false) ?: return
+            checkContract(holder, value, field, contract)
+        }
+
+        override fun visitField(field: PsiField) {
+            // @Generic 无泛型检查
+            checkGeneric(holder, field)
+            // @Conversion 泛型方向检查（Function<A,B> 的 A 必须匹配字段类型）
+            checkConversionDirection(holder, field)
+            // @Strategy 泛型类型匹配检查（Hash.Strategy<T> 的 T 必须匹配字段类型）
+            checkStrategyGeneric(holder, field)
+        }
+
+        override fun visitClass(clazz: PsiClass) {
+            // @SaveToDisk.key 重复检测（含嵌套 @AdditionalHolder 展平字段）
+            checkDuplicateKeys(holder, clazz)
+        }
+    }
 
     // ===== defaultValue 格式 =====
 
@@ -165,19 +165,23 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
         // saveCodec 非空时走静态分支，实例方法属性被忽略，无需成对校验
         if (!saveCodec.isNullOrEmpty()) return
 
-        checkPair(holder, annotation, "writeToData", "readFromData",
-            "'writeToData' requires a matching 'readFromData' (runtime resolves readFromData unconditionally)")
-        checkPair(holder, annotation, "writeToBuffer", "readFromBuffer",
-            "'writeToBuffer' requires a matching 'readFromBuffer' (runtime resolves readFromBuffer unconditionally)")
+        checkPair(
+            holder,
+            annotation,
+            "writeToData",
+            "readFromData",
+            "'writeToData' requires a matching 'readFromData' (runtime resolves readFromData unconditionally)",
+        )
+        checkPair(
+            holder,
+            annotation,
+            "writeToBuffer",
+            "readFromBuffer",
+            "'writeToBuffer' requires a matching 'readFromBuffer' (runtime resolves readFromBuffer unconditionally)",
+        )
     }
 
-    private fun checkPair(
-        holder: ProblemsHolder,
-        annotation: PsiAnnotation,
-        writeAttr: String,
-        readAttr: String,
-        message: String,
-    ) {
+    private fun checkPair(holder: ProblemsHolder, annotation: PsiAnnotation, writeAttr: String, readAttr: String, message: String) {
         val write = attrString(annotation, writeAttr)
         val read = attrString(annotation, readAttr)
         if (write.isNotEmpty() && read.isEmpty()) {
@@ -190,8 +194,7 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
         }
     }
 
-    private fun attrString(annotation: PsiAnnotation, attr: String): String =
-        annotation.findAttributeValue(attr)?.let { (it as? PsiLiteralExpression)?.value as? String } ?: ""
+    private fun attrString(annotation: PsiAnnotation, attr: String): String = annotation.findAttributeValue(attr)?.let { (it as? PsiLiteralExpression)?.value as? String } ?: ""
 
     // ===== @Generic 无泛型 =====
 
@@ -273,12 +276,7 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
         collectKeys(clazz, seen, holder, 0)
     }
 
-    private fun collectKeys(
-        clazz: PsiClass,
-        seen: MutableMap<String, PsiField>,
-        holder: ProblemsHolder,
-        depth: Int,
-    ) {
+    private fun collectKeys(clazz: PsiClass, seen: MutableMap<String, PsiField>, holder: ProblemsHolder, depth: Int) {
         if (depth > 8) return // 防循环
         for (field in clazz.fields) {
             if (field.hasModifierProperty(PsiModifier.STATIC)) continue
@@ -306,7 +304,7 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
             if (prev != null && prev !== field) {
                 val target = (saveToDisk?.findAttributeValue("key") as? PsiLiteralExpression) ?: field.nameIdentifier
                 holder.registerProblem(
-                    target ?: field,
+                    target,
                     "Duplicate field key '$key' (already used by '${prev.name}') — runtime throws 'Duplicate sync field key'",
                     ProblemHighlightType.ERROR,
                 )
@@ -316,11 +314,10 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
         }
     }
 
-    private fun isManagedField(field: PsiField): Boolean =
-        field.getAnnotation("com.gto.datasynclib.annotations.SaveToDisk") != null ||
-            field.getAnnotation("com.gto.datasynclib.annotations.SyncToClient") != null ||
-            field.getAnnotation("com.gto.datasynclib.annotations.SyncToServer") != null ||
-            field.getAnnotation("com.gto.datasynclib.annotations.AddToManager") != null
+    private fun isManagedField(field: PsiField): Boolean = field.getAnnotation("com.gto.datasynclib.annotations.SaveToDisk") != null ||
+        field.getAnnotation("com.gto.datasynclib.annotations.SyncToClient") != null ||
+        field.getAnnotation("com.gto.datasynclib.annotations.SyncToServer") != null ||
+        field.getAnnotation("com.gto.datasynclib.annotations.AddToManager") != null
 
     private fun resolveKey(field: PsiField, saveToDisk: PsiAnnotation?): String {
         val explicit = saveToDisk?.findAttributeValue("key")?.let {
@@ -331,12 +328,7 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
 
     // ===== 字符串引用契约校验 =====
 
-    private fun checkContract(
-        holder: ProblemsHolder,
-        literal: PsiLiteralExpression,
-        owner: PsiField,
-        contract: AnnotationContract,
-    ) {
+    private fun checkContract(holder: ProblemsHolder, literal: PsiLiteralExpression, owner: PsiField, contract: AnnotationContract) {
         val name = literal.value as? String ?: return
         val clazz = owner.containingClass ?: return
         when (contract.kind) {
@@ -345,13 +337,7 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
         }
     }
 
-    private fun checkField(
-        holder: ProblemsHolder,
-        literal: PsiLiteralExpression,
-        clazz: PsiClass,
-        name: String,
-        contract: AnnotationContract,
-    ) {
+    private fun checkField(holder: ProblemsHolder, literal: PsiLiteralExpression, clazz: PsiClass, name: String, contract: AnnotationContract) {
         val target = clazz.findFieldByName(name, false)
         if (target == null) {
             holder.registerProblem(literal, "Cannot resolve field '$name' in ${clazz.name}", ProblemHighlightType.ERROR)
@@ -367,14 +353,7 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
         }
     }
 
-    private fun checkMethod(
-        holder: ProblemsHolder,
-        literal: PsiLiteralExpression,
-        clazz: PsiClass,
-        name: String,
-        owner: PsiField,
-        contract: AnnotationContract,
-    ) {
+    private fun checkMethod(holder: ProblemsHolder, literal: PsiLiteralExpression, clazz: PsiClass, name: String, owner: PsiField, contract: AnnotationContract) {
         val methods = clazz.findMethodsByName(name, true)
         if (methods.isEmpty()) {
             holder.registerProblem(literal, "Cannot resolve method '$name'", ProblemHighlightType.ERROR)
@@ -398,10 +377,7 @@ class AnnotationContractInspection : AbstractBaseJavaLocalInspectionTool() {
 /**
  * 方法签名匹配器，与 AnnotationMemberReference.matchesContract 保持一致。
  */
-class MethodSignatureMatcher(
-    private val contract: AnnotationContract,
-    private val fieldType: PsiType,
-) {
+class MethodSignatureMatcher(private val contract: AnnotationContract, private val fieldType: PsiType) {
     fun matches(method: PsiMethod): Boolean {
         val params = contract.expectedParamTypes ?: emptyList()
         val actual = method.parameterList.parameters.map { it.type }
@@ -411,18 +387,18 @@ class MethodSignatureMatcher(
             if (expected == AnnotationContract.FIELD_TYPE) {
                 if (!typesCompatible(actual[i], fieldType)) return false
             } else if (expected == AnnotationContractRegistry.BUFFER_FIELD_TYPE) {
-                val t = actual[i]?.canonicalText
+                val t = actual[i].canonicalText
                 if (t != "net.minecraft.network.FriendlyByteBuf" && t != "net.minecraft.network.RegistryFriendlyByteBuf") return false
             } else {
-                val a = actual[i]?.canonicalText
-                if (a != expected && a?.substringAfterLast('.') != expected.substringAfterLast('.')) return false
+                val a = actual[i].canonicalText
+                if (a != expected && a.substringAfterLast('.') != expected.substringAfterLast('.')) return false
             }
         }
         if (contract.returnIsBoolean) {
             val rt = method.returnType ?: return false
             if (rt != PsiTypes.booleanType() && rt.canonicalText != "boolean") return false
         }
-        if (contract.returnIsVoid && method.returnType != PsiType.VOID) return false
+        if (contract.returnIsVoid && method.returnType != PsiTypes.voidType()) return false
         return true
     }
 
@@ -436,7 +412,7 @@ class MethodSignatureMatcher(
         return primitiveBox(a) == primitiveBox(e)
     }
 
-    private fun primitiveBox(t: String?): String = when (t) {
+    private fun primitiveBox(t: String?): String? = when (t) {
         "int" -> "java.lang.Integer"
         "long" -> "java.lang.Long"
         "boolean" -> "java.lang.Boolean"
