@@ -1,5 +1,6 @@
 package com.gto.datasynclib;
 
+import com.gto.datasynclib.annotations.RemoteCall;
 import com.gto.datasynclib.datastream.codec.ByteStreamDecoder;
 import com.gto.datasynclib.datastream.codec.ByteStreamEncoder;
 import com.gto.datasynclib.datastream.codec.DataDecoder;
@@ -7,14 +8,19 @@ import com.gto.datasynclib.datastream.codec.DataEncoder;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.datastream.data.StringMapData;
+import com.gto.datasynclib.remote.RemoteInvoker;
+import com.gto.datasynclib.remote.RemoteMethod;
+import com.gto.datasynclib.remote.RemoteRouting;
 import com.gto.datasynclib.util.FieldDataCodec;
 import com.gto.datasynclib.util.ReflectUtil;
 import io.netty.buffer.Unpooled;
+import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import lombok.Getter;
 import net.minecraft.network.FriendlyByteBuf;
 import org.apache.commons.lang3.ArrayUtils;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Field;
 import java.util.Collections;
@@ -37,6 +43,11 @@ import java.util.function.Supplier;
  *       where only changed fields are written (each prefixed by a VarInt field index)</li>
  *   <li><strong>Serializes for disk</strong> — via {@link #writeToData()} and
  *       {@link #readFromData(com.gto.datasynclib.datastream.data.Data, int)} using {@link com.gto.datasynclib.datastream.data.StringMapData}</li>
+ *   <li><strong>Serializes remote calls</strong> — {@link #writeRemoteCall(String, Object...)}
+ *       produces the {@code byte[]} for a {@link RemoteCall @RemoteCall}
+ *       invocation (validated against the lazily cached {@link #getRemoteMethods()} table) and
+ *       {@link #readRemoteCall(byte[])} decodes and invokes one; as with the sync methods, sending
+ *       the bytes is up to the packet layer</li>
  * </ul>
  *
  * <p><strong>Re-entrancy guards:</strong> The {@code updating} and {@code writing} volatile flags
@@ -72,6 +83,21 @@ public class FieldDataManager {
     private boolean changed;
     private volatile boolean updating;
     private volatile boolean writing;
+    /**
+     * Lazily resolved {@code @RemoteCall} table of this manager's holder, see
+     * {@link #getRemoteMethods()}. The scan itself is cached per class by
+     * {@link com.gto.datasynclib.remote.RemoteInvoker}; this field memoizes the map for this manager
+     * so a call costs a plain map lookup and a name can be validated locally.
+     */
+    @Nullable
+    private Object2ReferenceOpenHashMap<String, RemoteMethod> remoteMethods;
+    /**
+     * The field indices leading from the root of this holder tree to this holder — what
+     * {@link #writeRemoteCall(String, Object...)} writes into the call prefix, resolved on first use and
+     * then cached. {@code null} means "not resolved yet"; a root resolves to
+     * {@link RemoteRouting#EMPTY_PATH}.
+     */
+    private int @Nullable [] remotePath;
 
     public FieldDataManager(IFieldDataHolder holder) {
         this(holder, holder.getClass());
@@ -123,7 +149,7 @@ public class FieldDataManager {
     public DataFieldDefinition<?> getFieldDefinition(Field field) {
         for (var definition : storage.typeDefinitions.getOrDefault(field.getType(), Collections.emptyList())) {
             try {
-                if (definition.field == field) return definition;
+                if (definition.field.equals(field)) return definition;
             } catch (Throwable ignored) {
             }
         }
@@ -132,6 +158,162 @@ public class FieldDataManager {
 
     public DataFieldDefinition<?> getFieldDefinition(String fieldName) {
         return storage.definitionMap.get(fieldName);
+    }
+
+    // ==================== Remote calls ====================
+
+    /**
+     * Returns the {@code @RemoteCall} methods of <strong>this manager's holder</strong>, resolving
+     * them lazily on the first request.
+     *
+     * <p>The table belongs to the holder that owns this manager and is the very instance
+     * {@link com.gto.datasynclib.remote.RemoteInvoker#methods(Class)} caches for that class — a holder
+     * without annotated methods yields the shared empty table. It is handed out as is (no
+     * {@code unmodifiableMap} wrapper and no copy): treat it as read-only, since it is shared with
+     * every other holder of the class.</p>
+     */
+    public Object2ReferenceOpenHashMap<String, RemoteMethod> getRemoteMethods() {
+        var methods = remoteMethods;
+        if (methods == null) {
+            methods = RemoteInvoker.methods(holder.getClass());
+            remoteMethods = methods;
+        }
+        return methods;
+    }
+
+    /**
+     * Looks up one {@code @RemoteCall} method of this manager's holder by its wire name.
+     *
+     * @param method the wire name ({@link RemoteCall#value()} or the Java
+     *               method name)
+     * @return the method, or {@code null} if the holder does not expose that name
+     */
+    @Nullable
+    public RemoteMethod getRemoteMethod(String method) {
+        return getRemoteMethods().get(method);
+    }
+
+    /**
+     * Encodes a remote call for this holder and returns the payload a packet carries — the remote
+     * call counterpart of {@link #writeToNetworkBuffer(LogicalSide, boolean)}. Like the sync path,
+     * this class only produces the bytes: addressing and sending them is the packet layer's job
+     * (see {@link com.gto.datasynclib.remote.RemoteNetwork}, or a packet of your own).
+     *
+     * <p>The name is validated against the lazily cached {@link #getRemoteMethods()} table first, so a
+     * typo fails here instead of being logged on the receiver.</p>
+     *
+     * @param method the wire name of the {@code @RemoteCall} method
+     * @param args   the arguments, in declaration order
+     * @return the serialized call, ready for
+     * {@link com.gto.datasynclib.remote.RemoteBlockEntityPacket} /
+     * {@link com.gto.datasynclib.remote.RemoteEntityPacket}
+     * @throws IllegalArgumentException if this holder has no such remote method, or the arguments do
+     *                                  not match its parameters
+     */
+    public byte[] writeRemoteCall(String method, Object... args) {
+        var remote = getRemoteMethods().get(method);
+        if (remote == null)
+            throw new IllegalArgumentException("No @RemoteCall method '" + method + "' on " + holder.getClass().getName());
+        // The holder's own position travels with the call, so the receiver can walk straight to it; the
+        // resolved method is handed over as is, so the call costs one table lookup, not two.
+        return RemoteInvoker.write(remote, remotePath(), args);
+    }
+
+    /**
+     * Decodes a remote call payload and invokes it on this holder — the remote call counterpart of
+     * {@link #readFromNetworkBuffer(LogicalSide, byte[])}, called by a packet handler once it has
+     * resolved the target object.
+     *
+     * <p>The call is routed with the wire identity of the payload, so a method declared on a
+     * <strong>nested</strong> holder of this one (an {@code @AdditionalHolder} sub-object, or any
+     * field whose type implements {@link IFieldDataHolder}) is invoked on that nested object instead of
+     * failing on this holder. That is what lets {@code module.remoteCall("configure", 3)} — encoded by
+     * the nested holder's own manager — arrive on the block entity/entity that carries the module.</p>
+     *
+     * <p>A remote method is {@code void} ({@link RemoteCall}), so nothing
+     * comes back out; the callee's effects are observed through field synchronization.</p>
+     *
+     * @param data the payload produced by {@link #writeRemoteCall(String, Object...)}; empty input and
+     *             a payload whose prefix cannot be read are ignored
+     * @throws IllegalArgumentException if the payload's identity and index match no method of this
+     *                                  holder or of a nested one — normally a call from another version
+     * @throws RuntimeException         if the argument section is truncated, or the invoked method
+     *                                  itself throws; the original failure is the cause
+     */
+    public void readRemoteCall(byte[] data) {
+        dispatchRemoteCall(holder, data);
+    }
+
+    /**
+     * Decodes a received call and invokes it on the holder its field path addresses — the static core of
+     * {@link #readRemoteCall(byte[])}, shared with
+     * {@link IFieldDataHolder#handleRemoteCall(Object, byte[])} so a target that is <em>not</em> a holder
+     * (but still carries nested ones) can be dispatched the same way.
+     *
+     * <p>The payload is wrapped into a {@link FriendlyByteBuf} once and decoded once: the call prefix
+     * (field path + method index, see {@link RemoteInvoker#readRoute(FriendlyByteBuf)}) leads it, the
+     * receiving side walks the addressed object's holder fields — index by index, through
+     * {@link RemoteRouting} — and then invokes the method at that index of the target's table. Nothing
+     * is searched for and nothing is built on the way.</p>
+     *
+     * @param target  the object the packet addressed
+     * @param payload the call payload from {@link #writeRemoteCall(String, Object...)}; empty input is
+     *                ignored
+     */
+    static void dispatchRemoteCall(Object target, byte[] payload) {
+        if (target == null || payload == null || payload.length == 0) return;
+        RemoteInvoker.handle(target, payload);
+    }
+
+    // ==================== Sending: the holder's own position ====================
+
+    /**
+     * The field indices leading from the root of this holder tree to this holder. Empty when this holder
+     * is a root.
+     *
+     * <p>Derived by walking <em>up</em> the owner chain, one holder at a time: each level asks
+     * {@link IFieldDataHolder#getParentHolder()} for its owner and finds the field index by scanning that
+     * owner's holder fields for the very object
+     * ({@link RemoteRouting#indexOfHolder(Class, Object, Object)}), so nothing has to be pushed down the
+     * tree and no holder field is ever read on the send path beyond that one scan.</p>
+     *
+     * <p>The walk stops at a holder that answers {@code null} (a root), after
+     * {@link RemoteRouting#MAX_DEPTH} levels, or as soon as an owner does not actually hold the holder —
+     * the last case leaves the path uncached so that the next call picks up an owner link or an
+     * assignment that happened in between.</p>
+     */
+    public int[] remotePath() {
+        var path = remotePath;
+        if (path != null) return path;
+        var resolved = resolveRemotePath();
+        return resolved == null ? RemoteRouting.EMPTY_PATH : (remotePath = resolved);
+    }
+
+    /**
+     * Walks the owner chain upwards and returns the path, or {@code null} when a level could not be
+     * resolved — the caller then leaves the cache empty and tries again later.
+     */
+    private int @Nullable [] resolveRemotePath() {
+        // One slot per level, plus the root itself; the walk stops there, so a broken owner chain can
+        // neither loop nor allocate more than this.
+        var indices = new int[RemoteRouting.MAX_DEPTH + 1];
+        var depth = 0;
+        var node = holder;
+        var owner = node.getParentHolder();
+        while (depth <= RemoteRouting.MAX_DEPTH) {
+            if (owner == null || owner == node) break; // a root
+            var index = RemoteRouting.indexOfHolder(owner.getClass(), owner, node);
+            if (index < 0) return null; // that owner does not hold it: not resolvable (yet)
+            indices[depth++] = index;
+            node = owner;
+            owner = node.getParentHolder();
+        }
+        if (depth == 0) return RemoteRouting.EMPTY_PATH;
+        var path = new int[depth];
+        for (int i = 0; i < depth; i++) {
+            path[i] = indices[depth - 1 - i];
+        }
+        return path;
     }
 
     public boolean hasSyncFields(LogicalSide side) {
@@ -195,10 +377,10 @@ public class FieldDataManager {
     /**
      * Updates dirty flags for fields based on changes
      *
-     * @param side     the logical side
+     * @param side           the logical side
      * @param autoDetectOnly if {@code true}, only fields with {@code autoDetect = true}
-     *                 are checked; if {@code false}, all sync fields are checked
-     *                 regardless of their {@code autoDetect} setting
+     *                       are checked; if {@code false}, all sync fields are checked
+     *                       regardless of their {@code autoDetect} setting
      * @return true if any changes were detected
      */
     public boolean updateFieldDirtyFlags(LogicalSide side, boolean autoDetectOnly) {

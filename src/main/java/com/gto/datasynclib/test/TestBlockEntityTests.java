@@ -1,12 +1,16 @@
 package com.gto.datasynclib.test;
 
 import com.gto.datasynclib.DataSyncCodec;
+import com.gto.datasynclib.remote.RemoteInvoker;
+import com.gto.datasynclib.remote.RemoteNetwork;
+import com.gto.datasynclib.remote.RemoteRouting;
 import com.gto.datasynclib.DataSyncLib;
 import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.FieldDefinitionStorage;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity;
+import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.StringMapData;
@@ -18,6 +22,7 @@ import com.gto.datasynclib.util.ItemStackArrayHashStrategy;
 import com.gto.datasynclib.util.ItemStackHashStrategy;
 import com.gto.datasynclib.util.Registry;
 import it.unimi.dsi.fastutil.Hash;
+import io.netty.buffer.Unpooled;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.GlobalPos;
@@ -25,6 +30,7 @@ import net.minecraft.core.SectionPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.ByteArrayTag;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.effect.MobEffect;
@@ -88,6 +94,7 @@ public final class TestBlockEntityTests {
         section("childManagerAndConversion", this::childManagerAndConversion);
         section("registryEnumAndStrategy", this::registryEnumAndStrategy);
         section("levelFreeNoThrow", this::levelFreeNoThrow);
+        section("remoteCall", this::remoteCall);
         report();
     }
 
@@ -186,13 +193,22 @@ public final class TestBlockEntityTests {
      *
      * <p><b>Usage notes:</b> registration is an <b>exact class match</b> — there is no assignable-from
      * fallback, so a subtype (e.g. {@code MutableComponent} for {@code Component}) must be registered
-     * explicitly. Enums and object arrays are generated on demand and always resolve, primitives never do,
-     * and a codec referenced from {@code @Codec} lives in the annotation instead of the global registry.</p>
+     * explicitly. Enums and object arrays are generated on demand and always resolve, a primitive
+     * resolves as its wrapper, and a codec referenced from {@code @Codec} lives in the annotation
+     * instead of the global registry.</p>
      */
     private void codecLookupPolicy() {
-        // Primitives never have a codec.
-        expect("policy.primitiveNull", DataSyncCodec.get(int.class) == null, true);
-        expect("policy.primitiveContains", DataSyncCodec.contains(int.class), false);
+        // A primitive resolves as its wrapper, which is where the constants are registered.
+        expect("policy.primitiveResolves", DataSyncCodec.get(int.class) != null, true);
+        expect("policy.primitiveContains", DataSyncCodec.contains(int.class), true);
+        expect("policy.primitiveIsWrapperCodec", DataSyncCodec.get(int.class) == DataSyncCodec.get(Integer.class), true);
+        expect("policy.primitiveRoundTrip", 7, DataSyncCodec.get(int.class).decode(DataSyncCodec.get(int.class).encode(7), 0));
+        expect("policy.voidPrimitiveNull", DataSyncCodec.get(void.class) == null, true);
+        // The two halves resolve through the same registry and hand back their own codec.
+        expect("policy.halfDataCodec", DataCodec.get(String.class) == DataCodec.STRING_CODEC, true);
+        expect("policy.halfStreamCodec", ByteStreamCodec.get(String.class) == ByteStreamCodec.STRING_CODEC, true);
+        expect("policy.halfPrimitive", DataCodec.get(int.class) == DataCodec.INT_CODEC, true);
+        expect("policy.halfMissingNull", DataCodec.get(TestBlockEntity.A.class) == null, true);
         // Enums and object arrays report a codec even without registration (generated on demand).
         expect("policy.generatedEnum", DataSyncCodec.contains(Direction.class), true);
         expect("policy.generatedArray", DataSyncCodec.contains(String[].class), true);
@@ -736,6 +752,157 @@ public final class TestBlockEntityTests {
         expect("levelFree.noThrow", true, true);
     }
 
+    /**
+     * Remote calls end to end: the scanned table, the local name check, the wire prefix (holder-field
+     * path + method index), routing into nested holders — including two levels deep and a nested holder
+     * that declares the same method name as the root — the instance-free (static) form, the whole
+     * argument surface, and every failure the packet layer has to survive.
+     *
+     * <p><b>Usage:</b> annotate a method with {@code @RemoteCall} (it must be {@code void}); a holder
+     * that sits inside another one answers {@link IFieldDataHolder#getParentHolder()} so a call made from
+     * it is addressed as a field path; then {@code manager.writeRemoteCall("name", args)} builds the
+     * payload and {@code manager.readRemoteCall(payload)} —
+     * {@link com.gto.datasynclib.remote.RemoteNetwork#handleReceived(Object, byte[])} for a real packet —
+     * applies it. {@link com.gto.datasynclib.remote.RemoteNetwork} or a packet of your own carries it.</p>
+     */
+    private void remoteCall() {
+        TestBlockEntity be = newEntity();
+        var manager = be.getFieldDataManager();
+
+        // ---- the table is scanned once per class and shared, keyed by wire name ----
+        var methods = manager.getRemoteMethods();
+        expect("remote.tableCached", methods == manager.getRemoteMethods());
+        expect("remote.tableShared", methods == RemoteInvoker.methods(TestBlockEntity.class));
+        expect("remote.methodFound", manager.getRemoteMethod("remoteMark") != null, true);
+        expect("remote.unknownNull", manager.getRemoteMethod("missing") == null, true);
+        expect("remote.parameterCount", 1, manager.getRemoteMethod("remoteMark").parameterCount());
+        expect("remote.richParameterCount", 4, manager.getRemoteMethod("rich").parameterCount());
+        expect("remote.isVoid", manager.getRemoteMethod("remoteMark").method().getReturnType() == void.class, true);
+        expect("remote.staticRecognised", manager.getRemoteMethod("staticMark").isStatic(), true);
+        expect("remote.indexInRange", manager.getRemoteMethod("remoteMark").wireIndex() >= 0, true);
+
+        // ---- the holder's own position: root [], nested [b], third level [b, nested] ----
+        String[] outerFields = RemoteRouting.holderFieldNames(TestBlockEntity.class);
+        int[] bPath = be.b.getFieldDataManager().remotePath();
+        int[] cPath = be.b.nested.getFieldDataManager().remotePath();
+        int moduleIndex = Arrays.asList(outerFields).indexOf("module");
+        expect("remote.path.root", "[]", Arrays.toString(manager.remotePath()));
+        expect("remote.path.nestedLength", 1, bPath.length);
+        expect("remote.path.nestedField", "b", outerFields[bPath[0]]);
+        expect("remote.path.deepLength", 2, cPath.length);
+        expect("remote.path.deepFields", "[b, nested]",
+                "[" + outerFields[cPath[0]] + ", "
+                        + RemoteRouting.holderFieldNames(TestBlockEntity.B.class)[cPath[1]] + "]");
+        expect("remote.parentHolder", true, be.b.getParentHolder() == be);
+        expect("remote.parentHolderDeep", true, be.b.nested.getParentHolder() == be.b);
+        expect("remote.moduleIsAHolderField", moduleIndex >= 0, true);
+
+        // ---- the wire prefix: a VarInt depth, one VarInt per field index, a VarInt method index ----
+        byte[] payload = manager.writeRemoteCall("remoteMark", 5);
+        byte[] nestedCall = be.b.getFieldDataManager().writeRemoteCall("remoteMark", 11);
+        byte[] deepCall = be.b.nested.getFieldDataManager().writeRemoteCall("cMark", 13);
+        var route = RemoteInvoker.readRoute(payload);
+        expect("remote.prefix.rootDepth", 0, route.path().length);
+        expect("remote.prefix.rootIndex", manager.getRemoteMethod("remoteMark").wireIndex(), route.index());
+        expect("remote.payloadSize.root", 3, payload.length); // depth + method index + one VarInt int
+        expect("remote.prefix.nestedPath", Arrays.toString(bPath),
+                Arrays.toString(RemoteInvoker.readRoute(nestedCall).path()));
+        expect("remote.payloadSize.nested", 4, nestedCall.length);
+        expect("remote.prefix.deepPath", Arrays.toString(cPath),
+                Arrays.toString(RemoteInvoker.readRoute(deepCall).path()));
+        expect("remote.payloadSize.deep", 5, deepCall.length);
+
+        // ---- encode, decode and invoke: the two halves a packet handler sits between ----
+        expect("remote.notInvokedYet", be.remoteMarked, 0);
+        manager.readRemoteCall(payload);
+        expect("remote.received", be.remoteMarked, 5);
+        RemoteInvoker.handle(be, RemoteInvoker.write(be, "remoteMark", 7));
+        expect("remote.receivedViaInvoker", be.remoteMarked, 7);
+
+        // ---- the packet-layer trigger: a holder target goes through its manager ----
+        RemoteNetwork.handleReceived(be, manager.writeRemoteCall("remoteMark", 9));
+        expect("remote.receivedViaNetwork", be.remoteMarked, 9);
+
+        // ---- a call from a nested holder lands on it, even though it declares the same name as the root
+        RemoteNetwork.handleReceived(be, nestedCall);
+        expect("remote.nestedRouted", be.b.remoteMarked, 11);
+        expect("remote.nestedRootUntouched", be.remoteMarked, 9);
+        manager.readRemoteCall(be.b.getFieldDataManager().writeRemoteCall("remoteMark", 12));
+        expect("remote.nestedRoutedFromManager", be.b.remoteMarked, 12);
+        expect("remote.nestedRootStillUntouched", be.remoteMarked, 9);
+
+        // ...and one from the third level reaches it through two indices
+        RemoteNetwork.handleReceived(be, deepCall);
+        expect("remote.deepRouted", be.b.nested.marked, 13);
+        expect("remote.deepRootUntouched", be.remoteMarked, 9);
+        expect("remote.deepSiblingUntouched", be.b.remoteMarked, 12);
+
+        // ---- an instance-free (static) call needs no target object ----
+        TestBlockEntity.staticMarked = 0;
+        RemoteInvoker.handle(TestBlockEntity.class, RemoteInvoker.write(TestBlockEntity.class, "staticMark", 21));
+        expect("remote.staticInvoked", TestBlockEntity.staticMarked, 21);
+        RemoteNetwork.handleReceived(be, RemoteInvoker.write(TestBlockEntity.class, "staticMark", 22));
+        expect("remote.staticViaNetwork", TestBlockEntity.staticMarked, 22);
+
+        // ---- the argument surface: primitives, references, null and arrays ----
+        manager.readRemoteCall(manager.writeRemoteCall("rich", 31, "text", new int[]{1, 2, 3}, true));
+        expect("remote.args.int", be.richInt, 31);
+        expect("remote.args.text", be.richText, "text");
+        expect("remote.args.array", Arrays.toString(be.richArray), "[1, 2, 3]");
+        expect("remote.args.flag", be.richFlag, true);
+        manager.readRemoteCall(manager.writeRemoteCall("rich", 32, null, null, false));
+        expect("remote.args.nullText", be.richText, null);
+        expect("remote.args.nullArray", be.richArray, null);
+        expect("remote.args.false", be.richFlag, false);
+
+        // ---- failures, none of which may reach a method ----
+        int markedBefore = be.remoteMarked;
+        // a name this holder does not have is rejected locally, before a payload is built
+        expect("remote.unknownRejected", throwsRuntime(() -> manager.writeRemoteCall("missing")));
+        // ...and so are a wrong argument count and a null for a primitive parameter
+        expect("remote.arityRejected", throwsRuntime(() -> manager.writeRemoteCall("remoteMark", 1, 2)));
+        expect("remote.primitiveNullRejected",
+                throwsRuntime(() -> manager.writeRemoteCall("remoteMark", (Object) null)));
+        // a payload that cannot be read at all is dropped by the packet layer
+        RemoteNetwork.handleReceived(be, new byte[]{99});
+        expect("remote.malformedIgnored", be.remoteMarked, markedBefore);
+        // a method index the class does not have, and a field path the tree does not have
+        RemoteNetwork.handleReceived(be, prefix(0, 99));
+        expect("remote.badIndexIgnored", be.remoteMarked, markedBefore);
+        RemoteNetwork.handleReceived(be, prefix(1, 99, 0));
+        expect("remote.badPathIgnored", be.remoteMarked, markedBefore);
+        // a field path that reaches a holder without remote methods must not fall back to the root
+        RemoteNetwork.handleReceived(be, prefix(1, moduleIndex, 0));
+        expect("remote.wrongHolderIgnored", be.remoteMarked, markedBefore);
+        // bytes left over after the arguments mean the two sides disagree about the class
+        byte[] withJunk = manager.writeRemoteCall("remoteMark", 77);
+        RemoteNetwork.handleReceived(be, Arrays.copyOf(withJunk, withJunk.length + 2));
+        expect("remote.leftoverRejected", be.remoteMarked, markedBefore);
+        // none of that broke the routing: the nested holder is still reachable
+        RemoteNetwork.handleReceived(be, be.b.getFieldDataManager().writeRemoteCall("remoteMark", 78));
+        expect("remote.nestedStillRouted", be.b.remoteMarked, 78);
+        expect("remote.rootSurvivedEverything", be.remoteMarked, markedBefore);
+    }
+
+    /**
+     * Builds a raw call prefix — a depth, one field index per level and a method index — which is what a
+     * peer of another version (or a hostile one) can send.
+     */
+    private byte[] prefix(int... values) {
+        var buf = Unpooled.buffer();
+        try {
+            var wrapper = new FriendlyByteBuf(buf);
+            for (int value : values) {
+                wrapper.writeVarInt(value);
+            }
+            var bytes = new byte[buf.readableBytes()];
+            buf.getBytes(buf.readerIndex(), bytes);
+            return bytes;
+        } finally {
+            buf.release();
+        }
+    }
+
     // ==================== helpers ====================
 
     /**
@@ -902,7 +1069,9 @@ public final class TestBlockEntityTests {
         return tags;
     }
 
-    /** {@code ItemStack} has no {@code equals}, so compare slot by slot through {@code matches}. */
+    /**
+     * {@code ItemStack} has no {@code equals}, so compare slot by slot through {@code matches}.
+     */
     private boolean stacksEqual(ItemStack[] a, ItemStack[] b) {
         if (a.length != b.length) return false;
         for (int i = 0; i < a.length; i++) {

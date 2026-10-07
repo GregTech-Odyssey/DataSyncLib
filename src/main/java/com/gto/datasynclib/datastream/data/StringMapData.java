@@ -34,10 +34,6 @@ public record StringMapData(Map<String, Data> value) implements MapData {
         public StringMapData decode(FriendlyByteBuf stream) {
             return Data.readData(STRING_MAP, stream).asStringMapData();
         }
-
-        static {
-            ByteStreamCodec.registerCodec(StringMapData.class, BYTE_STREAM_CODEC);
-        }
     };
 
     public static final DataCodec<StringMapData> DATA_CODEC = new DataCodec<>() {
@@ -50,10 +46,6 @@ public record StringMapData(Map<String, Data> value) implements MapData {
         @Override
         public StringMapData decode(@NotNull Data data, int dataVersion) {
             return (StringMapData) data;
-        }
-
-        static {
-            DataCodec.registerCodec(StringMapData.class, DATA_CODEC);
         }
     };
 

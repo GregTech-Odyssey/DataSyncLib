@@ -8,6 +8,7 @@ import java.util.*;
 import java.util.function.IntFunction;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
 
@@ -44,6 +45,15 @@ import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
  *
  * <p>Rule of thumb: use {@link #composite} to compose types that are already codec-backed or
  * boxed anyway, and hand-write the pair on hot primitive paths.</p>
+ *
+ * <p>The {@link #optional} adapters mark a {@code null} value — or, with the default overloads, one
+ * equal to a default — as absent on both paths at once:
+ * {@link com.gto.datasynclib.datastream.data.NullData#INSTANCE} on disk, a {@code false} boolean on
+ * the wire. Every builder that takes a codec also has an instance form on the codec itself
+ * ({@code CODEC.optional()}, {@code CODEC.asKey(HashMap::new, KEY_CODEC)}, {@code CODEC.list()},
+ * {@code CODEC.toDataSyncCodec()}, …), which on this interface keeps the result combined:
+ * {@link #asKey} / {@link #asValue} / {@link #collection} / {@link #array} / {@link #convert} all
+ * return a {@link DataSyncCodec} covering both paths.</p>
  *
  * @param <T> the type both halves encode and decode
  */
@@ -490,5 +500,192 @@ public interface CombinedCodec<T> extends DataCodec<T>, ByteStreamCodec<T> {
         return DataSyncCodec.of(
                 ByteStreamCodec.map(function, keyCodec.toStreamCodec(), valueCodec.toStreamCodec()),
                 DataCodec.map(function, keyCodec.toDataCodec(), valueCodec.toDataCodec()));
+    }
+
+    // ===== Optional adapters (unified stream + data) =====
+
+    /**
+     * This codec made nullable on <strong>both</strong> paths at once: a {@code null} value is
+     * stored as absent and decodes back to {@code null}, while any other value is stored by this
+     * codec.
+     *
+     * <p>The two paths mark "absent" differently, because only the data path has a type tag to
+     * spare: the disk form writes {@link com.gto.datasynclib.datastream.data.NullData#INSTANCE}
+     * (one byte, the null tag) and the network form writes a {@code false} boolean — so a present
+     * value costs one extra boolean byte on the wire and nothing on disk.</p>
+     *
+     * <p>Declared here (rather than only inherited) because it overrides both
+     * {@link DataCodec#optional()} and {@link ByteStreamCodec#optional()} with the common
+     * {@link DataSyncCodec} return type. Equivalent to {@code CombinedCodec.optional(this)}.</p>
+     */
+    @Override
+    default DataSyncCodec<T> optional() {
+        return CombinedCodec.optional(this);
+    }
+
+    /**
+     * This codec made nullable with a default: a {@code null} value, or one that
+     * {@link Objects#equals(Object, Object) equals} {@code defaultValue}, is stored as absent on
+     * both paths — so a value at its default survives a round-trip but is never transmitted, the
+     * usual win when the default is also the common value — and decodes back to the default.
+     *
+     * <p>Equivalent to {@code CombinedCodec.optional(this, defaultValue)}.</p>
+     *
+     * @param defaultValue the value that is stored as absent; a {@code null} default degrades to
+     *                     plain {@link #optional()}
+     */
+    @Override
+    default DataSyncCodec<T> optional(T defaultValue) {
+        return CombinedCodec.optional(this, defaultValue);
+    }
+
+    /**
+     * This codec made nullable with a default produced by {@code defaultSupplier} — the supplier
+     * form of {@link #optional(Object)}, for a default that is not a constant (a fresh collection,
+     * a value read from config, …).
+     *
+     * <p>As on the two half-interfaces, a bare lambda or method reference is ambiguous between
+     * {@link #optional(Object)} and this overload ({@code codec.optional(ArrayList::new)} does not
+     * compile) because {@code T} is already fixed — pass a typed {@code Supplier<T>} variable or
+     * cast the lambda.</p>
+     *
+     * <p>The supplier is shared by both halves and consulted once per encode (for the equality
+     * check) and once per decode of an absent value on the path being used, so it should be
+     * side-effect free; a fresh mutable default is re-created on every decode.</p>
+     *
+     * <p>Equivalent to {@code CombinedCodec.optional(this, defaultSupplier)}.</p>
+     *
+     * @param defaultSupplier supplies the value that is stored as absent
+     */
+    @Override
+    default DataSyncCodec<T> optional(Supplier<? extends T> defaultSupplier) {
+        return CombinedCodec.optional(this, defaultSupplier);
+    }
+
+    /**
+     * {@link #optional()}, as a builder over an arbitrary codec. Both halves are built from
+     * {@link #toStreamCodec()}/{@link #toDataCodec()}, so a codec that keeps separate
+     * implementations per path reuses them here instead of being bridged again.
+     *
+     * @param codec codec for the present (non-{@code null}) value
+     * @param <T>   the value type
+     */
+    static <T> DataSyncCodec<T> optional(CombinedCodec<T> codec) {
+        return DataSyncCodec.of(
+                ByteStreamCodec.optional(codec.toStreamCodec()),
+                DataCodec.optional(codec.toDataCodec()));
+    }
+
+    /**
+     * {@link #optional(Object)}, as a builder over an arbitrary codec.
+     *
+     * @param codec        codec for the present value
+     * @param defaultValue the value that is stored as absent; a {@code null} default degrades to
+     *                     plain {@link #optional(CombinedCodec)}
+     * @param <T>          the value type
+     */
+    static <T> DataSyncCodec<T> optional(CombinedCodec<T> codec, T defaultValue) {
+        return DataSyncCodec.of(
+                ByteStreamCodec.optional(codec.toStreamCodec(), defaultValue),
+                DataCodec.optional(codec.toDataCodec(), defaultValue));
+    }
+
+    /**
+     * {@link #optional(Supplier)}, as a builder over an arbitrary codec.
+     *
+     * <p>As on the instance form, a bare lambda or method reference is ambiguous between this
+     * overload and {@link #optional(CombinedCodec, Object)} — {@code optional(codec, ArrayList::new)}
+     * does not compile — so pass a typed {@code Supplier<T>} variable or cast the lambda.</p>
+     *
+     * @param codec           codec for the present value
+     * @param defaultSupplier supplies the value that is stored as absent
+     * @param <T>             the value type
+     */
+    static <T> DataSyncCodec<T> optional(CombinedCodec<T> codec, Supplier<? extends T> defaultSupplier) {
+        return DataSyncCodec.of(
+                ByteStreamCodec.optional(codec.toStreamCodec(), defaultSupplier),
+                DataCodec.optional(codec.toDataCodec(), defaultSupplier));
+    }
+
+    // ===== Instance builder mirrors =====
+    // Same rule as on the two halves (see DataCodec), plus what a combined codec needs on top: the
+    // builders both halves declare are overridden here so the receiver keeps covering both paths
+    // and the result stays a DataSyncCodec, and the map builder gets an extra
+    // CombinedCodec-parameter overload — that argument type is the only one more specific than what
+    // DataCodec and ByteStreamCodec already offer.
+
+    /**
+     * Wraps this codec as a combined codec — the instance form of
+     * {@code CombinedCodec.of(DataCodec)} / {@code of(ByteStreamCodec)}. Both halves come from
+     * {@link #toStreamCodec()}/{@link #toDataCodec()}, so an implementation that already is a
+     * {@link DataSyncCodec} short-circuits this to itself, and one that only holds the two codecs
+     * gets them reused instead of bridged.
+     */
+    @Override
+    default DataSyncCodec<T> toDataSyncCodec() {
+        return DataSyncCodec.of(toStreamCodec(), toDataCodec());
+    }
+
+    /**
+     * Adapts this codec through a pair of converter functions on both paths — the combined form of
+     * the instance {@code convert} of the two halves, applied to {@link #toStreamCodec()} and
+     * {@link #toDataCodec()} so each path keeps its own codec instead of being bridged.
+     */
+    @Override
+    default <V> DataSyncCodec<V> convert(Function<? super V, ? extends T> encodeConverter, Function<? super T, ? extends V> decodeConverter) {
+        return DataSyncCodec.of(
+                ByteStreamCodec.convert(toStreamCodec(), encodeConverter, decodeConverter),
+                DataCodec.convert(toDataCodec(), encodeConverter, decodeConverter));
+    }
+
+    /**
+     * Map codec keyed by this codec on both paths, with {@code valueCodec} for the values — the
+     * instance form of {@link #map(IntFunction, CombinedCodec, CombinedCodec)}.
+     */
+    default <V, M extends Map<T, V>> DataSyncCodec<M> asKey(IntFunction<M> function, CombinedCodec<V> valueCodec) {
+        return CombinedCodec.map(function, this, valueCodec);
+    }
+
+    /**
+     * Map codec valued by this codec on both paths, with {@code keyCodec} for the keys — the
+     * instance form of {@link #map(IntFunction, CombinedCodec, CombinedCodec)}, with this codec on
+     * the value side.
+     */
+    default <K, M extends Map<K, T>> DataSyncCodec<M> asValue(IntFunction<M> function, CombinedCodec<K> keyCodec) {
+        return CombinedCodec.map(function, keyCodec, this);
+    }
+
+    /**
+     * Collection codec over this codec's elements on both paths — the instance form of
+     * {@link #collection(IntFunction, CombinedCodec)}.
+     */
+    @Override
+    default <C extends Collection<T>> DataSyncCodec<C> collection(IntFunction<C> function) {
+        return CombinedCodec.collection(function, this);
+    }
+
+    /**
+     * {@link List} codec (backed by {@link ArrayList}) over this codec's elements — the instance
+     * form of {@link #list(CombinedCodec)}.
+     */
+    default DataSyncCodec<List<T>> list() {
+        return CombinedCodec.list(this);
+    }
+
+    /**
+     * Reference-backed {@link Set} codec over this codec's elements — the instance form of
+     * {@link #set(CombinedCodec)}.
+     */
+    default DataSyncCodec<Set<T>> set() {
+        return CombinedCodec.set(this);
+    }
+
+    /**
+     * Object-array codec over this codec's elements on both paths — the instance form of
+     * {@link #array(Class, CombinedCodec)}.
+     */
+    @Override
+    default DataSyncCodec<T[]> array(Class<T> type) {
+        return CombinedCodec.array(type, this);
     }
 }

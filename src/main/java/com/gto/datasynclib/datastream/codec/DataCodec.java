@@ -1,14 +1,15 @@
 package com.gto.datasynclib.datastream.codec;
 
+import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.datastream.data.*;
 import com.mojang.datafixers.util.*;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.DynamicOps;
 import io.netty.buffer.Unpooled;
-import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Array;
 import java.math.BigInteger;
@@ -16,10 +17,12 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.IntFunction;
+import java.util.function.Supplier;
 
 /**
  * Combined encoder/decoder interface for {@link com.gto.datasynclib.datastream.data.Data}-based
@@ -27,13 +30,21 @@ import java.util.function.IntFunction;
  *
  * <p>Extends both {@link DataDecoder} and {@link DataEncoder} for bidirectional serialization.
  * Contains built-in codec constants for all Java primitives, arrays, String, UUID, and BigInteger.
- * Each constant registers itself in this interface's own {@code Codecs} table on class
- * initialization; that table is currently write-only ({@code DataCodec.getCodec} has no callers),
- * so runtime type lookup goes through {@link com.gto.datasynclib.DataSyncCodec#get(Class)}.</p>
+ * There is no per-interface registry: runtime type lookup goes through
+ * {@link com.gto.datasynclib.DataSyncCodec#get(Class)}, the single table for both paths, and
+ * {@link #get(Class)} hands back this path's own half of the result.</p>
  *
  * <p>Factory methods {@link #of} adapt from {@link ByteStreamCodec}, Mojang {@link com.mojang.serialization.Codec},
  * or custom encoder/decoder pairs. {@link #convert} adapts an existing codec with converter
  * functions, while {@link #map} / {@link #collection} / {@link #array} build container codecs.</p>
+ *
+ * <p>Every builder that takes a codec also has an instance form on the codec itself, with the
+ * receiver replacing that codec argument and the remaining parameters in the static order —
+ * {@code STRING_CODEC.optional()}, {@code STRING_CODEC.collection(ArrayList::new)},
+ * {@code STRING_CODEC.asKey(HashMap::new, INT_CODEC)}, {@code STRING_CODEC.toStreamCodec()}, … .
+ * {@link #optional} additionally treats a value equal to a default as absent: it is stored the same
+ * way as {@code null} ({@link NullData#INSTANCE} on this path) and decodes back to the default; the
+ * {@link Supplier} overload and its lambda caveat are documented on the method.</p>
  *
  * <h3>Performance: the helper paths box</h3>
  * <p>Every helper below is generic over the payload type, so its components are <em>boxed</em>:
@@ -276,6 +287,197 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
                 return (T[]) Array.newInstance(type, 0);
             }
         };
+    }
+
+    // ===== Optional adapters =====
+
+    /**
+     * This codec made nullable: {@code null} is stored as {@link NullData#INSTANCE} and decodes
+     * back to {@code null}, while any other value is stored as this codec's own payload.
+     *
+     * <p>No extra marker is needed on this path: the Data type system already tags every payload
+     * with a type id, so an absent value costs one byte (the null tag) and a present one costs
+     * exactly what this codec writes. The network path has no such tag, so
+     * {@link ByteStreamCodec#optional()} spends a boolean instead; a {@link CombinedCodec}
+     * overrides this method to wrap both paths at once.</p>
+     *
+     * <p>Equivalent to {@code DataCodec.optional(this)}.</p>
+     */
+    default DataCodec<T> optional() {
+        return DataCodec.optional(this);
+    }
+
+    /**
+     * This codec with a default: a {@code null} value, or one that
+     * {@link Objects#equals(Object, Object) equals} {@code defaultValue}, is stored as
+     * {@link NullData#INSTANCE} — the same absent form as {@link #optional()} — and decodes back to
+     * the default instead of {@code null}. Any other value is stored as this codec's payload.
+     *
+     * <p>Equivalent to {@code DataCodec.optional(this, defaultValue)}.</p>
+     *
+     * @param defaultValue the value that is stored as absent; a {@code null} default degrades to
+     *                     plain {@link #optional()}
+     */
+    default DataCodec<T> optional(T defaultValue) {
+        return DataCodec.optional(this, defaultValue);
+    }
+
+    /**
+     * This codec with a default produced by {@code defaultSupplier} — the supplier form of
+     * {@link #optional(Object)}, for a default that is not a constant (a fresh collection, a value
+     * read from config, …).
+     *
+     * <p>Because {@code T} is already fixed by this codec, a bare lambda or method reference is
+     * ambiguous between {@link #optional(Object)} and this overload
+     * ({@code codec.optional(ArrayList::new)} does not compile) — pass a typed
+     * {@code Supplier<T>} variable, or cast the lambda to {@code Supplier<T>}.</p>
+     *
+     * <p>The supplier is consulted once per encode (for the equality check) and once per decode of
+     * an absent payload, so it should be side-effect free and cheap; a fresh mutable default is
+     * re-created on every decode, which is what you want for collections.</p>
+     *
+     * <p>Equivalent to {@code DataCodec.optional(this, defaultSupplier)}.</p>
+     *
+     * @param defaultSupplier supplies the value that is stored as absent
+     */
+    default DataCodec<T> optional(Supplier<? extends T> defaultSupplier) {
+        return DataCodec.optional(this, defaultSupplier);
+    }
+
+    /**
+     * {@link #optional()}, as a builder over an arbitrary codec.
+     *
+     * @param codec codec for the present (non-{@code null}) value
+     * @param <T>   the value type
+     */
+    static <T> DataCodec<T> optional(DataCodec<T> codec) {
+        return new DataCodec<>() {
+
+            @Override
+            public @NotNull Data encode(T obj) {
+                return obj == null ? NullData.INSTANCE : codec.encode(obj);
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                return data.isNull() ? null : codec.decode(data, dataVersion);
+            }
+        };
+    }
+
+    /**
+     * {@link #optional(Object)}, as a builder over an arbitrary codec.
+     *
+     * @param codec        codec for the present value
+     * @param defaultValue the value that is stored as absent; a {@code null} default degrades to
+     *                     plain {@link #optional(DataCodec)}
+     * @param <T>          the value type
+     */
+    static <T> DataCodec<T> optional(DataCodec<T> codec, T defaultValue) {
+        return new DataCodec<>() {
+
+            @Override
+            public @NotNull Data encode(T obj) {
+                return obj == null || Objects.equals(obj, defaultValue) ? NullData.INSTANCE : codec.encode(obj);
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                return data.isNull() ? defaultValue : codec.decode(data, dataVersion);
+            }
+        };
+    }
+
+    /**
+     * {@link #optional(Supplier)}, as a builder over an arbitrary codec.
+     *
+     * <p>As on the instance form, a bare lambda or method reference is ambiguous between this
+     * overload and {@link #optional(DataCodec, Object)} — {@code optional(codec, ArrayList::new)}
+     * does not compile — so pass a typed {@code Supplier<T>} variable or cast the lambda.</p>
+     *
+     * @param codec           codec for the present value
+     * @param defaultSupplier supplies the value that is stored as absent
+     * @param <T>             the value type
+     */
+    static <T> DataCodec<T> optional(DataCodec<T> codec, Supplier<? extends T> defaultSupplier) {
+        return new DataCodec<>() {
+
+            @Override
+            public @NotNull Data encode(T obj) {
+                return obj == null || Objects.equals(obj, defaultSupplier.get()) ? NullData.INSTANCE : codec.encode(obj);
+            }
+
+            @Override
+            public T decode(@NotNull Data data, int dataVersion) {
+                return data.isNull() ? defaultSupplier.get() : codec.decode(data, dataVersion);
+            }
+        };
+    }
+
+    // ===== Instance builder mirrors =====
+    // Every static builder that takes a codec also exists as an instance method on the codec
+    // itself: the receiver replaces that codec argument and the remaining parameters keep the
+    // static order and meaning. A CombinedCodec overrides the ones both halves declare, so the
+    // same call works — with a DataSyncCodec result — on a codec that covers both paths.
+
+    /**
+     * Adapts this data codec to the network path — the instance form of
+     * {@link ByteStreamCodec#of(DataCodec)}: the {@link Data} payload is written inline
+     * ({@link Data#writeData(FriendlyByteBuf, Data)}), without the length-prefixed byte array that
+     * {@link com.gto.datasynclib.DataSyncCodec#of(DataCodec)} goes through.
+     */
+    default ByteStreamCodec<T> toStreamCodec() {
+        return ByteStreamCodec.of(this);
+    }
+
+    /**
+     * Pairs this data codec with the stream codec derived from it ({@link #toStreamCodec()}) into
+     * one combined codec — the instance form of {@link CombinedCodec#of(DataCodec)}.
+     */
+    default DataSyncCodec<T> toDataSyncCodec() {
+        return DataSyncCodec.of(this);
+    }
+
+    /**
+     * Adapts this codec through a pair of converter functions — the instance form of
+     * {@link #convert(DataCodec, Function, Function)}, with this codec's type as the stored type
+     * {@code K}.
+     */
+    default <V> DataCodec<V> convert(Function<? super V, ? extends T> encodeConverter, Function<? super T, ? extends V> decodeConverter) {
+        return convert(this, encodeConverter, decodeConverter);
+    }
+
+    /**
+     * Map codec keyed by this codec, with {@code valueCodec} for the values — the instance form of
+     * {@link #map(IntFunction, DataCodec, DataCodec)}. A non-list or empty payload decodes to an
+     * empty map.
+     */
+    default <V, M extends Map<T, V>> DataCodec<M> asKey(IntFunction<M> function, DataCodec<V> valueCodec) {
+        return map(function, this, valueCodec);
+    }
+
+    /**
+     * Map codec valued by this codec, with {@code keyCodec} for the keys — the instance form of
+     * {@link #map(IntFunction, DataCodec, DataCodec)}, with this codec on the value side.
+     */
+    default <K, M extends Map<K, T>> DataCodec<M> asValue(IntFunction<M> function, DataCodec<K> keyCodec) {
+        return map(function, keyCodec, this);
+    }
+
+    /**
+     * Collection codec over this codec's elements — the instance form of
+     * {@link #collection(IntFunction, DataCodec)}.
+     */
+    default <C extends Collection<T>> DataCodec<C> collection(IntFunction<C> function) {
+        return collection(function, this);
+    }
+
+    /**
+     * Object-array codec over this codec's elements — the instance form of
+     * {@link #array(Class, DataCodec)}. A primitive array has its own codec and does not need this.
+     */
+    default DataCodec<T[]> array(Class<T> type) {
+        return array(type, this);
     }
 
     /**
@@ -1064,14 +1266,23 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         };
     }
 
-    static <T> void registerCodec(Class<T> type, DataCodec<T> codec) {
-        synchronized (Codecs.CODECS) {
-            Codecs.CODECS.put(type, codec);
-        }
-    }
-
-    static <T> DataCodec<T> getCodec(Class<T> type) {
-        return (DataCodec<T>) Codecs.CODECS.get(type);
+    /**
+     * Resolves the persist-side codec of a type: the {@link DataCodec} half of what
+     * {@link com.gto.datasynclib.DataSyncCodec#get(Class)} holds, so a caller that only serializes to
+     * disk works with the bare half the combined codec was built from instead of the wrapper.
+     *
+     * <p>The lookup rules are the combined registry's own: an exact class match, enums and object
+     * arrays generated on demand, and a primitive resolved as its wrapper. A type without a codec —
+     * including a type whose codec only exists on a {@code @Codec} annotation — resolves to
+     * {@code null}.</p>
+     *
+     * @param type the class to resolve
+     * @return the persist-side codec, or {@code null} if the type has none
+     */
+    @Nullable
+    static <T> DataCodec<T> get(Class<T> type) {
+        var codec = DataSyncCodec.get(type);
+        return codec == null ? null : codec.toDataCodec();
     }
 
     DataCodec<Boolean> BOOLEAN_CODEC = new DataCodec<>() {
@@ -1084,11 +1295,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         @Override
         public Boolean decode(@NotNull Data data, int dataVersion) {
             return data.getBoolean();
-        }
-
-        static {
-            registerCodec(Boolean.class, BOOLEAN_CODEC);
-            registerCodec(boolean.class, BOOLEAN_CODEC);
         }
     };
 
@@ -1103,11 +1309,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         public Byte decode(@NotNull Data data, int dataVersion) {
             return data.getByte();
         }
-
-        static {
-            registerCodec(Byte.class, BYTE_CODEC);
-            registerCodec(byte.class, BYTE_CODEC);
-        }
     };
 
     DataCodec<Short> SHORT_CODEC = new DataCodec<>() {
@@ -1120,11 +1321,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         @Override
         public Short decode(@NotNull Data data, int dataVersion) {
             return data.getShort();
-        }
-
-        static {
-            registerCodec(Short.class, SHORT_CODEC);
-            registerCodec(short.class, SHORT_CODEC);
         }
     };
 
@@ -1139,11 +1335,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         public Character decode(@NotNull Data data, int dataVersion) {
             return data.getChar();
         }
-
-        static {
-            registerCodec(Character.class, CHAR_CODEC);
-            registerCodec(char.class, CHAR_CODEC);
-        }
     };
 
     DataCodec<Integer> INT_CODEC = new DataCodec<>() {
@@ -1156,11 +1347,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         @Override
         public Integer decode(@NotNull Data data, int dataVersion) {
             return data.getInt();
-        }
-
-        static {
-            registerCodec(Integer.class, INT_CODEC);
-            registerCodec(int.class, INT_CODEC);
         }
     };
 
@@ -1175,11 +1361,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         public Long decode(@NotNull Data data, int dataVersion) {
             return data.getLong();
         }
-
-        static {
-            registerCodec(Long.class, LONG_CODEC);
-            registerCodec(long.class, LONG_CODEC);
-        }
     };
 
     DataCodec<Float> FLOAT_CODEC = new DataCodec<>() {
@@ -1192,11 +1373,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         @Override
         public Float decode(@NotNull Data data, int dataVersion) {
             return data.getFloat();
-        }
-
-        static {
-            registerCodec(Float.class, FLOAT_CODEC);
-            registerCodec(float.class, FLOAT_CODEC);
         }
     };
 
@@ -1211,11 +1387,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         public Double decode(@NotNull Data data, int dataVersion) {
             return data.getDouble();
         }
-
-        static {
-            registerCodec(Double.class, DOUBLE_CODEC);
-            registerCodec(double.class, DOUBLE_CODEC);
-        }
     };
 
     DataCodec<String> STRING_CODEC = new DataCodec<>() {
@@ -1228,10 +1399,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         @Override
         public String decode(@NotNull Data data, int dataVersion) {
             return data.getString();
-        }
-
-        static {
-            registerCodec(String.class, STRING_CODEC);
         }
     };
 
@@ -1246,10 +1413,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         public BigInteger decode(@NotNull Data data, int dataVersion) {
             return data.getBigInteger();
         }
-
-        static {
-            registerCodec(BigInteger.class, BIG_INTEGER_CODEC);
-        }
     };
 
     DataCodec<boolean[]> BOOLEANS_CODEC = new DataCodec<>() {
@@ -1262,10 +1425,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         @Override
         public boolean[] decode(@NotNull Data data, int dataVersion) {
             return data.getBooleanArray();
-        }
-
-        static {
-            registerCodec(boolean[].class, BOOLEANS_CODEC);
         }
     };
 
@@ -1280,10 +1439,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         public byte[] decode(@NotNull Data data, int dataVersion) {
             return data.getByteArray();
         }
-
-        static {
-            registerCodec(byte[].class, BYTES_CODEC);
-        }
     };
 
     DataCodec<short[]> SHORTS_CODEC = new DataCodec<>() {
@@ -1296,10 +1451,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         @Override
         public short[] decode(@NotNull Data data, int dataVersion) {
             return data.getShortArray();
-        }
-
-        static {
-            registerCodec(short[].class, SHORTS_CODEC);
         }
     };
 
@@ -1314,10 +1465,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         public char[] decode(@NotNull Data data, int dataVersion) {
             return data.getCharArray();
         }
-
-        static {
-            registerCodec(char[].class, CHARS_CODEC);
-        }
     };
 
     DataCodec<int[]> INTS_CODEC = new DataCodec<>() {
@@ -1330,10 +1477,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         @Override
         public int[] decode(@NotNull Data data, int dataVersion) {
             return data.getIntArray();
-        }
-
-        static {
-            registerCodec(int[].class, INTS_CODEC);
         }
     };
 
@@ -1348,10 +1491,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         public long[] decode(@NotNull Data data, int dataVersion) {
             return data.getLongArray();
         }
-
-        static {
-            registerCodec(long[].class, LONGS_CODEC);
-        }
     };
 
     DataCodec<float[]> FLOATS_CODEC = new DataCodec<>() {
@@ -1364,10 +1503,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         @Override
         public float[] decode(@NotNull Data data, int dataVersion) {
             return data.getFloatArray();
-        }
-
-        static {
-            registerCodec(float[].class, FLOATS_CODEC);
         }
     };
 
@@ -1382,10 +1517,6 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         public double[] decode(@NotNull Data data, int dataVersion) {
             return data.getDoubleArray();
         }
-
-        static {
-            registerCodec(double[].class, DOUBLES_CODEC);
-        }
     };
 
     DataCodec<UUID> UUID_CODEC = new DataCodec<>() {
@@ -1399,14 +1530,5 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         public UUID decode(@NotNull Data data, int dataVersion) {
             return data.getUUID();
         }
-
-        static {
-            registerCodec(UUID.class, UUID_CODEC);
-        }
     };
-
-    final class Codecs {
-
-        private static final Reference2ReferenceOpenHashMap<Class<?>, DataCodec<?>> CODECS = new Reference2ReferenceOpenHashMap<>();
-    }
 }

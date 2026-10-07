@@ -2,6 +2,7 @@ package com.gto.datasynclib;
 
 import com.gto.datasynclib.datastream.data.StringMapData;
 import net.minecraft.network.FriendlyByteBuf;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Interface for objects whose annotated fields are managed by a {@link FieldDataManager}.
@@ -44,6 +45,39 @@ public interface IFieldDataHolder {
     FieldDataManager getFieldDataManager();
 
     /**
+     * The holder this one is nested in — {@code null} for a holder that is its own root.
+     *
+     * <p>This is what makes a holder addressable inside its owner: a remote call carries the field path
+     * from the root down to the calling holder, and that path is derived from this link
+     * ({@link FieldDataManager#remotePath()}). A nested holder knows its owner, so it answers it here —
+     * typically with the reference it was constructed with:</p>
+     *
+     * <pre>{@code
+     * final class EnergyHandler implements IFieldDataHolder {
+     *     private final MyBlockEntity owner;
+     *
+     *     EnergyHandler(MyBlockEntity owner) { this.owner = owner; }
+     *
+     *     @Override public IFieldDataHolder getParentHolder() { return owner; }
+     * }
+     *
+     * // in the owner: this.energy = new EnergyHandler(this);
+     * }</pre>
+     *
+     * <p>Nothing else is required of that field. It is an ordinary holder-typed field, so it takes part
+     * in the owner's holder-field numbering like any other — harmless, because the sender and the
+     * receiver number the same class the same way. Mark it {@code transient} only if you would rather
+     * keep the owner link out of that numbering (see
+     * {@link com.gto.datasynclib.remote.RemoteRouting}).</p>
+     *
+     * @return the owning holder, or {@code null} when this holder is a root
+     */
+    @Nullable
+    default IFieldDataHolder getParentHolder() {
+        return null;
+    }
+
+    /**
      * Resolves the actual owning object for a given field definition.
      *
      * <p>For simple holders, returns {@code this}. For holders with
@@ -70,6 +104,38 @@ public interface IFieldDataHolder {
     }
 
     /**
+     * Applies a received remote call to the object a packet resolved — the dispatch rule the remote
+     * packet layer uses, exposed so a packet of your own can share it.
+     *
+     * <p>The call is routed by the holder-field path the payload carries: the receiving side reads the
+     * addressed object's holder fields index by index (see
+     * {@link com.gto.datasynclib.remote.RemoteRouting}) until the path is exhausted, so a method declared
+     * on an {@code @AdditionalHolder} sub-object (or any field whose type implements
+     * {@link IFieldDataHolder}) is invoked on that nested object — which is what lets a call encoded by a
+     * nested holder's manager be received here. A holder target runs the call through
+     * {@link FieldDataManager#readRemoteCall(byte[])}, any other block entity or entity through
+     * {@link FieldDataManager#dispatchRemoteCall(Object, byte[])}; both share one buffer and one
+     * decode of the payload.</p>
+     *
+     * <p>Failures (a path this tree has no field for, an absent holder, a method index out of range, an
+     * exception thrown by the method) are propagated; a payload whose prefix cannot be read at all is
+     * ignored, and a packet handler usually wants to log what does come out instead — see
+     * {@link com.gto.datasynclib.remote.RemoteNetwork#handleReceived(Object, byte[])}.</p>
+     *
+     * @param target  the block entity or entity the packet addressed; {@code null} is ignored
+     * @param payload the call payload from
+     *                {@link FieldDataManager#writeRemoteCall(String, Object...)}; empty input is
+     *                ignored
+     */
+    static void handleRemoteCall(Object target, byte[] payload) {
+        if (target instanceof IFieldDataHolder holder) {
+            holder.getFieldDataManager().readRemoteCall(payload);
+        } else {
+            FieldDataManager.dispatchRemoteCall(target, payload);
+        }
+    }
+
+    /**
      * Schedules an update operation.
      * <p>
      * Called when field data has changed and notification is needed.
@@ -79,6 +145,8 @@ public interface IFieldDataHolder {
      * @param side the logical side (client or server), used to distinguish update direction
      */
     default void scheduleUpdate(LogicalSide side) {
+        var parent = getParentHolder();
+        if (parent != null) parent.scheduleUpdate(side);
     }
 
     /**

@@ -23,7 +23,9 @@ import net.minecraftforge.fluids.FluidStack;
  * Pre-registered {@link ByteStreamCodec} instances for Minecraft types: ResourceLocation,
  * BlockPos, ChunkPos, Vec3i, SectionPos, Vec2, Vec3, AABB, Tag, CompoundTag, ListTag, ItemStack,
  * FluidStack and Component, plus {@link #of(net.minecraft.core.Registry)} for registry entries
- * (encoded as a VarInt id). Each constant registers itself in the interface-level codec table.
+ * (encoded as a VarInt id). The matching persist-side halves live in
+ * {@link com.gto.datasynclib.util.DataCodecs}; both are registered in
+ * {@link com.gto.datasynclib.DataSyncCodec} rather than in a per-interface table.
  *
  * <p>These are hand-written on purpose: they read and write primitives straight on the buffer
  * instead of going through the boxed components of {@link com.gto.datasynclib.datastream.codec.CombinedCodec#composite}.
@@ -45,12 +47,6 @@ public class StreamCodecs {
         stream.writeLong(obj.toLong());
     }, stream -> new ChunkPos(stream.readLong()));
 
-    static {
-        ByteStreamCodec.registerCodec(ResourceLocation.class, RESOURCE_LOCATION_CODEC);
-        ByteStreamCodec.registerCodec(BlockPos.class, BLOCK_POS_CODEC);
-        ByteStreamCodec.registerCodec(ChunkPos.class, CHUNK_POS_CODEC);
-    }
-
     /**
      * Integer triple, three VarInts. {@link BlockPos} keeps its own packed-long codec, and an
      * exact registration always wins over this one.
@@ -68,10 +64,6 @@ public class StreamCodecs {
         public Vec3i decode(FriendlyByteBuf stream) {
             return new Vec3i(stream.readVarInt(), stream.readVarInt(), stream.readVarInt());
         }
-
-        static {
-            ByteStreamCodec.registerCodec(Vec3i.class, VEC3I_CODEC);
-        }
     };
 
     /**
@@ -87,10 +79,6 @@ public class StreamCodecs {
         @Override
         public SectionPos decode(FriendlyByteBuf stream) {
             return SectionPos.of(stream.readLong());
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(SectionPos.class, SECTION_POS_CODEC);
         }
     };
 
@@ -114,10 +102,6 @@ public class StreamCodecs {
             return new AABB(stream.readDouble(), stream.readDouble(), stream.readDouble(),
                     stream.readDouble(), stream.readDouble(), stream.readDouble());
         }
-
-        static {
-            ByteStreamCodec.registerCodec(AABB.class, AABB_CODEC);
-        }
     };
 
 
@@ -132,10 +116,6 @@ public class StreamCodecs {
         @Override
         public Vec2 decode(FriendlyByteBuf stream) {
             return new Vec2(stream.readFloat(), stream.readFloat());
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(Vec2.class, VEC2_CODEC);
         }
     };
 
@@ -152,10 +132,6 @@ public class StreamCodecs {
         public Vec3 decode(FriendlyByteBuf stream) {
             return new Vec3(stream.readDouble(), stream.readDouble(), stream.readDouble());
         }
-
-        static {
-            ByteStreamCodec.registerCodec(Vec3.class, VEC3_CODEC);
-        }
     };
 
 
@@ -171,10 +147,6 @@ public class StreamCodecs {
         public Tag decode(FriendlyByteBuf stream) {
             return NbtUtil.read(stream.readByte(), stream);
         }
-
-        static {
-            ByteStreamCodec.registerCodec(Tag.class, TAG_CODEC);
-        }
     };
 
     public static final ByteStreamCodec<CompoundTag> COMPOUND_TAG_CODEC = new ByteStreamCodec<>() {
@@ -187,10 +159,6 @@ public class StreamCodecs {
         @Override
         public CompoundTag decode(FriendlyByteBuf stream) {
             return (CompoundTag) NbtUtil.read(Tag.TAG_COMPOUND, stream);
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(CompoundTag.class, COMPOUND_TAG_CODEC);
         }
     };
 
@@ -205,10 +173,6 @@ public class StreamCodecs {
         public ListTag decode(FriendlyByteBuf stream) {
             return (ListTag) NbtUtil.read(Tag.TAG_LIST, stream);
         }
-
-        static {
-            ByteStreamCodec.registerCodec(ListTag.class, LIST_TAG_CODEC);
-        }
     };
 
     public static final ByteStreamCodec<ItemStack> ITEM_STACK_CODEC = new ByteStreamCodec<>() {
@@ -221,10 +185,6 @@ public class StreamCodecs {
         @Override
         public ItemStack decode(FriendlyByteBuf stream) {
             return stream.readItem();
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(ItemStack.class, ITEM_STACK_CODEC);
         }
     };
 
@@ -239,10 +199,6 @@ public class StreamCodecs {
         public FluidStack decode(FriendlyByteBuf stream) {
             return FluidStack.readFromPacket(stream);
         }
-
-        static {
-            ByteStreamCodec.registerCodec(FluidStack.class, FLUID_STACK_CODEC);
-        }
     };
 
     public static final ByteStreamCodec<Component> COMPONENT_CODEC = new ByteStreamCodec<>() {
@@ -255,10 +211,6 @@ public class StreamCodecs {
         @Override
         public Component decode(FriendlyByteBuf buf) {
             return buf.readComponent();
-        }
-
-        static {
-            ByteStreamCodec.registerCodec(Component.class, COMPONENT_CODEC);
         }
     };
 

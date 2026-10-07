@@ -103,10 +103,6 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
         public Data decode(FriendlyByteBuf stream) {
             return Data.readData(stream);
         }
-
-        static {
-            ByteStreamCodec.registerCodec(Data.class, BYTE_STREAM_CODEC);
-        }
     };
 
     DataCodec<Data> DATA_CODEC = new DataCodec<>() {
@@ -119,10 +115,6 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
         @Override
         public Data decode(@NotNull Data data, int dataVersion) {
             return data;
-        }
-
-        static {
-            DataCodec.registerCodec(Data.class, DATA_CODEC);
         }
     };
 

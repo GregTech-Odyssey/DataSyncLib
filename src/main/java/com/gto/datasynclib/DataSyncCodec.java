@@ -6,8 +6,6 @@ import com.gto.datasynclib.util.DataCodecs;
 import com.gto.datasynclib.util.EnumUtil;
 import com.gto.datasynclib.util.HashUtil;
 import com.gto.datasynclib.util.StreamCodecs;
-import com.gto.datasynclib.util.cache.ConcurrentHashMapCache;
-import com.gto.datasynclib.util.cache.MapCache;
 import com.mojang.serialization.Codec;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import net.minecraft.core.BlockPos;
@@ -70,8 +68,9 @@ import java.util.UUID;
  * Fluid, EntityType, BlockEntityType, MobEffect, Enchantment, SoundEvent, Attribute,
  * ParticleType, MenuType, RecipeType, ItemStack, FluidStack, ResourceLocation, Vec2, Vec3,
  * Vec3i, BlockPos, ChunkPos, SectionPos, GlobalPos, Tag, CompoundTag, ListTag, Component,
- * BlockState and AABB. They all register themselves while this class is initialized, so
- * {@link #init()} is a no-op kept for compatibility.</p>
+ * BlockState and AABB. They all register themselves while this class is initialized, except the
+ * primitive keys ({@code int.class} and friends), which {@link #init()} adds during mod
+ * construction.</p>
  *
  * <p>Types whose payload is a handful of primitives (Vec3i, SectionPos, AABB) use hand-written
  * codec pairs instead of {@link CombinedCodec#composite} to avoid boxing; see that method for
@@ -93,80 +92,99 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     private static final Reference2ReferenceOpenHashMap<Class<?>, DataSyncCodec<?>> CODECS = new Reference2ReferenceOpenHashMap<>();
     private static final Reference2ReferenceOpenHashMap<Class<?>, HashMap<Object, DataSyncCodec<?>>> GENERIC_CODECS = new Reference2ReferenceOpenHashMap<>();
 
-    private static final MapCache<Class<?>, DataSyncCodec<?>> ENUM_CACHE = new ConcurrentHashMapCache<>(t -> {
-        if (t.isEnum()) {
-            var constants = t.getEnumConstants();
-            var len = constants.length;
-            var isFixed = EnumUtil.isFixed((Class<? extends Enum<?>>) t);
-            return new DataSyncCodec<>((buf, obj) -> buf.writeVarInt(obj.ordinal()),
-                    buf -> (Enum<?>) constants[buf.readVarInt()],
-                    obj -> {
-                        if (isFixed) return IntData.valueOf(obj.ordinal());
-                        return StringData.valueOf(EnumUtil.getSerializedName(obj));
-                    },
-                    (data, dataVersion) -> {
-                        if (data instanceof IntData(int value)) {
-                            if (value < len) return (Enum<?>) constants[value];
-                            return null;
-                        }
-                        return EnumUtil.getSerializedEnum((Class) t, data.getString());
-                    });
+    /**
+     * Auto-generated codecs for enum types. A {@link ClassValue} keeps the entry on the class
+     * itself — no class-keyed map pinning mod classes, and a {@code get} without a map lookup.
+     */
+    private static final ClassValue<DataSyncCodec<?>> ENUM_CACHE = new ClassValue<>() {
+        @Override
+        protected DataSyncCodec<?> computeValue(Class<?> t) {
+            if (t.isEnum()) {
+                var constants = t.getEnumConstants();
+                var len = constants.length;
+                var isFixed = EnumUtil.isFixed((Class<? extends Enum<?>>) t);
+                return new DataSyncCodec<>((buf, obj) -> buf.writeVarInt(obj.ordinal()),
+                        buf -> (Enum<?>) constants[buf.readVarInt()],
+                        obj -> {
+                            if (isFixed) return IntData.valueOf(obj.ordinal());
+                            return StringData.valueOf(EnumUtil.getSerializedName(obj));
+                        },
+                        (data, dataVersion) -> {
+                            if (data instanceof IntData(int value)) {
+                                if (value < len) return (Enum<?>) constants[value];
+                                return null;
+                            }
+                            return EnumUtil.getSerializedEnum((Class) t, data.getString());
+                        });
+            }
+            throw new RuntimeException("No codec registered for type " + t);
         }
-        throw new RuntimeException("No codec registered for type " + t);
-    });
+    };
 
-    private static final MapCache<Class<?>, DataSyncCodec<?>> ARRAY_CACHE = new ConcurrentHashMapCache<>(t -> {
-        if (t.isArray() && !t.componentType().isPrimitive()) {
-            Class type = t.getComponentType();
-            DataSyncCodec<Object> codec = get(type);
-            return new DataSyncCodec<>(
-                    (buf, obj) -> {
-                        buf.writeVarInt(obj.length);
-                        var encoder = codec.streamWriter;
-                        for (var element : obj) {
-                            if (element == null) {
-                                buf.writeBoolean(false);
-                            } else {
-                                buf.writeBoolean(true);
-                                encoder.encode(buf, element);
+    /**
+     * Auto-generated codecs for object (non-primitive) arrays. A {@link ClassValue} for the same
+     * reason as {@link #ENUM_CACHE}.
+     */
+    private static final ClassValue<DataSyncCodec<?>> ARRAY_CACHE = new ClassValue<>() {
+        @Override
+        @SuppressWarnings("unchecked")
+        protected DataSyncCodec<?> computeValue(Class<?> t) {
+            if (t.isArray() && !t.componentType().isPrimitive()) {
+                Class<?> type = t.getComponentType();
+                // Fully qualified on purpose: inside an anonymous ClassValue an unqualified get(...)
+                // would bind to the inherited ClassValue.get (i.e. recurse into this very cache), and
+                // an explicit type witness would pick the varargs get(Class, Class...) overload and
+                // silently return null.
+                DataSyncCodec<Object> codec = (DataSyncCodec<Object>) DataSyncCodec.get(type);
+                return new DataSyncCodec<>(
+                        (buf, obj) -> {
+                            buf.writeVarInt(obj.length);
+                            var encoder = codec.streamWriter;
+                            for (var element : obj) {
+                                if (element == null) {
+                                    buf.writeBoolean(false);
+                                } else {
+                                    buf.writeBoolean(true);
+                                    encoder.encode(buf, element);
+                                }
                             }
-                        }
-                    },
-                    buf -> {
-                        var decoder = codec.streamReader;
-                        var length = buf.readVarInt();
-                        var array = (Object[]) Array.newInstance(type, length);
-                        for (int i = 0; i < length; i++) {
-                            if (buf.readBoolean()) array[i] = decoder.decode(buf);
-                        }
-                        return array;
-                    },
-                    obj -> {
-                        if (obj.length == 0) return NullData.INSTANCE;
-                        var encoder = codec.dataWriter;
-                        var list = new ListData();
-                        for (Object element : obj) {
-                            if (element != null) {
-                                list.add(encoder.encode(element));
-                            } else {
-                                list.addNull();
+                        },
+                        buf -> {
+                            var decoder = codec.streamReader;
+                            var length = buf.readVarInt();
+                            var array = (Object[]) Array.newInstance(type, length);
+                            for (int i = 0; i < length; i++) {
+                                if (buf.readBoolean()) array[i] = decoder.decode(buf);
                             }
-                        }
-                        return list;
-                    },
-                    (data, dataVersion) -> {
-                        var decoder = codec.dataReader;
-                        var list = data.getList();
-                        var size = list.size();
-                        var array = (Object[]) Array.newInstance(type, size);
-                        for (int i = 0; i < size; i++) {
-                            array[i] = decoder.decode(list.get(i), dataVersion);
-                        }
-                        return array;
-                    });
+                            return array;
+                        },
+                        obj -> {
+                            if (obj.length == 0) return NullData.INSTANCE;
+                            var encoder = codec.dataWriter;
+                            var list = new ListData();
+                            for (Object element : obj) {
+                                if (element != null) {
+                                    list.add(encoder.encode(element));
+                                } else {
+                                    list.addNull();
+                                }
+                            }
+                            return list;
+                        },
+                        (data, dataVersion) -> {
+                            var decoder = codec.dataReader;
+                            var list = data.getList();
+                            var size = list.size();
+                            var array = (Object[]) Array.newInstance(type, size);
+                            for (int i = 0; i < size; i++) {
+                                array[i] = decoder.decode(list.get(i), dataVersion);
+                            }
+                            return array;
+                        });
+            }
+            throw new RuntimeException("No codec registered for type " + t);
         }
-        throw new RuntimeException("No codec registered for type " + t);
-    });
+    };
 
     /**
      * Encoder for live network synchronization via {@link FriendlyByteBuf}.
@@ -204,6 +222,15 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     public ByteStreamCodec<T> toStreamCodec() {
         // streamWriter == streamReader means the same ByteStreamCodec was supplied; return it directly.
         return streamWriter == streamReader ? (ByteStreamCodec<T>) streamWriter : this;
+    }
+
+    /**
+     * Returns this codec: it is already combined, so the instance-mirror default (which would wrap
+     * the two halves into a fresh {@code DataSyncCodec}) has nothing to add.
+     */
+    @Override
+    public DataSyncCodec<T> toDataSyncCodec() {
+        return this;
     }
 
     // ===== ByteStreamCodec implementation =====
@@ -287,12 +314,20 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
         return of(ByteStreamCodec.of(dataCodec), dataCodec);
     }
 
+    public static <T extends Enum<T>> DataSyncCodec<T> ofEnum(Class<T> enumClass) {
+        return (DataSyncCodec<T>) ENUM_CACHE.get(enumClass);
+    }
+
+    public static <T> DataSyncCodec<T> ofArray(Class<T> componentClass) {
+        return (DataSyncCodec<T>) ARRAY_CACHE.get(componentClass);
+    }
+
     /**
      * Checks whether a codec can be resolved for the given type.
      *
-     * <p>This mirrors {@link #get(Class)}: primitives always return {@code false}, while enum
-     * and object-array types return {@code true} even without an explicit registration because
-     * their codec is generated on demand.</p>
+     * <p>This mirrors {@link #get(Class)}: a primitive resolves through the wrapper codec registered
+     * under its own key, and enum and object-array types return {@code true} even without an explicit
+     * registration because their codec is generated on demand.</p>
      *
      * @param type the class to check
      * @return {@code true} if {@link #get(Class)} would return a codec
@@ -318,8 +353,6 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
      *
      * <p>Lookup order:
      * <ol>
-     *   <li>Primitive types — always return {@code null} (primitives don't have codecs;
-     *       use the wrapper type instead)</li>
      *   <li>Enum types — auto-generated on first access via {@link #ENUM_CACHE}. Uses
      *       ordinal-based encoding on the wire and either ordinal-based or name-based
      *       encoding on disk (depending on whether the enum type is "fixed")</li>
@@ -330,9 +363,13 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
      *       also keeps the choice of codec for a subtype visible in one place).</li>
      * </ol>
      *
+     * <p>A primitive type is an ordinary key here, not a special case: {@link #init()} registers each
+     * one under its own class (the same codec instance as its wrapper), so {@code get(int.class)} is a
+     * plain map hit with no per-call conversion. {@code void} has no codec and returns {@code null}.</p>
+     *
      * @param type the class type
      * @return the registered or auto-generated codec, or {@code null} if this exact type is not
-     * registered (primitives always return null)
+     * registered
      * @throws IllegalArgumentException if {@code type} is {@code null} — normally an unresolved
      *                                  wildcard or type variable in a field declaration
      */
@@ -340,13 +377,13 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     public static <T> DataSyncCodec<T> get(Class<T> type) {
         if (type == null)
             throw new IllegalArgumentException("Cannot resolve a codec for a null type (unresolved wildcard or type variable?)");
-        if (type.isPrimitive()) return null;
         DataSyncCodec<?> codec;
         if (type.isEnum()) {
-            codec = ENUM_CACHE.getCache(type);
+            codec = ENUM_CACHE.get(type);
         } else if (type.isArray() && !type.componentType().isPrimitive()) {
-            codec = ARRAY_CACHE.getCacheNonAtomic(type);
+            codec = ARRAY_CACHE.get(type);
         } else {
+            // Covers primitives too: int.class is put next to Integer.class at registration time.
             codec = CODECS.get(type);
         }
         return (DataSyncCodec<T>) codec;
@@ -375,10 +412,11 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
      *
      * @param type the exact runtime type this codec handles
      */
-    public void register(Class<T> type) {
+    public DataSyncCodec<T> register(Class<T> type) {
         synchronized (CODECS) {
             CODECS.put(type, this);
         }
+        return this;
     }
 
     /**
@@ -580,11 +618,24 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     }
 
     /**
-     * Retained for compatibility and symmetry with {@code NbtUtil#init()}: every pre-registered
-     * codec now registers itself while this class is initialized (composed ones included, via
-     * {@link #registerComposed}), so this method has nothing left to do and is a no-op.
-     * {@code DataSyncLib} still calls it during mod construction.
+     * Registers the primitive aliases of the pre-registered wrapper codecs — {@code int.class} and
+     * {@link Integer} then resolve to the same codec, so {@link #get(Class)} needs no conversion and a
+     * primitive lookup is an ordinary map hit.
+     *
+     * <p>The constants themselves register in this class's initializer; the primitives are added here
+     * because a class constant cannot know it is the wrapper of a primitive. {@code DataSyncLib} calls
+     * this first thing in mod construction, before anything can scan a field or a remote method — a
+     * lookup that happens earlier (a static initializer of a downstream mod, say) still resolves the
+     * wrapper, just not the primitive key.</p>
      */
     public static void init() {
+        BOOLEAN_CODEC.register(boolean.class);
+        BYTE_CODEC.register(byte.class);
+        CHAR_CODEC.register(char.class);
+        SHORT_CODEC.register(short.class);
+        INT_CODEC.register(int.class);
+        LONG_CODEC.register(long.class);
+        FLOAT_CODEC.register(float.class);
+        DOUBLE_CODEC.register(double.class);
     }
 }

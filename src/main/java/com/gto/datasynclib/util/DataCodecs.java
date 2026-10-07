@@ -27,7 +27,8 @@ import org.jetbrains.annotations.NotNull;
  * Pre-registered {@link DataCodec} instances for Minecraft types: ResourceLocation, BlockPos,
  * ChunkPos, Vec3i, SectionPos, Vec2, Vec3, AABB, Tag, CompoundTag, ListTag, ItemStack, FluidStack
  * and Component, plus {@link #of(net.minecraft.core.Registry)} for registry entries (encoded by
- * key). Each constant registers itself in the interface-level codec table.
+ * key). The matching network halves live in {@link com.gto.datasynclib.util.StreamCodecs}; both are
+ * registered in {@link com.gto.datasynclib.DataSyncCodec} rather than in a per-interface table.
  *
  * <p>These are hand-written on purpose: they encode the scalar {@code Data} types directly instead
  * of going through the boxed components and {@code ListData} tuples produced by
@@ -38,10 +39,6 @@ import org.jetbrains.annotations.NotNull;
 public class DataCodecs {
 
     public final DataCodec<ResourceLocation> RESOURCE_LOCATION_CODEC = DataCodec.of(obj -> StringData.valueOf(obj.toString()), (data, dataVersion) -> ResourceLocation.parse(data.getString()));
-
-    static {
-        DataCodec.registerCodec(ResourceLocation.class, RESOURCE_LOCATION_CODEC);
-    }
 
     public static final DataCodec<BlockPos> BLOCK_POS_CODEC = new DataCodec<>() {
 
@@ -54,10 +51,6 @@ public class DataCodecs {
         @Override
         public @NotNull Data encode(BlockPos obj) {
             return new IntArrayData(obj.getX(), obj.getY(), obj.getZ());
-        }
-
-        static {
-            DataCodec.registerCodec(BlockPos.class, BLOCK_POS_CODEC);
         }
     };
 
@@ -73,10 +66,6 @@ public class DataCodecs {
             var array = data.getFloatArray();
             return new Vec2(array[0], array[1]);
         }
-
-        static {
-            DataCodec.registerCodec(Vec2.class, VEC2_CODEC);
-        }
     };
 
     public static final DataCodec<Vec3> VEC3_CODEC = new DataCodec<>() {
@@ -91,10 +80,6 @@ public class DataCodecs {
             var array = data.getDoubleArray();
             return new Vec3(array[0], array[1], array[2]);
         }
-
-        static {
-            DataCodec.registerCodec(Vec3.class, VEC3_CODEC);
-        }
     };
 
 
@@ -108,10 +93,6 @@ public class DataCodecs {
         @Override
         public @NotNull Data encode(ChunkPos obj) {
             return LongData.valueOf(obj.toLong());
-        }
-
-        static {
-            DataCodec.registerCodec(ChunkPos.class, CHUNK_POS_CODEC);
         }
     };
 
@@ -130,10 +111,6 @@ public class DataCodecs {
         public @NotNull Data encode(Vec3i obj) {
             return new IntArrayData(obj.getX(), obj.getY(), obj.getZ());
         }
-
-        static {
-            DataCodec.registerCodec(Vec3i.class, VEC3I_CODEC);
-        }
     };
 
     /**
@@ -149,10 +126,6 @@ public class DataCodecs {
         @Override
         public @NotNull Data encode(SectionPos obj) {
             return LongData.valueOf(obj.asLong());
-        }
-
-        static {
-            DataCodec.registerCodec(SectionPos.class, SECTION_POS_CODEC);
         }
     };
 
@@ -171,10 +144,6 @@ public class DataCodecs {
         public @NotNull Data encode(AABB obj) {
             return Data.valueOf(new double[]{obj.minX, obj.minY, obj.minZ, obj.maxX, obj.maxY, obj.maxZ});
         }
-
-        static {
-            DataCodec.registerCodec(AABB.class, AABB_CODEC);
-        }
     };
 
     public static final DataCodec<ListTag> LIST_TAG_CODEC = new DataCodec<>() {
@@ -191,10 +160,6 @@ public class DataCodecs {
         @Override
         public @NotNull Data encode(ListTag listTag) {
             return NbtUtil.LIST_TAG_TYPE.create(listTag);
-        }
-
-        static {
-            DataCodec.registerCodec(ListTag.class, LIST_TAG_CODEC);
         }
     };
 
@@ -213,10 +178,6 @@ public class DataCodecs {
         public @NotNull Data encode(CompoundTag compoundTag) {
             return NbtUtil.COMPOUND_TAG_TYPE.create(compoundTag);
         }
-
-        static {
-            DataCodec.registerCodec(CompoundTag.class, COMPOUND_TAG_CODEC);
-        }
     };
 
     public static final DataCodec<Tag> TAG_CODEC = new DataCodec<>() {
@@ -234,10 +195,6 @@ public class DataCodecs {
         public @NotNull Data encode(Tag obj) {
             return NbtUtil.TAG_TYPE.create(obj);
         }
-
-        static {
-            DataCodec.registerCodec(Tag.class, TAG_CODEC);
-        }
     };
 
     public static final DataCodec<ItemStack> ITEM_STACK_CODEC = new DataCodec<>() {
@@ -250,10 +207,6 @@ public class DataCodecs {
         @Override
         public @NotNull Data encode(ItemStack obj) {
             return COMPOUND_TAG_CODEC.encode(obj.save(new CompoundTag()));
-        }
-
-        static {
-            DataCodec.registerCodec(ItemStack.class, ITEM_STACK_CODEC);
         }
     };
 
@@ -268,10 +221,6 @@ public class DataCodecs {
         public @NotNull Data encode(FluidStack obj) {
             return COMPOUND_TAG_CODEC.encode(obj.writeToNBT(new CompoundTag()));
         }
-
-        static {
-            DataCodec.registerCodec(FluidStack.class, FLUID_STACK_CODEC);
-        }
     };
 
     public static final DataCodec<Component> COMPONENT_CODEC = new DataCodec<>() {
@@ -284,10 +233,6 @@ public class DataCodecs {
         @Override
         public @NotNull Data encode(Component obj) {
             return StringData.valueOf(Component.Serializer.toJson(obj));
-        }
-
-        static {
-            DataCodec.registerCodec(Component.class, COMPONENT_CODEC);
         }
     };
 

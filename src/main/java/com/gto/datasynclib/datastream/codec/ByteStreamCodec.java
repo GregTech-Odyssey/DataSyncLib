@@ -1,34 +1,44 @@
 package com.gto.datasynclib.datastream.codec;
 
+import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.DataOps;
 import com.mojang.datafixers.util.*;
 import com.mojang.serialization.Codec;
-import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import net.minecraft.network.FriendlyByteBuf;
+import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Array;
 import java.math.BigInteger;
 import java.util.Collection;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.IntFunction;
+import java.util.function.Supplier;
 
 /**
  * Combined encoder/decoder interface for {@link FriendlyByteBuf}-based network transmission.
  *
  * <p>Extends both {@link ByteStreamDecoder} and {@link ByteStreamEncoder} for bidirectional
  * serialization. Contains built-in codec constants for all Java primitives, arrays, String,
- * UUID, and BigInteger. Each constant registers itself in this interface's own {@code Codecs}
- * table on class initialization; that table is currently write-only
- * ({@code ByteStreamCodec.getCodec} has no callers), so runtime type lookup goes through
- * {@link com.gto.datasynclib.DataSyncCodec#get(Class)}.
+ * UUID, and BigInteger. There is no per-interface registry: runtime type lookup goes through
+ * {@link com.gto.datasynclib.DataSyncCodec#get(Class)}, the single table for both paths, and
+ * {@link #get(Class)} hands back this path's own half of the result.</p>
  *
  * <p>Factory methods {@link #of} adapt from {@link DataCodec} or Mojang {@link com.mojang.serialization.Codec}.
  * {@link #convert} adapts an existing codec with converter functions, while
  * {@link #map} / {@link #collection} / {@link #array} build container codecs.</p>
+ *
+ * <p>Every builder that takes a codec also has an instance form on the codec itself, with the
+ * receiver replacing that codec argument and the remaining parameters in the static order —
+ * {@code STRING_CODEC.optional()}, {@code STRING_CODEC.collection(ArrayList::new)},
+ * {@code STRING_CODEC.asKey(HashMap::new, INT_CODEC)}, {@code STRING_CODEC.toDataCodec()}, … .
+ * {@link #optional} additionally treats a value equal to a default as absent: it writes the same
+ * {@code false} marker as {@code null} and decodes back to the default; the {@link Supplier}
+ * overload and its lambda caveat are documented on the method.</p>
  *
  * <h3>Performance: the helper paths box</h3>
  * <p>{@link #convert}, {@link #map}, {@link #collection} and {@link #array} are generic over the
@@ -211,6 +221,214 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         };
     }
 
+
+    // ===== Optional adapters =====
+
+    /**
+     * This codec made nullable: {@code null} is written as a {@code false} boolean and decodes back
+     * to {@code null}, while any other value is preceded by a {@code true} boolean and then written
+     * by this codec.
+     *
+     * <p>The boolean is the stream's substitute for the type tag the data path gets for free, so an
+     * absent value costs one byte and a present one costs one extra byte; a {@link CombinedCodec}
+     * overrides this method to wrap both paths at once.</p>
+     *
+     * <p>Equivalent to {@code ByteStreamCodec.optional(this)}.</p>
+     */
+    default ByteStreamCodec<T> optional() {
+        return ByteStreamCodec.optional(this);
+    }
+
+    /**
+     * This codec with a default: a {@code null} value, or one that
+     * {@link Objects#equals(Object, Object) equals} {@code defaultValue}, writes the same
+     * {@code false} marker as the absent form of {@link #optional()} and decodes back to the
+     * default instead of {@code null}. Any other value writes {@code true} followed by this codec's
+     * payload.
+     *
+     * <p>Equivalent to {@code ByteStreamCodec.optional(this, defaultValue)}.</p>
+     *
+     * @param defaultValue the value that is written as absent; a {@code null} default degrades to
+     *                     plain {@link #optional()}
+     */
+    default ByteStreamCodec<T> optional(T defaultValue) {
+        return ByteStreamCodec.optional(this, defaultValue);
+    }
+
+    /**
+     * This codec with a default produced by {@code defaultSupplier} — the supplier form of
+     * {@link #optional(Object)}, for a default that is not a constant (a fresh collection, a value
+     * read from config, …).
+     *
+     * <p>Because {@code T} is already fixed by this codec, a bare lambda or method reference is
+     * ambiguous between {@link #optional(Object)} and this overload
+     * ({@code codec.optional(ArrayList::new)} does not compile) — pass a typed
+     * {@code Supplier<T>} variable, or cast the lambda to {@code Supplier<T>}.</p>
+     *
+     * <p>The supplier is consulted once per encode (for the equality check) and once per decode of
+     * an absent value, so it should be side-effect free and cheap; a fresh mutable default is
+     * re-created on every decode, which is what you want for collections.</p>
+     *
+     * <p>Equivalent to {@code ByteStreamCodec.optional(this, defaultSupplier)}.</p>
+     *
+     * @param defaultSupplier supplies the value that is written as absent
+     */
+    default ByteStreamCodec<T> optional(Supplier<? extends T> defaultSupplier) {
+        return ByteStreamCodec.optional(this, defaultSupplier);
+    }
+
+    /**
+     * {@link #optional()}, as a builder over an arbitrary codec.
+     *
+     * @param codec codec for the present (non-{@code null}) value
+     * @param <T>   the value type
+     */
+    static <T> ByteStreamCodec<T> optional(ByteStreamCodec<T> codec) {
+        return new ByteStreamCodec<>() {
+
+            @Override
+            public void encode(FriendlyByteBuf buf, T obj) {
+                if (obj == null) {
+                    buf.writeBoolean(false);
+                } else {
+                    buf.writeBoolean(true);
+                    codec.encode(buf, obj);
+                }
+            }
+
+            @Override
+            public T decode(FriendlyByteBuf buf) {
+                return buf.readBoolean() ? codec.decode(buf) : null;
+            }
+        };
+    }
+
+    /**
+     * {@link #optional(Object)}, as a builder over an arbitrary codec.
+     *
+     * @param codec        codec for the present value
+     * @param defaultValue the value that is written as absent; a {@code null} default degrades to
+     *                     plain {@link #optional(ByteStreamCodec)}
+     * @param <T>          the value type
+     */
+    static <T> ByteStreamCodec<T> optional(ByteStreamCodec<T> codec, T defaultValue) {
+        return new ByteStreamCodec<>() {
+
+            @Override
+            public void encode(FriendlyByteBuf buf, T obj) {
+                if (obj == null || Objects.equals(obj, defaultValue)) {
+                    buf.writeBoolean(false);
+                } else {
+                    buf.writeBoolean(true);
+                    codec.encode(buf, obj);
+                }
+            }
+
+            @Override
+            public T decode(FriendlyByteBuf buf) {
+                return buf.readBoolean() ? codec.decode(buf) : defaultValue;
+            }
+        };
+    }
+
+    /**
+     * {@link #optional(Supplier)}, as a builder over an arbitrary codec.
+     *
+     * <p>As on the instance form, a bare lambda or method reference is ambiguous between this
+     * overload and {@link #optional(ByteStreamCodec, Object)} — {@code optional(codec, ArrayList::new)}
+     * does not compile — so pass a typed {@code Supplier<T>} variable or cast the lambda.</p>
+     *
+     * @param codec           codec for the present value
+     * @param defaultSupplier supplies the value that is written as absent
+     * @param <T>             the value type
+     */
+    static <T> ByteStreamCodec<T> optional(ByteStreamCodec<T> codec, Supplier<? extends T> defaultSupplier) {
+        return new ByteStreamCodec<>() {
+
+            @Override
+            public void encode(FriendlyByteBuf buf, T obj) {
+                if (obj == null || Objects.equals(obj, defaultSupplier.get())) {
+                    buf.writeBoolean(false);
+                } else {
+                    buf.writeBoolean(true);
+                    codec.encode(buf, obj);
+                }
+            }
+
+            @Override
+            public T decode(FriendlyByteBuf buf) {
+                return buf.readBoolean() ? codec.decode(buf) : defaultSupplier.get();
+            }
+        };
+    }
+
+    // ===== Instance builder mirrors =====
+    // Every static builder that takes a codec also exists as an instance method on the codec
+    // itself: the receiver replaces that codec argument and the remaining parameters keep the
+    // static order and meaning. A CombinedCodec overrides the ones both halves declare, so the
+    // same call works — with a DataSyncCodec result — on a codec that covers both paths.
+
+    /**
+     * Adapts this stream codec to the persistence path — the instance form of
+     * {@link DataCodec#of(ByteStreamCodec)}: the stream bytes are carried inside a
+     * {@link com.gto.datasynclib.datastream.data.ByteArrayData}, so the disk form mirrors the wire
+     * form at the cost of an extra buffer round-trip.
+     */
+    default DataCodec<T> toDataCodec() {
+        return DataCodec.of(this);
+    }
+
+    /**
+     * Pairs this stream codec with the data codec derived from it ({@link #toDataCodec()}) into one
+     * combined codec — the instance form of {@link CombinedCodec#of(ByteStreamCodec)}.
+     */
+    default DataSyncCodec<T> toDataSyncCodec() {
+        return DataSyncCodec.of(this);
+    }
+
+    /**
+     * Adapts this codec through a pair of converter functions — the instance form of
+     * {@link #convert(ByteStreamCodec, Function, Function)}, with this codec's type as the
+     * transported type {@code K}.
+     */
+    default <V> ByteStreamCodec<V> convert(Function<? super V, ? extends T> encodeConverter, Function<? super T, ? extends V> decodeConverter) {
+        return convert(this, encodeConverter, decodeConverter);
+    }
+
+    /**
+     * Map codec keyed by this codec, with {@code valueCodec} for the values — the instance form of
+     * {@link #map(IntFunction, ByteStreamCodec, ByteStreamCodec)}: a VarInt size followed by the
+     * key/value pairs.
+     */
+    default <V, M extends Map<T, V>> ByteStreamCodec<M> asKey(IntFunction<M> function, ByteStreamCodec<V> valueCodec) {
+        return map(function, this, valueCodec);
+    }
+
+    /**
+     * Map codec valued by this codec, with {@code keyCodec} for the keys — the instance form of
+     * {@link #map(IntFunction, ByteStreamCodec, ByteStreamCodec)}, with this codec on the value
+     * side.
+     */
+    default <K, M extends Map<K, T>> ByteStreamCodec<M> asValue(IntFunction<M> function, ByteStreamCodec<K> keyCodec) {
+        return map(function, keyCodec, this);
+    }
+
+    /**
+     * Collection codec over this codec's elements — the instance form of
+     * {@link #collection(IntFunction, ByteStreamCodec)}.
+     */
+    default <C extends Collection<T>> ByteStreamCodec<C> collection(IntFunction<C> function) {
+        return collection(function, this);
+    }
+
+    /**
+     * Object-array codec over this codec's elements — the instance form of
+     * {@link #array(Class, ByteStreamCodec)}. A primitive array has its own codec and does not need
+     * this.
+     */
+    default ByteStreamCodec<T[]> array(Class<T> type) {
+        return array(type, this);
+    }
 
     /**
      * Creates a codec that writes nothing on encode (no-op) and always returns
@@ -1116,14 +1334,23 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         };
     }
 
-    static <T> void registerCodec(Class<T> type, ByteStreamCodec<T> codec) {
-        synchronized (Codecs.CODECS) {
-            Codecs.CODECS.put(type, codec);
-        }
-    }
-
-    static <T> ByteStreamCodec<T> getCodec(Class<T> type) {
-        return (ByteStreamCodec<T>) Codecs.CODECS.get(type);
+    /**
+     * Resolves the network-side codec of a type: the {@link ByteStreamCodec} half of what
+     * {@link com.gto.datasynclib.DataSyncCodec#get(Class)} holds, so a caller that only serializes to
+     * the wire works with the bare half the combined codec was built from instead of the wrapper.
+     *
+     * <p>The lookup rules are the combined registry's own: an exact class match, enums and object
+     * arrays generated on demand, and a primitive resolved as its wrapper. A type without a codec —
+     * including a type whose codec only exists on a {@code @Codec} annotation — resolves to
+     * {@code null}.</p>
+     *
+     * @param type the class to resolve
+     * @return the network-side codec, or {@code null} if the type has none
+     */
+    @Nullable
+    static <T> ByteStreamCodec<T> get(Class<T> type) {
+        var codec = DataSyncCodec.get(type);
+        return codec == null ? null : codec.toStreamCodec();
     }
 
     ByteStreamCodec<Boolean> BOOLEAN_CODEC = new ByteStreamCodec<>() {
@@ -1136,11 +1363,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         @Override
         public Boolean decode(FriendlyByteBuf buf) {
             return buf.readBoolean();
-        }
-
-        static {
-            registerCodec(Boolean.class, BOOLEAN_CODEC);
-            registerCodec(boolean.class, BOOLEAN_CODEC);
         }
     };
 
@@ -1155,11 +1377,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         public Byte decode(FriendlyByteBuf buf) {
             return buf.readByte();
         }
-
-        static {
-            registerCodec(Byte.class, BYTE_CODEC);
-            registerCodec(byte.class, BYTE_CODEC);
-        }
     };
 
     ByteStreamCodec<Short> SHORT_CODEC = new ByteStreamCodec<>() {
@@ -1172,11 +1389,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         @Override
         public Short decode(FriendlyByteBuf buf) {
             return buf.readShort();
-        }
-
-        static {
-            registerCodec(Short.class, SHORT_CODEC);
-            registerCodec(short.class, SHORT_CODEC);
         }
     };
 
@@ -1191,11 +1403,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         public Character decode(FriendlyByteBuf buf) {
             return buf.readChar();
         }
-
-        static {
-            registerCodec(Character.class, CHAR_CODEC);
-            registerCodec(char.class, CHAR_CODEC);
-        }
     };
 
     ByteStreamCodec<Integer> INT_CODEC = new ByteStreamCodec<>() {
@@ -1208,11 +1415,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         @Override
         public Integer decode(FriendlyByteBuf buf) {
             return buf.readVarInt();
-        }
-
-        static {
-            registerCodec(Integer.class, INT_CODEC);
-            registerCodec(int.class, INT_CODEC);
         }
     };
 
@@ -1227,11 +1429,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         public Long decode(FriendlyByteBuf buf) {
             return buf.readLong();
         }
-
-        static {
-            registerCodec(Long.class, LONG_CODEC);
-            registerCodec(long.class, LONG_CODEC);
-        }
     };
 
     ByteStreamCodec<Float> FLOAT_CODEC = new ByteStreamCodec<>() {
@@ -1244,11 +1441,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         @Override
         public Float decode(FriendlyByteBuf buf) {
             return buf.readFloat();
-        }
-
-        static {
-            registerCodec(Float.class, FLOAT_CODEC);
-            registerCodec(float.class, FLOAT_CODEC);
         }
     };
 
@@ -1263,11 +1455,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         public Double decode(FriendlyByteBuf buf) {
             return buf.readDouble();
         }
-
-        static {
-            registerCodec(Double.class, DOUBLE_CODEC);
-            registerCodec(double.class, DOUBLE_CODEC);
-        }
     };
 
     ByteStreamCodec<String> STRING_CODEC = new ByteStreamCodec<>() {
@@ -1281,10 +1468,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         public String decode(FriendlyByteBuf buf) {
             return buf.readUtf();
         }
-
-        static {
-            registerCodec(String.class, STRING_CODEC);
-        }
     };
 
     ByteStreamCodec<BigInteger> BIG_INTEGER_CODEC = new ByteStreamCodec<>() {
@@ -1297,10 +1480,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         @Override
         public BigInteger decode(FriendlyByteBuf buf) {
             return new BigInteger(buf.readByteArray());
-        }
-
-        static {
-            registerCodec(BigInteger.class, BIG_INTEGER_CODEC);
         }
     };
 
@@ -1323,10 +1502,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
             }
             return booleans;
         }
-
-        static {
-            registerCodec(boolean[].class, BOOLEANS_CODEC);
-        }
     };
 
     ByteStreamCodec<byte[]> BYTES_CODEC = new ByteStreamCodec<>() {
@@ -1339,10 +1514,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         @Override
         public byte[] decode(FriendlyByteBuf buf) {
             return buf.readByteArray();
-        }
-
-        static {
-            registerCodec(byte[].class, BYTES_CODEC);
         }
     };
 
@@ -1365,10 +1536,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
             }
             return ints;
         }
-
-        static {
-            registerCodec(int[].class, INTS_CODEC);
-        }
     };
 
     ByteStreamCodec<long[]> LONGS_CODEC = new ByteStreamCodec<>() {
@@ -1381,10 +1548,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         @Override
         public long[] decode(FriendlyByteBuf buf) {
             return buf.readLongArray();
-        }
-
-        static {
-            registerCodec(long[].class, LONGS_CODEC);
         }
     };
 
@@ -1407,10 +1570,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
             }
             return shorts;
         }
-
-        static {
-            registerCodec(short[].class, SHORTS_CODEC);
-        }
     };
 
     ByteStreamCodec<char[]> CHARS_CODEC = new ByteStreamCodec<>() {
@@ -1431,10 +1590,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
                 chars[i] = buf.readChar();
             }
             return chars;
-        }
-
-        static {
-            registerCodec(char[].class, CHARS_CODEC);
         }
     };
 
@@ -1457,10 +1612,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
             }
             return floats;
         }
-
-        static {
-            registerCodec(float[].class, FLOATS_CODEC);
-        }
     };
 
     ByteStreamCodec<double[]> DOUBLES_CODEC = new ByteStreamCodec<>() {
@@ -1482,10 +1633,6 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
             }
             return doubles;
         }
-
-        static {
-            registerCodec(double[].class, DOUBLES_CODEC);
-        }
     };
 
     ByteStreamCodec<UUID> UUID_CODEC = new ByteStreamCodec<>() {
@@ -1499,14 +1646,5 @@ public interface ByteStreamCodec<T> extends ByteStreamDecoder<T>, ByteStreamEnco
         public UUID decode(FriendlyByteBuf buf) {
             return buf.readUUID();
         }
-
-        static {
-            registerCodec(UUID.class, UUID_CODEC);
-        }
     };
-
-    final class Codecs {
-
-        private static final Reference2ReferenceOpenHashMap<Class<?>, ByteStreamCodec<?>> CODECS = new Reference2ReferenceOpenHashMap<>();
-    }
 }

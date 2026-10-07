@@ -44,12 +44,18 @@ public final class FluidStackArrayHashStrategy {
     private FluidStackArrayHashStrategy() {
     }
 
-    /** Fluid, amount and NBT of every element must match. Registered for {@code FluidStack[]} by default. */
+    /**
+     * Fluid, amount and NBT of every element must match. Registered for {@code FluidStack[]} by default.
+     */
     public static final Hash.Strategy<FluidStack[]> ALL = HashUtil.arrayStrategy(FluidStackHashStrategy.ALL);
 
-    /** Fluid and NBT of every element must match; amounts are ignored. */
+    /**
+     * Fluid and NBT of every element must match; amounts are ignored.
+     */
     public static final Hash.Strategy<FluidStack[]> FLUID_AND_TAG = HashUtil.arrayStrategy(FluidStackHashStrategy.FLUID_AND_TAG);
 
-    /** Only the fluid type of every element must match; amounts and NBT are ignored. */
+    /**
+     * Only the fluid type of every element must match; amounts and NBT are ignored.
+     */
     public static final Hash.Strategy<FluidStack[]> FLUID = HashUtil.arrayStrategy(FluidStackHashStrategy.FLUID);
 }

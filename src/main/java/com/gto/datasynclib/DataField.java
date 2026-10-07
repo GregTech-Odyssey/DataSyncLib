@@ -75,11 +75,11 @@ public interface DataField<T> {
      * Detects whether the field's value has changed by comparing the current value
      * against a previously-stored snapshot.
      *
-     * @param side     the logical side initiating the detection
-     * @param source   the owning object
+     * @param side           the logical side initiating the detection
+     * @param source         the owning object
      * @param autoDetectOnly {@code true} to only detect changes on fields whose
-     *                 {@code autoDetect} annotation is enabled; {@code false} to
-     *                 force detection on all fields regardless of annotation
+     *                       {@code autoDetect} annotation is enabled; {@code false} to
+     *                       force detection on all fields regardless of annotation
      * @return {@code true} if the value has changed and the field should be synced
      */
     boolean detectChange(@NotNull LogicalSide side, @NotNull Object source, boolean autoDetectOnly);

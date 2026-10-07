@@ -8,6 +8,7 @@ import com.gto.datasynclib.field.object.ObjCodecField;
 import com.gto.datasynclib.forge.TagSerializableAccess;
 import com.gto.datasynclib.forge.TagSerializableArrayAccess;
 import com.gto.datasynclib.network.DataSyncNetwork;
+import com.gto.datasynclib.remote.RemoteNetwork;
 import com.gto.datasynclib.test.ModBlockEntities;
 import com.gto.datasynclib.test.ModBlocks;
 import com.gto.datasynclib.test.ModEntityTypes;
@@ -52,6 +53,9 @@ import static com.gto.datasynclib.FieldDefinitionStorage.*;
  *       {@link DataSyncCodec#init()} is a no-op kept for compatibility</li>
  *   <li><strong>Network channel</strong> — {@link DataSyncNetwork#init()} registers
  *       the Forge SimpleChannel and message handlers</li>
+ *   <li><strong>Remote call channel</strong> — {@link RemoteNetwork#init()} registers the
+ *       independent {@code datasynclib:remote} channel with its two default packets
+ *       (block entity / entity targets) for the {@code com.gto.datasynclib.remote} module</li>
  *   <li><strong>Field factories</strong> — registers {@link DataField} factories for
  *       primitive types (exact match) and codec-backed object types (predicate match)</li>
  *   <li><strong>Access factories</strong> — registers factories for container types
@@ -90,6 +94,7 @@ import static com.gto.datasynclib.FieldDefinitionStorage.*;
  * @see FieldDefinitionStorage
  * @see DataSyncCodec
  * @see DataSyncNetwork
+ * @see com.gto.datasynclib.remote.RemoteInvoker
  */
 @Mod(DataSyncLib.MOD_ID)
 public final class DataSyncLib {
@@ -102,6 +107,7 @@ public final class DataSyncLib {
     public DataSyncLib(FMLJavaModLoadingContext context) {
         DataSyncCodec.init();
         DataSyncNetwork.init();
+        RemoteNetwork.init();
         // Built-in registration below: all of it must happen here, in mod construction, because
         // FieldDefinitionStorage caches the resolved factory per field type on first scan — a
         // registration that arrives later is ignored. Downstream mods extend the same tables

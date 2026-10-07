@@ -6,7 +6,6 @@ import com.gto.datasynclib.field.object.ObjCodecField;
 import com.gto.datasynclib.util.HashUtil;
 import com.gto.datasynclib.util.ReflectUtil;
 import com.gto.datasynclib.util.cache.HashMapCache;
-import com.gto.datasynclib.util.cache.IdentityHashMapCache;
 import it.unimi.dsi.fastutil.Hash;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import org.jetbrains.annotations.Nullable;
@@ -19,7 +18,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.*;
 
 /**
@@ -72,33 +70,78 @@ public final class FieldDefinitionStorage {
         };
     }
 
-    private static final IdentityHashMapCache<Class<?>, HashMapCache<Supplier<Class<?>[]>, DataField.Factory<?>>> GENERIC_FIELDS_CACHE = new IdentityHashMapCache<>(type -> new HashMapCache<>(genericFunction(type)));
+    private static final ClassValue<HashMapCache<Supplier<Class<?>[]>, DataField.Factory<?>>> GENERIC_FIELDS_CACHE =
+            new ClassValue<>() {
+                @Override
+                protected HashMapCache<Supplier<Class<?>[]>, DataField.Factory<?>> computeValue(Class<?> type) {
+                    return new HashMapCache<>(genericFunction(type));
+                }
+            };
 
     private static final ArrayList<DataField.CustomFactory<?>> FIELDS = new ArrayList<>();
-    private static final IdentityHashMapCache<Class<?>, DataField.Factory<?>> FIELDS_CACHE = new IdentityHashMapCache<>(type -> {
-        for (var f : FIELDS) {
-            if (f.predicate().test(type)) {
-                return f.factory().apply(type);
+
+    /**
+     * Exact-type value-mode registrations; consulted before the predicate chain.
+     */
+    private static final Reference2ReferenceOpenHashMap<Class<?>, DataField.Factory<?>> EXACT_FIELDS = new Reference2ReferenceOpenHashMap<>();
+
+    private static final ClassValue<DataField.Factory<?>> FIELDS_CACHE = new ClassValue<>() {
+        @Override
+        protected DataField.Factory<?> computeValue(Class<?> type) {
+            var exact = EXACT_FIELDS.get(type);
+            if (exact != null) return exact;
+            for (var f : FIELDS) {
+                if (f.predicate().test(type)) {
+                    return f.factory().apply(type);
+                }
             }
+            throw new IllegalStateException("No factory for " + type);
         }
-        throw new IllegalStateException("No factory for " + type);
-    });
+    };
 
     private static final ArrayList<DataField.CustomFactory<?>> ACCESS = new ArrayList<>();
-    private static final IdentityHashMapCache<Class<?>, DataField.Factory<?>> ACCESS_CACHE = new IdentityHashMapCache<>(type -> {
-        for (var f : ACCESS) {
-            if (f.predicate().test(type)) {
-                return f.factory().apply(type);
+
+    /**
+     * Exact-type access-mode registrations; consulted before the predicate chain.
+     */
+    private static final Reference2ReferenceOpenHashMap<Class<?>, DataField.Factory<?>> EXACT_ACCESS = new Reference2ReferenceOpenHashMap<>();
+
+    private static final ClassValue<DataField.Factory<?>> ACCESS_CACHE = new ClassValue<>() {
+        @Override
+        protected DataField.Factory<?> computeValue(Class<?> type) {
+            var exact = EXACT_ACCESS.get(type);
+            if (exact != null) return exact;
+            for (var f : ACCESS) {
+                if (f.predicate().test(type)) {
+                    return f.factory().apply(type);
+                }
             }
+            throw new IllegalStateException("No factory for " + type);
         }
-        throw new IllegalStateException("No factory for " + type);
-    });
+    };
 
     private static final Reference2ReferenceOpenHashMap<Class<?>, Hash.Strategy<?>> STRATEGIES = new Reference2ReferenceOpenHashMap<>();
 
-    private static final ConcurrentHashMap<Class<?>, FieldDefinitionStorage> CACHE = new ConcurrentHashMap<>();
-
     private static final FieldDefinitionStorage EMPTY = new FieldDefinitionStorage();
+
+    /**
+     * Per-class definition cache. A {@link ClassValue} keeps the entry on the class itself instead
+     * of in a class-keyed map: no mod class is pinned in memory by the cache, the superclass walk
+     * re-enters it naturally, and {@code get} is a direct per-class read rather than a map lookup.
+     */
+    private static final ClassValue<FieldDefinitionStorage> CACHE = new ClassValue<>() {
+        @Override
+        protected FieldDefinitionStorage computeValue(Class<?> clazz) {
+            Class<?> sc = clazz.getSuperclass();
+            if (sc != null && sc != Object.class) {
+                var sh = CACHE.get(sc);
+                var storage = of(clazz, sh);
+                return storage.allDefinitions.length == sh.allDefinitions.length ? sh : storage;
+            }
+            var storage = of(clazz);
+            return storage.allDefinitions.length == 0 ? EMPTY : storage;
+        }
+    };
 
     /**
      * Registers a factory for an exact field type, bypassing the predicate chain.
@@ -112,8 +155,8 @@ public final class FieldDefinitionStorage {
      * @param factory creates the {@link DataField} for a field definition
      */
     public static <T> void registerAccessFactory(Class<T> type, DataField.Factory<T> factory) {
-        synchronized (ACCESS_CACHE) {
-            ACCESS_CACHE.put(type, factory);
+        synchronized (EXACT_ACCESS) {
+            EXACT_ACCESS.put(type, factory);
         }
     }
 
@@ -160,8 +203,9 @@ public final class FieldDefinitionStorage {
      * @param genericType the resolved generic arguments, in declaration order
      */
     public static <T> void registerGenericFactory(Class<?> type, DataField.Factory<T> factory, Class<?>... genericType) {
-        synchronized (GENERIC_FIELDS_CACHE) {
-            GENERIC_FIELDS_CACHE.computeIfAbsent(type, k -> new HashMapCache<>(genericFunction(type))).put(HashUtil.arrayIdentityWrapper(genericType), factory);
+        var cache = GENERIC_FIELDS_CACHE.get(type);
+        synchronized (cache) {
+            cache.put(HashUtil.arrayIdentityWrapper(genericType), factory);
         }
     }
 
@@ -187,12 +231,16 @@ public final class FieldDefinitionStorage {
      * Registers a value-mode factory for an exact field type (primitives, codec-backed objects).
      * Takes precedence over the predicate chain and over the generic/access tiers.
      *
+     * <p>The registration is consulted by the per-type {@link ClassValue} that memoizes the
+     * resolved factory, so it must arrive before the first field of that type is resolved — a
+     * later registration cannot replace an already-resolved entry.</p>
+     *
      * @param type    the exact field type to handle
      * @param factory creates the {@link DataField} for a field definition
      */
     public static <T> void registerFactory(Class<T> type, DataField.Factory<T> factory) {
-        synchronized (FIELDS_CACHE) {
-            FIELDS_CACHE.put(type, factory);
+        synchronized (EXACT_FIELDS) {
+            EXACT_FIELDS.put(type, factory);
         }
     }
 
@@ -323,24 +371,7 @@ public final class FieldDefinitionStorage {
      * @return the (cached) definitions for that class
      */
     public static FieldDefinitionStorage get(Class<?> clazz) {
-        var storage = CACHE.get(clazz);
-        if (storage != null) return storage;
-        synchronized (CACHE) {
-            Class<?> sc = clazz.getSuperclass();
-            if (sc != null && sc != Object.class) {
-                var sh = get(sc);
-                storage = of(clazz, sh);
-                if (storage.allDefinitions.length == sh.allDefinitions.length) {
-                    storage = sh;
-                }
-            }
-            if (storage == null) {
-                storage = of(clazz);
-                if (storage.allDefinitions.length == 0) storage = EMPTY;
-            }
-            CACHE.put(clazz, storage);
-        }
-        return storage;
+        return CACHE.get(clazz);
     }
 
     /**
@@ -529,12 +560,12 @@ public final class FieldDefinitionStorage {
     }
 
     private static DataFieldDefinition<?> createAccessFieldDefinition(MethodHandles.Lookup lookup, Field field, Class<?> type, @Nullable Function<Object, Object> source, FieldAnnotationMetadata annotations, Class<?>[] genericType, boolean isFinal, Function conversionGetFunction, Function conversionSetFunction) {
-        var factory = ACCESS_CACHE.getCache(type);
+        var factory = ACCESS_CACHE.get(type);
         return new DataFieldDefinition<>(lookup, field, type, factory, source, annotations, genericType, isFinal, annotations.instanceAsValue(), STRATEGIES, conversionGetFunction, conversionSetFunction);
     }
 
     private static DataFieldDefinition<?> createGenericFieldDefinition(MethodHandles.Lookup lookup, Field field, Class<?> type, @Nullable Function<Object, Object> source, FieldAnnotationMetadata annotations, Class<?>[] genericType, boolean isFinal, Function conversionGetFunction, Function conversionSetFunction) {
-        var factory = GENERIC_FIELDS_CACHE.getCache(type).getCache(HashUtil.arrayIdentityWrapper(genericType));
+        var factory = GENERIC_FIELDS_CACHE.get(type).getCache(HashUtil.arrayIdentityWrapper(genericType));
         return new DataFieldDefinition<>(lookup, field, type, factory, source, annotations, genericType, isFinal, true, STRATEGIES, conversionGetFunction, conversionSetFunction);
     }
 
@@ -557,7 +588,7 @@ public final class FieldDefinitionStorage {
     private static DataFieldDefinition<?> createFieldDefinition(MethodHandles.Lookup lookup, Field field, Class<?> type, @Nullable Function<Object, Object> source, FieldAnnotationMetadata annotations, Class<?>[] genericType, boolean isFinal, Function conversionGetFunction, Function conversionSetFunction) {
         try {
             // Tier 1: try standard (exact-type) factory
-            var factory = FIELDS_CACHE.getCache(type);
+            var factory = FIELDS_CACHE.get(type);
             return new DataFieldDefinition<>(lookup, field, type, factory, source, annotations, genericType, isFinal, true, STRATEGIES, conversionGetFunction, conversionSetFunction);
         } catch (Throwable e) {
             try {

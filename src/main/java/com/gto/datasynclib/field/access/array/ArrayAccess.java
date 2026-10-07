@@ -49,7 +49,9 @@ import java.util.Arrays;
 public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
 
     private final DataSyncCodec<T> elementCodec;
-    /** Strategy registered for the array type, or {@code null} to hash elements directly. */
+    /**
+     * Strategy registered for the array type, or {@code null} to hash elements directly.
+     */
     @Nullable
     private final Hash.Strategy<T[]> strategy;
     private int hashCode;

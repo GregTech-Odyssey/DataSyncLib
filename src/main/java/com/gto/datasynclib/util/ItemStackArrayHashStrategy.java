@@ -40,12 +40,18 @@ public final class ItemStackArrayHashStrategy {
     private ItemStackArrayHashStrategy() {
     }
 
-    /** Item, count and NBT of every element must match. Registered for {@code ItemStack[]} by default. */
+    /**
+     * Item, count and NBT of every element must match. Registered for {@code ItemStack[]} by default.
+     */
     public static final Hash.Strategy<ItemStack[]> ALL = HashUtil.arrayStrategy(ItemStackHashStrategy.ALL);
 
-    /** Item and NBT of every element must match; counts are ignored. */
+    /**
+     * Item and NBT of every element must match; counts are ignored.
+     */
     public static final Hash.Strategy<ItemStack[]> ITEM_AND_TAG = HashUtil.arrayStrategy(ItemStackHashStrategy.ITEM_AND_TAG);
 
-    /** Only the item type of every element must match; counts and NBT are ignored. */
+    /**
+     * Only the item type of every element must match; counts and NBT are ignored.
+     */
     public static final Hash.Strategy<ItemStack[]> ITEM = HashUtil.arrayStrategy(ItemStackHashStrategy.ITEM);
 }

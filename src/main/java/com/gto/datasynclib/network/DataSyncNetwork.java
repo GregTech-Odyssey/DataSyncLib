@@ -3,6 +3,10 @@ package com.gto.datasynclib.network;
 import com.gto.datasynclib.DataSyncLib;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.annotations.RemoteCall;
+import com.gto.datasynclib.remote.RemoteBlockEntityPacket;
+import com.gto.datasynclib.remote.RemoteEntityPacket;
+import com.gto.datasynclib.remote.RemoteInvoker;
 import lombok.experimental.UtilityClass;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
@@ -147,11 +151,11 @@ public class DataSyncNetwork {
      * <p>
      * Call from the <strong>server</strong> side. Async-safe.
      *
-     * @param be       the block entity to sync
-     * @param all      {@code true} to write all fields regardless of dirty state (full sync);
-     *                 {@code false} to write only changed fields (incremental sync)
+     * @param be             the block entity to sync
+     * @param all            {@code true} to write all fields regardless of dirty state (full sync);
+     *                       {@code false} to write only changed fields (incremental sync)
      * @param autoDetectOnly {@code true} to only detect changes on fields with
-     *                 {@code autoDetect = true}; {@code false} to force-detect all fields
+     *                       {@code autoDetect = true}; {@code false} to force-detect all fields
      */
     public void syncBlockEntityToClient(@NotNull BlockEntity be, boolean all, boolean autoDetectOnly) {
         if (be instanceof IFieldDataHolder holder
@@ -170,11 +174,11 @@ public class DataSyncNetwork {
      * <p>
      * Call from the <strong>client</strong> side. Async-safe.
      *
-     * @param be       the block entity to sync
-     * @param all      {@code true} to write all fields (full sync);
-     *                 {@code false} for incremental (only changed fields)
+     * @param be             the block entity to sync
+     * @param all            {@code true} to write all fields (full sync);
+     *                       {@code false} for incremental (only changed fields)
      * @param autoDetectOnly {@code true} to only detect changes on fields with
-     *                 {@code autoDetect = true}; {@code false} to force-detect all fields
+     *                       {@code autoDetect = true}; {@code false} to force-detect all fields
      */
     public void syncBlockEntityToServer(@NotNull BlockEntity be, boolean all, boolean autoDetectOnly) {
         var level = be.getLevel();
@@ -193,11 +197,11 @@ public class DataSyncNetwork {
      * <p>
      * Call from the <strong>server</strong> side. Async-safe.
      *
-     * @param entity   the entity to sync
-     * @param all      {@code true} to write all fields (full sync);
-     *                 {@code false} for incremental (only changed fields)
+     * @param entity         the entity to sync
+     * @param all            {@code true} to write all fields (full sync);
+     *                       {@code false} for incremental (only changed fields)
      * @param autoDetectOnly {@code true} to only detect changes on fields with
-     *                 {@code autoDetect = true}; {@code false} to force-detect all fields
+     *                       {@code autoDetect = true}; {@code false} to force-detect all fields
      */
     public void syncEntityToClient(@NotNull Entity entity, boolean all, boolean autoDetectOnly) {
         if (entity.level().isClientSide()) return;
@@ -217,11 +221,11 @@ public class DataSyncNetwork {
      * <p>
      * Call from the <strong>client</strong> side. Async-safe.
      *
-     * @param entity   the entity to sync
-     * @param all      {@code true} to write all fields (full sync);
-     *                 {@code false} for incremental (only changed fields)
+     * @param entity         the entity to sync
+     * @param all            {@code true} to write all fields (full sync);
+     *                       {@code false} for incremental (only changed fields)
      * @param autoDetectOnly {@code true} to only detect changes on fields with
-     *                 {@code autoDetect = true}; {@code false} to force-detect all fields
+     *                       {@code autoDetect = true}; {@code false} to force-detect all fields
      */
     public void syncEntityToServer(@NotNull Entity entity, boolean all, boolean autoDetectOnly) {
         if (!entity.level().isClientSide()) return;
@@ -314,5 +318,131 @@ public class DataSyncNetwork {
      */
     public void syncEntityToServer(@NotNull Entity entity) {
         syncEntityToServer(entity, false, true);
+    }
+
+
+    /**
+     * Encodes a call and sends it to the server, to be invoked on the server-side block entity at
+     * the same position.
+     * <p>
+     * Call from the <strong>client</strong> side. Async-safe.
+     *
+     * @param blockEntity the local block entity whose class resolves the method
+     * @param method      the wire name of the {@link RemoteCall} method
+     * @param args        the arguments, in declaration order
+     */
+    public void callBlockEntityOnServer(@NotNull BlockEntity blockEntity, String method, Object... args) {
+        sendBlockEntityToServer(blockEntity, RemoteInvoker.write(blockEntity, method, args));
+    }
+
+    /**
+     * Sends an already encoded call (for instance
+     * {@link com.gto.datasynclib.FieldDataManager#writeRemoteCall(String, Object...)}) to the server,
+     * to be invoked on the server-side block entity at the same position — the transport half of
+     * {@link #callBlockEntityOnServer(BlockEntity, String, Object...)}, for callers that build their
+     * own payload.
+     * <p>
+     * Call from the <strong>client</strong> side. Async-safe.
+     *
+     * @param blockEntity the local block entity whose position addresses the call
+     * @param payload     the bytes produced by {@link RemoteInvoker#write(Object, String, Object...)}
+     */
+    public void sendBlockEntityToServer(@NotNull BlockEntity blockEntity, byte[] payload) {
+        var level = blockEntity.getLevel();
+        if (level == null || !level.isClientSide()) return;
+        var packet = new RemoteBlockEntityPacket(blockEntity.getBlockPos(), payload);
+        Minecraft.getInstance().execute(() -> CHANNEL.sendToServer(packet));
+    }
+
+    /**
+     * Encodes a call and sends it to every client tracking the block entity's chunk, to be invoked
+     * on their copies of it.
+     * <p>
+     * Call from the <strong>server</strong> side. Async-safe.
+     *
+     * @param blockEntity the block entity whose class resolves the method
+     * @param method      the wire name of the {@link RemoteCall} method
+     * @param args        the arguments, in declaration order
+     */
+    public void callBlockEntityOnClients(@NotNull BlockEntity blockEntity, String method, Object... args) {
+        sendBlockEntityToClients(blockEntity, RemoteInvoker.write(blockEntity, method, args));
+    }
+
+    /**
+     * Sends an already encoded call to every client tracking the block entity's chunk — the transport
+     * half of {@link #callBlockEntityOnClients(BlockEntity, String, Object...)}.
+     * <p>
+     * Call from the <strong>server</strong> side. Async-safe.
+     *
+     * @param blockEntity the block entity whose position addresses the call
+     * @param payload     the bytes produced by {@link RemoteInvoker#write(Object, String, Object...)}
+     */
+    public void sendBlockEntityToClients(@NotNull BlockEntity blockEntity, byte[] payload) {
+        if (!(blockEntity.getLevel() instanceof ServerLevel level)) return;
+        var pos = blockEntity.getBlockPos();
+        var packet = new RemoteBlockEntityPacket(pos, payload);
+        level.getServer().execute(() ->
+                CHANNEL.send(PacketDistributor.TRACKING_CHUNK.with(() -> level.getChunkAt(pos)), packet));
+    }
+
+    /**
+     * Encodes a call and sends it to the server, to be invoked on the server-side entity with the
+     * same network id.
+     * <p>
+     * Call from the <strong>client</strong> side. Async-safe.
+     *
+     * @param entity the local entity whose class resolves the method
+     * @param method the wire name of the {@link RemoteCall} method
+     * @param args   the arguments, in declaration order
+     */
+    public void callEntityOnServer(@NotNull Entity entity, String method, Object... args) {
+        sendEntityToServer(entity, RemoteInvoker.write(entity, method, args));
+    }
+
+    /**
+     * Sends an already encoded call to the server, to be invoked on the server-side entity with the
+     * same network id — the transport half of
+     * {@link #callEntityOnServer(Entity, String, Object...)}.
+     * <p>
+     * Call from the <strong>client</strong> side. Async-safe.
+     *
+     * @param entity  the local entity whose network id addresses the call
+     * @param payload the bytes produced by {@link RemoteInvoker#write(Object, String, Object...)}
+     */
+    public void sendEntityToServer(@NotNull Entity entity, byte[] payload) {
+        var level = entity.level();
+        if (level == null || !level.isClientSide()) return;
+        var packet = new RemoteEntityPacket(entity.getId(), payload);
+        Minecraft.getInstance().execute(() -> CHANNEL.sendToServer(packet));
+    }
+
+    /**
+     * Encodes a call and sends it to every client tracking the entity, to be invoked on their
+     * copies of it.
+     * <p>
+     * Call from the <strong>server</strong> side. Async-safe.
+     *
+     * @param entity the entity whose class resolves the method
+     * @param method the wire name of the {@link RemoteCall} method
+     * @param args   the arguments, in declaration order
+     */
+    public void callEntityOnClients(@NotNull Entity entity, String method, Object... args) {
+        sendEntityToClients(entity, RemoteInvoker.write(entity, method, args));
+    }
+
+    /**
+     * Sends an already encoded call to every client tracking the entity — the transport half of
+     * {@link #callEntityOnClients(Entity, String, Object...)}.
+     * <p>
+     * Call from the <strong>server</strong> side. Async-safe.
+     *
+     * @param entity  the entity whose network id addresses the call
+     * @param payload the bytes produced by {@link RemoteInvoker#write(Object, String, Object...)}
+     */
+    public void sendEntityToClients(@NotNull Entity entity, byte[] payload) {
+        if (!(entity.level() instanceof ServerLevel level)) return;
+        var packet = new RemoteEntityPacket(entity.getId(), payload);
+        level.getServer().execute(() ->
+                CHANNEL.send(PacketDistributor.TRACKING_ENTITY.with(() -> entity), packet));
     }
 }

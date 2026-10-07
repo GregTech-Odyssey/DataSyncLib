@@ -8,6 +8,8 @@ import com.gto.datasynclib.annotations.*;
 import com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity;
 import com.gto.datasynclib.listener.ObjNotifiableHolder;
 import com.gto.datasynclib.network.DataSyncNetwork;
+import com.gto.datasynclib.annotations.RemoteCall;
+import com.gto.datasynclib.remote.RemoteNetwork;
 import com.gto.datasynclib.util.FieldDataCodec;
 import com.gto.datasynclib.util.NbtUtil;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
@@ -63,27 +65,39 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
 
     static final FieldDataCodec<A> A_CODEC = FieldDataManager.createCodec(A.class, A::new);
 
-    /** Not annotated: must never show up in the managed definitions. */
+    /**
+     * Not annotated: must never show up in the managed definitions.
+     */
     boolean isDirty;
 
-    /** Primitive value field ({@code IntField}): value-mode, persisted only. */
+    /**
+     * Primitive value field ({@code IntField}): value-mode, persisted only.
+     */
     @SaveToDisk
     int i;
 
-    /** Object array ({@code ArrayAccess} + the {@code String} codec); elements may be null. */
+    /**
+     * Object array ({@code ArrayAccess} + the {@code String} codec); elements may be null.
+     */
     @SaveToDisk
     final String[] uuids = new String[3];
 
-    /** Array of a type without content equality — see the array strategy registration for ItemStack[]. */
+    /**
+     * Array of a type without content equality — see the array strategy registration for ItemStack[].
+     */
     @SaveToDisk
     final ItemStack[] stacks = new ItemStack[9];
 
-    /** Scalar {@code ItemStack}: exercises the registered {@link com.gto.datasynclib.util.ItemStackHashStrategy}. */
+    /**
+     * Scalar {@code ItemStack}: exercises the registered {@link com.gto.datasynclib.util.ItemStackHashStrategy}.
+     */
     @SaveToDisk
     @SyncToClient
     ItemStack stack = new ItemStack(Items.IRON_INGOT, 1);
 
-    /** Scalar {@code FluidStack}: exercises the registered {@link com.gto.datasynclib.util.FluidStackHashStrategy}. */
+    /**
+     * Scalar {@code FluidStack}: exercises the registered {@link com.gto.datasynclib.util.FluidStackHashStrategy}.
+     */
     @SaveToDisk
     @SyncToClient
     FluidStack fluid = new FluidStack(Fluids.WATER, 1000);
@@ -96,33 +110,45 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     @SaveToDisk
     final FluidStack[] tanks = new FluidStack[3];
 
-    /** Nested array: the element is itself an array, so it goes through {@code ArrayAccess} with an enum-array codec. */
+    /**
+     * Nested array: the element is itself an array, so it goes through {@code ArrayAccess} with an enum-array codec.
+     */
     @SaveToDisk
     final Direction[][] directions = new Direction[3][3];
 
-    /** {@code java.util} containers → {@code CollectionAccess} / {@code MapAccess} (mutated in place). */
+    /**
+     * {@code java.util} containers → {@code CollectionAccess} / {@code MapAccess} (mutated in place).
+     */
     @SaveToDisk
     final Set<String> uuidSet = new HashSet<>();
 
     @SaveToDisk
     final Map<Integer, Boolean> map = new HashMap<>();
 
-    /** Minecraft value type with a codec ({@code AABB}, hand-written pair). */
+    /**
+     * Minecraft value type with a codec ({@code AABB}, hand-written pair).
+     */
     @SaveToDisk
     AABB aabb = new AABB(1, 4, 5, 6, 1, 5);
 
-    /** {@code @Codec}: serialization delegated to the {@link FieldDataCodec} field named by the annotation. */
+    /**
+     * {@code @Codec}: serialization delegated to the {@link FieldDataCodec} field named by the annotation.
+     */
     @SaveToDisk
     @Codec(saveCodec = "A_CODEC", syncCodec = "A_CODEC")
     @SyncToClient
     A a = new A();
 
-    /** Nested {@code IFieldDataHolder}: kept as one field and synced through its own manager. */
+    /**
+     * Nested {@code IFieldDataHolder}: kept as one field and synced through its own manager.
+     */
     @SaveToDisk
     @SyncToClient
-    final B b = new B();
+    final B b = new B(this);
 
-    /** Sync-only, container-typed field: the holder carries its own change detection and listener. */
+    /**
+     * Sync-only, container-typed field: the holder carries its own change detection and listener.
+     */
     @SyncToServer
     final ObjNotifiableHolder<String> objectHolder = ObjNotifiableHolder.create(DataSyncCodec.STRING_CODEC);
 
@@ -138,7 +164,9 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     @SyncToClient
     final float[] floats = new float[4];
 
-    /** FastUtil containers → IntCollectionAccess / Object2IntMapAccess. */
+    /**
+     * FastUtil containers → IntCollectionAccess / Object2IntMapAccess.
+     */
     @SaveToDisk
     @SyncToClient
     final IntList intList = new IntArrayList();
@@ -147,7 +175,9 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     @SyncToClient
     final Object2IntMap<String> object2IntMap = new Object2IntOpenHashMap<>();
 
-    /** Forge {@code INBTSerializable} → TagSerializableAccess / TagSerializableArrayAccess. */
+    /**
+     * Forge {@code INBTSerializable} → TagSerializableAccess / TagSerializableArrayAccess.
+     */
     @SaveToDisk
     @SyncToClient
     final ItemStackHandler handler = new ItemStackHandler(3);
@@ -156,13 +186,17 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     @SyncToClient
     final ItemStackHandler[] handlerArray = {new ItemStackHandler(2), new ItemStackHandler(2)};
 
-    /** {@code @AdditionalHolder(childManager = true)} → ChildManagerAccess over a plain POJO. */
+    /**
+     * {@code @AdditionalHolder(childManager = true)} → ChildManagerAccess over a plain POJO.
+     */
     @SaveToDisk
     @SyncToClient
     @AdditionalHolder(childManager = true)
     ChildModule module = new ChildModule();
 
-    /** Hand-written codecs added to the built-in set. */
+    /**
+     * Hand-written codecs added to the built-in set.
+     */
     @SaveToDisk
     @SyncToClient
     GlobalPos globalPos = GlobalPos.of(Level.OVERWORLD, new BlockPos(1, 2, 3));
@@ -173,26 +207,76 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     @SaveToDisk
     Vec3i vec3i = new Vec3i(1, 2, 3);
 
-    /** Equals the configured default → skipped on disk; changing it makes it written. */
+    /**
+     * Equals the configured default → skipped on disk; changing it makes it written.
+     */
     @SaveToDisk(defaultValue = "7")
     int withDefault = 7;
 
-    /** Skipped while {@link #skipMe(int)} says so. */
+    /**
+     * Skipped while {@link #skipMe(int)} says so.
+     */
     @SaveToDisk(skipWhen = "skipMe")
     int skipped = 0;
 
-    /** {@code autoDetect = false}: only sent after an explicit markFieldsForSync. */
+    /**
+     * {@code autoDetect = false}: only sent after an explicit markFieldsForSync.
+     */
     @SyncToClient(autoDetect = false)
     int manual = 0;
 
-    /** Exercises the {@code @SaveToDisk(listener = ...)} hook added in this version. */
+    /**
+     * Target of the remote-call tests: {@code TestBlockEntityTests} invokes it through
+     * {@link com.gto.datasynclib.remote.RemoteInvoker} (the receive path) exactly like the packet
+     * handler does, and the manager-level {@code remoteCall} send path is exercised without a level.
+     */
+    int remoteMarked = 0;
+
+    @RemoteCall
+    public void remoteMark(int value) {
+        this.remoteMarked = value;
+        setChanged();
+    }
+
+    /**
+     * Remote target covering the argument surface a call can carry.
+     */
+    int richInt = 0;
+    String richText = null;
+    int[] richArray = null;
+    boolean richFlag = false;
+
+    @RemoteCall("rich")
+    public void rich(int value, String text, int[] array, boolean flag) {
+        this.richInt = value;
+        this.richText = text;
+        this.richArray = array;
+        this.richFlag = flag;
+        setChanged();
+    }
+
+    /**
+     * Instance-free remote target: a static method needs no target object on the receive side.
+     */
+    static int staticMarked = 0;
+
+    @RemoteCall
+    public static void staticMark(int value) {
+        staticMarked = value;
+    }
+
+    /**
+     * Exercises the {@code @SaveToDisk(listener = ...)} hook added in this version.
+     */
     @SaveToDisk(listener = "onLoaded")
     int loaded = 0;
 
     int loadedListenerCalls = 0;
     int lastLoaded = -1;
 
-    /** Exercises the sync listener hook. */
+    /**
+     * Exercises the sync listener hook.
+     */
     @SyncToClient(listener = "onSynced")
     int synced = 0;
 
@@ -247,14 +331,18 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
         return value < 0;
     }
 
-    /** Test hook: the BE-level save path ({@code saveAdditional} is protected in the base class). */
+    /**
+     * Test hook: the BE-level save path ({@code saveAdditional} is protected in the base class).
+     */
     CompoundTag saveToTag() {
         var tag = new CompoundTag();
         saveAdditional(tag);
         return tag;
     }
 
-    /** Test hook: the BE-level load path. */
+    /**
+     * Test hook: the BE-level load path.
+     */
     void loadFromTag(CompoundTag tag) {
         load(tag);
     }
@@ -330,6 +418,14 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
             tagData.putInt("aaa", tagData.getInt("aaa") + 1);
             DataSyncNetwork.syncBlockEntityToClient(this, false, true);
         }
+        // Remote-call ping-pong, so the module can be watched live: the server asks every client tracking
+        // this block entity to mark it, and the client's own call comes back the other way (clientTick).
+        // Every five seconds, to stay readable in the log.
+        if (level.getGameTime() % 100 == 0) {
+            RemoteNetwork.callBlockEntityOnClients(this, "remoteMark", (int) (level.getGameTime() % 1000));
+            DataSyncLib.LOGGER.info("remote: server tick {}, remoteMarked={} (calls received from the client)",
+                    level.getGameTime(), remoteMarked);
+        }
     }
 
     /**
@@ -344,6 +440,12 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
             DataSyncLib.LOGGER.info("tagData: {}", tagData);
             DataSyncLib.LOGGER.info("a.a: {}", a.a);
         }
+        // The other half of the in-game remote-call check: a call made on the client, sent to the server.
+        if (level.getGameTime() % 100 == 20) {
+            RemoteNetwork.callBlockEntityOnServer(this, "remoteMark", (int) (level.getGameTime() % 1000) + 1);
+            DataSyncLib.LOGGER.info("remote: client tick {}, remoteMarked={} (calls received from the server)",
+                    level.getGameTime(), remoteMarked);
+        }
     }
 
     public final void updateTick() {
@@ -353,7 +455,9 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
         }
     }
 
-    /** POJO managed through {@code @Codec} + {@link FieldDataCodec}. */
+    /**
+     * POJO managed through {@code @Codec} + {@link FieldDataCodec}.
+     */
     static class A {
 
         A(int a) {
@@ -367,8 +471,15 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
         int a;
     }
 
-    /** Nested {@link IFieldDataHolder}: handled by {@code FieldDataHolderAccess}. */
+    /**
+     * Nested {@link IFieldDataHolder}: handled by {@code FieldDataHolderAccess}.
+     */
     static class B implements IFieldDataHolder {
+
+        /**
+         * The owner this holder sits in — what a remote call from here is addressed with; no modifier needed.
+         */
+        private final IFieldDataHolder owner;
 
         @SaveToDisk
         int a;
@@ -382,7 +493,8 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
         int receiverCalls = 0;
         String lastReceived = null;
 
-        B() {
+        B(IFieldDataHolder owner) {
+            this.owner = owner;
             c.setReceiverListener((s, n, o) -> {
                 DataSyncLib.LOGGER.info("D changed: {} {} {}", s, n, o);
                 b = Items.COPPER_INGOT;
@@ -391,11 +503,66 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
             });
         }
 
+        @Override
+        public IFieldDataHolder getParentHolder() {
+            return owner;
+        }
+
         @Getter
         final FieldDataManager fieldDataManager = new FieldDataManager(this);
+
+        /**
+         * Remote-call target on a <em>nested</em> holder: the payload is encoded via this holder's own
+         * manager ({@code b.getFieldDataManager().writeRemoteCall("remoteMark", v)}) while the packet
+         * addresses the block entity, so the receive side has to route the call down to here.
+         */
+        int remoteMarked = 0;
+
+        @RemoteCall
+        public void remoteMark(int value) {
+            this.remoteMarked = value;
+        }
+
+        /**
+         * Third-level holder: a call made from here is addressed by the path
+         * {@code [index of b, index of nested]}, so the receive side has to walk two fields.
+         */
+        final C nested = new C(this);
     }
 
-    /** Plain POJO with its own child manager (does not implement {@link IFieldDataHolder}). */
+    /**
+     * Holder nested two levels deep, under {@link B}.
+     */
+    static class C implements IFieldDataHolder {
+
+        /**
+         * The owner this holder sits in — what a remote call from here is addressed with; no modifier needed.
+         */
+        private final IFieldDataHolder owner;
+
+        @Getter
+        final FieldDataManager fieldDataManager = new FieldDataManager(this);
+
+        int marked = 0;
+
+        C(IFieldDataHolder owner) {
+            this.owner = owner;
+        }
+
+        @Override
+        public IFieldDataHolder getParentHolder() {
+            return owner;
+        }
+
+        @RemoteCall("cMark")
+        public void cMark(int value) {
+            this.marked = value;
+        }
+    }
+
+    /**
+     * Plain POJO with its own child manager (does not implement {@link IFieldDataHolder}).
+     */
     static class ChildModule {
 
         @SaveToDisk
