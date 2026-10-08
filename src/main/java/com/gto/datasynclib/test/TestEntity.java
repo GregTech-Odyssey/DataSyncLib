@@ -3,11 +3,11 @@ package com.gto.datasynclib.test;
 import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.annotations.AdditionalHolder;
+import com.gto.datasynclib.annotations.RemoteCall;
 import com.gto.datasynclib.annotations.SaveToDisk;
 import com.gto.datasynclib.annotations.SyncToClient;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.network.DataSyncNetwork;
-import com.gto.datasynclib.annotations.RemoteCall;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityDimensions;
@@ -93,8 +93,8 @@ public class TestEntity extends Entity implements IFieldDataHolder {
     /**
      * Target of the remote-call path on the entity side, mirroring
      * {@link TestBlockEntity#remoteMark(int)}: {@link com.gto.datasynclib.remote.RemoteNetwork} routes
-     * a received call through {@link FieldDataManager#readRemoteCall(byte[])} for a holder like this
-     * one.
+     * a received call through {@link IFieldDataHolder#handleRemoteCall(Object, byte[])} for a holder like
+     * this one.
      */
     private int remoteMarked;
 

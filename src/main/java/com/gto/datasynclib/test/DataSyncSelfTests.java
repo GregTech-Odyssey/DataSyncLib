@@ -4,19 +4,16 @@ import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.annotations.AdditionalHolder;
-import com.gto.datasynclib.annotations.SaveToDisk;
-import com.gto.datasynclib.annotations.SyncToClient;
-import com.gto.datasynclib.annotations.SyncToServer;
+import com.gto.datasynclib.annotations.*;
 import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import com.gto.datasynclib.datastream.codec.CombinedCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
+import com.gto.datasynclib.datastream.codec.StreamCodec;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.NullData;
 import com.gto.datasynclib.datastream.data.StringMapData;
 import com.gto.datasynclib.listener.ObjNotifiableHolder;
 import com.gto.datasynclib.remote.RemoteBlockEntityPacket;
-import com.gto.datasynclib.annotations.RemoteCall;
 import com.gto.datasynclib.remote.RemoteEntityPacket;
 import com.gto.datasynclib.remote.RemoteInvoker;
 import com.gto.datasynclib.util.ReflectUtil;
@@ -630,16 +627,16 @@ public final class DataSyncSelfTests {
         expect("remote.managerUnknownNull", null, subManager.getRemoteMethod("missing"));
         boolean rejectedUnknownOnManager = false;
         try {
-            subManager.writeRemoteCall("missing");
+            subHolder.writeRemoteCall(subHolder, "missing");
         } catch (IllegalArgumentException e) {
             rejectedUnknownOnManager = true;
         }
         expect("remote.managerUnknownRejected", true, rejectedUnknownOnManager);
 
-        // The manager produces and consumes the payload; sending it is the packet layer's job.
-        byte[] remotePayload = subManager.writeRemoteCall("mark", 3);
+        // The holder produces the payload; the packet layer applies it to the object it addressed.
+        byte[] remotePayload = subHolder.writeRemoteCall(subHolder, "mark", 3);
         expect("remote.payloadNotEmpty", true, remotePayload.length > 0);
-        subManager.readRemoteCall(remotePayload);
+        IFieldDataHolder.handleRemoteCall(subHolder, remotePayload);
         expect("remote.managerRoundTrip", 3, subHolder.marked);
 
         // Both default packets carry target + payload over the wire.
@@ -673,7 +670,7 @@ public final class DataSyncSelfTests {
      * Writes one value with a stream codec and returns the raw bytes, so a test can also assert on
      * the size of the encoding (the optional builders must spend exactly one byte on "absent").
      */
-    private static <T> byte[] streamEncode(ByteStreamCodec<T> codec, T value) {
+    private static <T> byte[] streamEncode(StreamCodec<? super FriendlyByteBuf, T> codec, T value) {
         var buf = Unpooled.buffer();
         try {
             codec.encode(new FriendlyByteBuf(buf), value);
@@ -685,7 +682,7 @@ public final class DataSyncSelfTests {
         }
     }
 
-    private static <T> T streamDecode(ByteStreamCodec<T> codec, byte[] bytes) {
+    private static <T> T streamDecode(StreamCodec<? super FriendlyByteBuf, T> codec, byte[] bytes) {
         var buf = Unpooled.wrappedBuffer(bytes);
         try {
             return codec.decode(new FriendlyByteBuf(buf));
@@ -714,7 +711,7 @@ public final class DataSyncSelfTests {
         expect("optional.data.staticForm", dataOptional.encode("x"), DataCodec.optional(DataCodec.STRING_CODEC).encode("x"));
 
         // ---- optional(): one boolean marker, then the payload ----
-        var streamOptional = ByteStreamCodec.STRING_CODEC.optional();
+        var streamOptional = ByteStreamCodec.optional(ByteStreamCodec.STRING_CODEC);
         byte[] absentBytes = streamEncode(streamOptional, null);
         expect("optional.stream.nullMarkerSize", absentBytes.length, 1);
         expect("optional.stream.nullMarkerFalse", absentBytes[0], (byte) 0);
@@ -732,7 +729,7 @@ public final class DataSyncSelfTests {
         expect("optional.default.data.decodeDefault", "d", dataDefault.decode(NullData.INSTANCE));
         expect("optional.default.data.decodeValue", "x", dataDefault.decode(dataDefault.encode("x")));
 
-        var streamDefault = ByteStreamCodec.STRING_CODEC.optional("d");
+        var streamDefault = ByteStreamCodec.optional(ByteStreamCodec.STRING_CODEC, "d");
         expect("optional.default.stream.defaultMarkerSize", streamEncode(streamDefault, "d").length, 1);
         expect("optional.default.stream.decodeDefault", "d", streamDecode(streamDefault, streamEncode(streamDefault, "d")));
         expect("optional.default.stream.decodeValue", "x", streamDecode(streamDefault, streamEncode(streamDefault, "x")));
@@ -752,9 +749,9 @@ public final class DataSyncSelfTests {
         expect("optional.supplier.data.default", true, firstDefault.isEmpty() && secondDefault.isEmpty());
         expect("optional.supplier.data.freshInstance", true, firstDefault != secondDefault);
 
-        var streamListDefault = ByteStreamCodec
-                .<String, List<String>>collection(ArrayList::new, ByteStreamCodec.STRING_CODEC)
-                .optional(newList);
+        StreamCodec<FriendlyByteBuf, List<String>> streamListCodec =
+                ByteStreamCodec.collection(ArrayList::new, ByteStreamCodec.STRING_CODEC);
+        var streamListDefault = ByteStreamCodec.optional(streamListCodec, newList);
         expect("optional.supplier.stream.emptyMarkerSize", streamEncode(streamListDefault, new ArrayList<>()).length, 1);
         expect("optional.supplier.stream.decode", List.of("a"),
                 streamDecode(streamListDefault, streamEncode(streamListDefault, new ArrayList<>(List.of("a")))));
@@ -801,10 +798,10 @@ public final class DataSyncSelfTests {
         var valuedByString = DataCodec.STRING_CODEC.asValue(intKeyed, DataCodec.INT_CODEC);
         expect("map.asValue.data", Map.of(1, "a"), valuedByString.decode(valuedByString.encode(Map.of(1, "a"))));
 
-        var streamKeyedByString = ByteStreamCodec.STRING_CODEC.asKey(stringKeyed, ByteStreamCodec.INT_CODEC);
+        var streamKeyedByString = ByteStreamCodec.map(stringKeyed, ByteStreamCodec.STRING_CODEC, ByteStreamCodec.INT_CODEC);
         expect("map.asKey.stream", Map.of("a", 1),
                 streamDecode(streamKeyedByString, streamEncode(streamKeyedByString, Map.of("a", 1))));
-        var streamValuedByString = ByteStreamCodec.STRING_CODEC.asValue(intKeyed, ByteStreamCodec.INT_CODEC);
+        var streamValuedByString = ByteStreamCodec.map(intKeyed, ByteStreamCodec.INT_CODEC, ByteStreamCodec.STRING_CODEC);
         expect("map.asValue.stream", Map.of(1, "a"),
                 streamDecode(streamValuedByString, streamEncode(streamValuedByString, Map.of(1, "a"))));
 
@@ -824,14 +821,14 @@ public final class DataSyncSelfTests {
         var dataCollection = DataCodec.STRING_CODEC.collection(listFactory);
         expect("mirror.collection.data", List.of("a", "b"),
                 dataCollection.decode(dataCollection.encode(new ArrayList<>(List.of("a", "b")))));
-        var streamCollection = ByteStreamCodec.STRING_CODEC.collection(listFactory);
+        var streamCollection = ByteStreamCodec.collection(listFactory, ByteStreamCodec.STRING_CODEC);
         expect("mirror.collection.stream", List.of("a", "b"),
                 streamDecode(streamCollection, streamEncode(streamCollection, new ArrayList<>(List.of("a", "b")))));
 
         var dataArray = DataCodec.STRING_CODEC.array(String.class);
         expect("mirror.array.data", true,
                 Arrays.equals(new String[]{"a", "b"}, dataArray.decode(dataArray.encode(new String[]{"a", "b"}))));
-        var streamArray = ByteStreamCodec.STRING_CODEC.array(String.class);
+        var streamArray = ByteStreamCodec.array(String.class, ByteStreamCodec.STRING_CODEC);
         expect("mirror.array.stream", true,
                 Arrays.equals(new String[]{"a", "b"}, streamDecode(streamArray, streamEncode(streamArray, new String[]{"a", "b"}))));
 
@@ -858,12 +855,12 @@ public final class DataSyncSelfTests {
         // Cross-path mirrors: adapt a half to the other path, or to a combined codec.
         var dataAsStream = DataCodec.STRING_CODEC.toStreamCodec();
         expect("mirror.toStreamCodec", "x", streamDecode(dataAsStream, streamEncode(dataAsStream, "x")));
-        var streamAsData = ByteStreamCodec.STRING_CODEC.toDataCodec();
+        var streamAsData = DataCodec.of(ByteStreamCodec.STRING_CODEC);
         expect("mirror.toDataCodec", "x", streamAsData.decode(streamAsData.encode("x")));
         var fromData = DataCodec.STRING_CODEC.toDataSyncCodec();
         expect("mirror.toDataSyncCodec.data", "x", fromData.decode(fromData.encode("x"), 0));
         expect("mirror.toDataSyncCodec.wire", "x", streamDecode(fromData, streamEncode(fromData, "x")));
-        var fromStream = ByteStreamCodec.STRING_CODEC.toDataSyncCodec();
+        var fromStream = DataSyncCodec.of(ByteStreamCodec.STRING_CODEC);
         expect("mirror.toDataSyncCodec.stream.disk", "x", fromStream.decode(fromStream.encode("x"), 0));
         expect("mirror.toDataSyncCodec.self", true, DataSyncCodec.STRING_CODEC.toDataSyncCodec() == DataSyncCodec.STRING_CODEC);
     }

@@ -22,7 +22,7 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 | **FieldDefinitionStorage** | 全局缓存 — 扫描类层级中的注解字段，生成 `DataFieldDefinition[]` |
 | **FieldDataManager** | 每实例管理器 — 字段发现 → 变更检测 → 网络序列化 → 磁盘序列化 |
 | **DataField 体系** | `AbstractField`（值类型：原始/对象）、`AbstractFieldAccess`（容器类型：集合/Map/数组） |
-| **DataSyncCodec** | 统一编解码注册表，配对 `ByteStreamCodec`（网络）+ `DataCodec`（持久化） |
+| **DataSyncCodec** | 统一编解码注册表，配对 `StreamCodec<B, T>` / `ByteStreamCodec`（网络）+ `DataCodec`（持久化） |
 | **Data 类型系统** | 19 种密封二进制类型，比 NBT Tag 更紧凑，支持 VarInt 变长编码 |
 
 ## 核心特性

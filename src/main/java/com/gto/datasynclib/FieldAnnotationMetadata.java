@@ -3,6 +3,7 @@ package com.gto.datasynclib;
 import com.gto.datasynclib.annotations.*;
 import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
+import com.gto.datasynclib.datastream.codec.StreamCodec;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.util.ReflectUtil;
 import it.unimi.dsi.fastutil.Hash;
@@ -46,7 +47,7 @@ final class FieldAnnotationMetadata {
     private final Method syncToClientSkipWhen;
     private final Method syncToServerSkipWhen;
     private final Hash.Strategy strategy;
-    private final ByteStreamCodec streamCodec;
+    private final StreamCodec streamCodec;
     private final DataCodec dataCodec;
     private final Method writeToData;
     private final Method readFromData;
@@ -192,7 +193,7 @@ final class FieldAnnotationMetadata {
                     if (!codec.syncCodec().isEmpty()) {
                         f = clazz.getDeclaredField(codec.syncCodec());
                         f.setAccessible(true);
-                        this.streamCodec = (ByteStreamCodec) f.get(null);
+                        this.streamCodec = (StreamCodec) f.get(null);
                     } else {
                         this.streamCodec = ByteStreamCodec.of(dataCodec);
                     }

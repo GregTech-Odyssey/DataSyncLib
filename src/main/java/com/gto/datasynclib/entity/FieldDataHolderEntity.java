@@ -45,8 +45,8 @@ import org.jetbrains.annotations.NotNull;
  *       first field access</li>
  *   <li><strong>Remote calls:</strong> because the class is an {@link IFieldDataHolder},
  *       {@link com.gto.datasynclib.remote.RemoteNetwork} routes a received call into
- *       {@link FieldDataManager#readRemoteCall(byte[])} for it, so {@code @RemoteCall} methods on the
- *       entity (or a superclass) are reachable</li>
+ *       {@link IFieldDataHolder#handleRemoteCall(Object, byte[])} for it, so {@code @RemoteCall} methods
+ *       on the entity (or a superclass) are reachable</li>
  * </ul>
  *
  * <h3>Manual steps needed:</h3>

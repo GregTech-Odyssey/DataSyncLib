@@ -21,7 +21,7 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 - **FieldDefinitionStorage**: Scans class hierarchy for annotated fields, caches metadata globally
 - **FieldDataManager**: Per-instance lifecycle manager — detects changes, serializes to network/disk
 - **DataField hierarchy**: `AbstractField` (primitive values), `ObjField` (objects with codecs), `AbstractFieldAccess` (collections/maps/arrays)
-- **DataSyncCodec**: Unified codec registry pairing `ByteStreamCodec` (network) with `DataCodec` (persistence)
+- **DataSyncCodec**: Unified codec registry pairing `StreamCodec<B, T>` / `ByteStreamCodec` (network) with `DataCodec` (persistence)
 - **Data type system**: 19-type sealed binary format, more compact than NBT, with VarInt encoding
 
 ## Key Features

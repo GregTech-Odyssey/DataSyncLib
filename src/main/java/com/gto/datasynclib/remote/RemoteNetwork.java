@@ -2,18 +2,12 @@ package com.gto.datasynclib.remote;
 
 import com.gto.datasynclib.DataSyncLib;
 import com.gto.datasynclib.IFieldDataHolder;
-import com.gto.datasynclib.annotations.RemoteCall;
+import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.network.DataSyncNetwork;
 import lombok.experimental.UtilityClass;
 import net.minecraft.client.Minecraft;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.network.NetworkEvent;
-import net.minecraftforge.network.NetworkRegistry;
-import net.minecraftforge.network.PacketDistributor;
-import net.minecraftforge.network.simple.SimpleChannel;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.function.Supplier;
@@ -38,46 +32,26 @@ import java.util.function.Supplier;
  * ({@code context.enqueueWork}). A failure while decoding or invoking is logged instead of being
  * propagated — a packet handler must not take the game down.</p>
  *
- * <p>Sending is push-based and split in two families: the four {@code callXxxOnServer/OnClients}
- * helpers encode the call ({@link RemoteInvoker#write}) and send it, while the four
- * {@code sendXxxToServer/ToClients} helpers take an already encoded payload — for instance from
- * {@link com.gto.datasynclib.FieldDataManager#writeRemoteCall(String, Object...)} — for callers that
- * build their own. Both schedule the send onto the owning side's executor, so they are safe to call
- * from off-thread code. Initialized once via {@link #init()} during mod construction (the mod calls it
- * next to the sync channel).</p>
+ * <p>Sending is left to the caller: a call is built with
+ * {@link com.gto.datasynclib.FieldDataManager#writeRemoteCall(Object, Object, String, Object...)}
+ * (or {@link RemoteInvoker#write(Object, String, Object...)}) and put into whichever packet suits the
+ * target — the two here, or one of your own — because the payload is opaque to the transport. This class
+ * therefore only owns the channel, the two packets and the receive path. Initialized once via
+ * {@link #init()} during mod construction (the mod calls it next to the sync channel).</p>
  *
  * @see RemoteInvoker
  */
 @UtilityClass
 public class RemoteNetwork {
 
-    private final String PROTOCOL_VERSION = "1";
-    public final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
-            ResourceLocation.fromNamespaceAndPath(DataSyncLib.MOD_ID, "remote"),
-            () -> PROTOCOL_VERSION,
-            PROTOCOL_VERSION::equals,
-            PROTOCOL_VERSION::equals
-    );
-
-    private boolean initialized;
-
-    /**
-     * Registers the two default message handlers on {@link #CHANNEL}. Must be called once during
-     * mod startup; repeated calls are ignored.
-     */
     public void init() {
-        if (initialized) return;
-        initialized = true;
-
-        // Index 0 — block entity target, both directions (see handleBlockEntity)
-        CHANNEL.registerMessage(0,
+        DataSyncNetwork.CHANNEL.registerMessage(2,
                 RemoteBlockEntityPacket.class,
                 RemoteBlockEntityPacket::encode,
                 RemoteBlockEntityPacket::decode,
                 RemoteNetwork::handleBlockEntity);
 
-        // Index 1 — entity target, both directions (see handleEntity)
-        CHANNEL.registerMessage(1,
+        DataSyncNetwork.CHANNEL.registerMessage(3,
                 RemoteEntityPacket.class,
                 RemoteEntityPacket::encode,
                 RemoteEntityPacket::decode,
@@ -89,25 +63,26 @@ public class RemoteNetwork {
     private void handleBlockEntity(RemoteBlockEntityPacket packet, Supplier<NetworkEvent.Context> ctx) {
         var context = ctx.get();
         if (context.getDirection().getOriginationSide().isClient()) {
+            // Originated on the client: this handler runs on the server.
             context.enqueueWork(() -> {
                 var sender = context.getSender();
                 if (sender == null) return;
-                applyBlockEntityCall(sender.level(), packet);
+                applyBlockEntityCall(sender.level(), packet, LogicalSide.SERVER);
             });
         } else {
             context.enqueueWork(() -> {
                 var player = Minecraft.getInstance().player;
                 if (player == null) return;
-                applyBlockEntityCall(player.level(), packet);
+                applyBlockEntityCall(player.level(), packet, LogicalSide.CLIENT);
             });
         }
         context.setPacketHandled(true);
     }
 
-    private void applyBlockEntityCall(@NotNull Level level, RemoteBlockEntityPacket packet) {
+    private void applyBlockEntityCall(@NotNull Level level, RemoteBlockEntityPacket packet, LogicalSide side) {
         var blockEntity = level.getBlockEntity(packet.pos());
         if (blockEntity == null) return;
-        handleReceived(blockEntity, packet.data());
+        handleReceived(blockEntity, packet.data(), side);
     }
 
     private void handleEntity(RemoteEntityPacket packet, Supplier<NetworkEvent.Context> ctx) {
@@ -116,37 +91,39 @@ public class RemoteNetwork {
             context.enqueueWork(() -> {
                 var sender = context.getSender();
                 if (sender == null) return;
-                applyEntityCall(sender.level(), packet);
+                applyEntityCall(sender.level(), packet, LogicalSide.SERVER);
             });
         } else {
             context.enqueueWork(() -> {
                 var player = Minecraft.getInstance().player;
                 if (player == null) return;
-                applyEntityCall(player.level(), packet);
+                applyEntityCall(player.level(), packet, LogicalSide.CLIENT);
             });
         }
         context.setPacketHandled(true);
     }
 
-    private void applyEntityCall(@NotNull Level level, RemoteEntityPacket packet) {
+    private void applyEntityCall(@NotNull Level level, RemoteEntityPacket packet, LogicalSide side) {
         var entity = level.getEntity(packet.entityId());
         if (entity == null) return;
-        handleReceived(entity, packet.data());
+        handleReceived(entity, packet.data(), side);
     }
 
     /**
      * Applies one received call to the object a packet resolved — the receive-side entry point, used
      * by both built-in handlers and available to a packet of your own.
      *
-     * <p>Dispatch is {@link IFieldDataHolder#handleRemoteCall(Object, byte[])}: a target that is a
-     * field holder (the library's
-     * {@link com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity},
-     * {@link com.gto.datasynclib.entity.FieldDataHolderEntity}, or any holder of your own) runs the call
-     * through {@link com.gto.datasynclib.FieldDataManager#readRemoteCall(byte[])}, while any other
-     * block entity or entity is invoked directly.</p>
+     * <p>Dispatch is {@link IFieldDataHolder#handleRemoteCall(Object, byte[])}, which resolves the call's
+     * node index against the object the packet addressed ({@code 0} being that object itself, see
+     * {@link RemoteRouting}): the call runs on whichever holder in that tree the index names — the target
+     * itself ({@link com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity},
+     * {@link com.gto.datasynclib.entity.FieldDataHolderEntity}, or any holder of your own), or a nested
+     * one. The side the call arrived on is taken from the target's level, so
+     * {@link com.gto.datasynclib.annotations.RemoteCall#side()} is enforced; pass the side explicitly with
+     * {@link #handleReceived(Object, byte[], LogicalSide)} when the target has no level of its own.</p>
      *
-     * <p>A decode or invocation failure is logged instead of being propagated — a packet handler must
-     * not take the game down.</p>
+     * <p>A decode, direction or invocation failure is logged instead of being propagated — a packet
+     * handler must not take the game down.</p>
      *
      * @param target  the block entity or entity the packet addressed
      * @param payload the call payload; an empty one is ignored
@@ -156,6 +133,22 @@ public class RemoteNetwork {
             IFieldDataHolder.handleRemoteCall(target, payload);
         } catch (Throwable t) {
             DataSyncLib.LOGGER.error("Remote call failed for {} ({})", target.getClass().getName(), t);
+        }
+    }
+
+    /**
+     * The side-aware form of {@link #handleReceived(Object, byte[])} — what the built-in handlers use,
+     * because they know which side they are running on from the packet's direction.
+     *
+     * @param target  the block entity or entity the packet addressed
+     * @param payload the call payload; an empty one is ignored
+     * @param side    the side the call arrived on
+     */
+    public void handleReceived(@NotNull Object target, byte[] payload, LogicalSide side) {
+        try {
+            IFieldDataHolder.handleRemoteCall(target, payload, side);
+        } catch (Throwable t) {
+            DataSyncLib.LOGGER.error("Remote call failed for {} on {} ({})", target.getClass().getName(), side, t);
         }
     }
 

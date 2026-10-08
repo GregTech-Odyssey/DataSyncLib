@@ -1,7 +1,8 @@
 package com.gto.datasynclib.remote;
 
+import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.annotations.RemoteCall;
-import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
+import com.gto.datasynclib.datastream.codec.StreamCodec;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -11,7 +12,7 @@ import java.lang.reflect.Method;
 
 /**
  * One scanned {@link RemoteCall} method: its wire name, an adapted {@link MethodHandle} and the
- * {@link ByteStreamCodec} of every parameter, so a call can be written to, and read from, a
+ * {@link StreamCodec} of every parameter, so a call can be written to, and read from, a
  * {@link FriendlyByteBuf} without any per-instance state.
  *
  * <p>The stream codecs are used on purpose: a call travels over the network, so arguments are written
@@ -39,9 +40,15 @@ public final class RemoteMethod {
     private final Method method;
     private final MethodHandle handle;
     private final MethodHandle spreader;
-    private final ByteStreamCodec<?>[] codecs;
+    private final StreamCodec<? super FriendlyByteBuf, ?>[] codecs;
     private final Class<?>[] parameterTypes;
     private final boolean staticMethod;
+
+    /**
+     * The logical side this method belongs to ({@link RemoteCall#side()}), checked when a call is
+     * resolved: a call that arrives on the other side is refused before the method runs.
+     */
+    private final LogicalSide side;
 
     /**
      * This method's index in the wire table of the class it was scanned for — assigned by
@@ -49,7 +56,8 @@ public final class RemoteMethod {
      */
     private int wireIndex;
 
-    RemoteMethod(String name, Method method, MethodHandle handle, ByteStreamCodec<?>[] codecs, boolean staticMethod) {
+    RemoteMethod(String name, Method method, MethodHandle handle, StreamCodec<? super FriendlyByteBuf, ?>[] codecs, boolean staticMethod,
+                 LogicalSide side) {
         this.name = name;
         this.method = method;
         this.handle = handle;
@@ -61,6 +69,26 @@ public final class RemoteMethod {
         // null check below runs on every encode/decode.
         this.parameterTypes = method.getParameterTypes();
         this.staticMethod = staticMethod;
+        this.side = side;
+    }
+
+    /**
+     * The logical side this method belongs to — {@link RemoteCall#side()}, or {@link LogicalSide#BOTH}
+     * when the annotation does not restrict it.
+     */
+    public LogicalSide side() {
+        return side;
+    }
+
+    /**
+     * Whether this method may run on {@code actual}, the side a call arrived on: a method declared
+     * {@link LogicalSide#BOTH} runs anywhere, and an unknown side ({@code null}, or {@code BOTH} passed
+     * as "not known") is never refused.
+     *
+     * @param actual the side the call arrived on, or {@code null} when it is not known
+     */
+    public boolean runsOn(@Nullable LogicalSide actual) {
+        return actual == null || actual.isBoth() || side.isBoth() || side == actual;
     }
 
     /**
@@ -126,9 +154,11 @@ public final class RemoteMethod {
     }
 
     /**
-     * The stream codec of the parameter at {@code index}, resolved from its declared type.
+     * The stream codec of the parameter at {@code index}, resolved from its declared type — declared
+     * for any buffer the call's {@link FriendlyByteBuf} can stand in as, since the registered codec
+     * may well be written against the plain {@code ByteBuf}.
      */
-    public ByteStreamCodec<?> codec(int index) {
+    public StreamCodec<? super FriendlyByteBuf, ?> codec(int index) {
         return codecs[index];
     }
 
@@ -237,12 +267,12 @@ public final class RemoteMethod {
 
     @SuppressWarnings("unchecked")
     private void encode(int index, FriendlyByteBuf buf, Object value) {
-        ((ByteStreamCodec<Object>) codecs[index]).encode(buf, value);
+        ((StreamCodec<? super FriendlyByteBuf, Object>) codecs[index]).encode(buf, value);
     }
 
     @SuppressWarnings("unchecked")
     private Object decode(int index, FriendlyByteBuf buf) {
-        return ((ByteStreamCodec<Object>) codecs[index]).decode(buf);
+        return ((StreamCodec<? super FriendlyByteBuf, Object>) codecs[index]).decode(buf);
     }
 
     @Override

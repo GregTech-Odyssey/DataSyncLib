@@ -1,7 +1,7 @@
 package com.gto.datasynclib.datastream.data;
 
-import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
+import com.gto.datasynclib.datastream.codec.StreamCodec;
 import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
@@ -92,7 +92,7 @@ public sealed interface Data permits CollectionData, ImmutableData, CustomData {
         }
     };
 
-    ByteStreamCodec<Data> BYTE_STREAM_CODEC = new ByteStreamCodec<>() {
+    StreamCodec<FriendlyByteBuf, Data> BYTE_STREAM_CODEC = new StreamCodec<>() {
 
         @Override
         public void encode(FriendlyByteBuf stream, Data obj) {

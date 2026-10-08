@@ -47,34 +47,32 @@ public interface IFieldDataHolder {
     /**
      * The holder this one is nested in — {@code null} for a holder that is its own root.
      *
-     * <p>This is what makes a holder addressable inside its owner: a remote call carries the field path
-     * from the root down to the calling holder, and that path is derived from this link
-     * ({@link FieldDataManager#remotePath()}). A nested holder knows its owner, so it answers it here —
-     * typically with the reference it was constructed with:</p>
-     *
-     * <pre>{@code
-     * final class EnergyHandler implements IFieldDataHolder {
-     *     private final MyBlockEntity owner;
-     *
-     *     EnergyHandler(MyBlockEntity owner) { this.owner = owner; }
-     *
-     *     @Override public IFieldDataHolder getParentHolder() { return owner; }
-     * }
-     *
-     * // in the owner: this.energy = new EnergyHandler(this);
-     * }</pre>
-     *
-     * <p>Nothing else is required of that field. It is an ordinary holder-typed field, so it takes part
-     * in the owner's holder-field numbering like any other — harmless, because the sender and the
-     * receiver number the same class the same way. Mark it {@code transient} only if you would rather
-     * keep the owner link out of that numbering (see
-     * {@link com.gto.datasynclib.remote.RemoteRouting}).</p>
+     * <p>Used by {@link #scheduleUpdate(LogicalSide)} to hand an update up to the owner. Remote calls do
+     * <strong>not</strong> need it: a call is addressed by the target's index in the flattened holder
+     * tree of the object the packet addresses
+     * ({@link FieldDataManager#writeRemoteCall(Object, Object, String, Object...)}, which takes that
+     * object explicitly), so a holder never has to know where it sits.</p>
      *
      * @return the owning holder, or {@code null} when this holder is a root
      */
     @Nullable
     default IFieldDataHolder getParentHolder() {
         return null;
+    }
+
+    /**
+     * Encodes a remote call for {@code target} — the convenience form of
+     * {@link FieldDataManager#writeRemoteCall(Object, Object, String, Object...)} for the holder the packet
+     * will address: {@code this} is the root of the call, and {@code target} is the holder inside it the
+     * call is for ({@code this} itself when the call is for the addressed object).
+     *
+     * @param target the holder the call is for
+     * @param method the wire name of the {@code @RemoteCall} method
+     * @param args   the arguments, in declaration order
+     * @return the serialized call
+     */
+    default byte[] writeRemoteCall(Object target, String method, Object... args) {
+        return FieldDataManager.writeRemoteCall(this, target, method, args);
     }
 
     /**
@@ -107,32 +105,37 @@ public interface IFieldDataHolder {
      * Applies a received remote call to the object a packet resolved — the dispatch rule the remote
      * packet layer uses, exposed so a packet of your own can share it.
      *
-     * <p>The call is routed by the holder-field path the payload carries: the receiving side reads the
-     * addressed object's holder fields index by index (see
-     * {@link com.gto.datasynclib.remote.RemoteRouting}) until the path is exhausted, so a method declared
-     * on an {@code @AdditionalHolder} sub-object (or any field whose type implements
-     * {@link IFieldDataHolder}) is invoked on that nested object — which is what lets a call encoded by a
-     * nested holder's manager be received here. A holder target runs the call through
-     * {@link FieldDataManager#readRemoteCall(byte[])}, any other block entity or entity through
-     * {@link FieldDataManager#dispatchRemoteCall(Object, byte[])}; both share one buffer and one
-     * decode of the payload.</p>
+     * <p>The payload names a node of {@code target}'s flattened holder tree
+     * ({@link com.gto.datasynclib.remote.RemoteRouting}): index {@code 0} is {@code target} itself,
+     * anything else a holder inside it, found by following one cached path — so a method declared on a
+     * nested holder is invoked on that nested object, and the object a call was made from never has to
+     * know where it sits.</p>
      *
-     * <p>Failures (a path this tree has no field for, an absent holder, a method index out of range, an
-     * exception thrown by the method) are propagated; a payload whose prefix cannot be read at all is
-     * ignored, and a packet handler usually wants to log what does come out instead — see
+     * <p>Failures (an index this tree has no node for, a node absent on this instance, a method index out
+     * of range, an exception thrown by the method) are propagated; a payload whose prefix cannot be read
+     * at all is ignored, and a packet handler usually wants to log what does come out instead — see
      * {@link com.gto.datasynclib.remote.RemoteNetwork#handleReceived(Object, byte[])}.</p>
      *
      * @param target  the block entity or entity the packet addressed; {@code null} is ignored
      * @param payload the call payload from
-     *                {@link FieldDataManager#writeRemoteCall(String, Object...)}; empty input is
-     *                ignored
+     *                {@link FieldDataManager#writeRemoteCall(Object, Object, String, Object...)}; empty
+     *                input is ignored
      */
     static void handleRemoteCall(Object target, byte[] payload) {
-        if (target instanceof IFieldDataHolder holder) {
-            holder.getFieldDataManager().readRemoteCall(payload);
-        } else {
-            FieldDataManager.dispatchRemoteCall(target, payload);
-        }
+        FieldDataManager.dispatchRemoteCall(target, payload);
+    }
+
+    /**
+     * The side-aware form of {@link #handleRemoteCall(Object, byte[])}: the caller states the logical side
+     * the call arrived on, so {@link com.gto.datasynclib.annotations.RemoteCall#side()} is enforced even
+     * for a target that is not in a level (where the two-argument form has no side to check against).
+     *
+     * @param target  the block entity or entity the packet addressed; {@code null} is ignored
+     * @param payload the call payload; empty input is ignored
+     * @param side    the side the call arrived on, or {@code null} when it is not known
+     */
+    static void handleRemoteCall(Object target, byte[] payload, @Nullable LogicalSide side) {
+        FieldDataManager.dispatchRemoteCall(target, payload, side);
     }
 
     /**

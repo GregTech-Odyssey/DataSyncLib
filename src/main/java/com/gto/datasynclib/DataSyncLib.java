@@ -13,12 +13,7 @@ import com.gto.datasynclib.test.ModBlockEntities;
 import com.gto.datasynclib.test.ModBlocks;
 import com.gto.datasynclib.test.ModEntityTypes;
 import com.gto.datasynclib.test.ModItems;
-import com.gto.datasynclib.util.EnumUtil;
-import com.gto.datasynclib.util.FluidStackArrayHashStrategy;
-import com.gto.datasynclib.util.FluidStackHashStrategy;
-import com.gto.datasynclib.util.ItemStackArrayHashStrategy;
-import com.gto.datasynclib.util.ItemStackHashStrategy;
-import com.gto.datasynclib.util.NbtUtil;
+import com.gto.datasynclib.util.*;
 import it.unimi.dsi.fastutil.ints.IntCollection;
 import it.unimi.dsi.fastutil.longs.LongCollection;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
@@ -107,7 +102,6 @@ public final class DataSyncLib {
     public DataSyncLib(FMLJavaModLoadingContext context) {
         DataSyncCodec.init();
         DataSyncNetwork.init();
-        RemoteNetwork.init();
         // Built-in registration below: all of it must happen here, in mod construction, because
         // FieldDefinitionStorage caches the resolved factory per field type on first scan — a
         // registration that arrives later is ignored. Downstream mods extend the same tables

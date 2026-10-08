@@ -1,9 +1,9 @@
 package com.gto.datasynclib.datastream;
 
 import com.gto.datasynclib.DataSyncCodec;
-import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import com.gto.datasynclib.datastream.codec.CombinedCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
+import com.gto.datasynclib.datastream.codec.StreamCodec;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.StringMapData;
 import com.gto.datasynclib.util.Registry;
@@ -19,7 +19,7 @@ import java.util.function.Consumer;
  *
  * <p>Implements three codec interfaces simultaneously:
  * <ul>
- *   <li>{@link ByteStreamCodec}{@code <DataComponentMap>} — for network sync via {@link FriendlyByteBuf}</li>
+ *   <li>{@link StreamCodec}{@code <FriendlyByteBuf, DataComponentMap>} — for network sync via {@link FriendlyByteBuf}</li>
  *   <li>{@link DataCodec}{@code <DataComponentMap>} — for disk persistence via {@link com.gto.datasynclib.datastream.data.StringMapData}</li>
  *   <li>{@link Codec}{@code <DataComponentMap>} — for Mojang's DFU codec integration (delegates to {@link Data#CODEC})</li>
  * </ul>

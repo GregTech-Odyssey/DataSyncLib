@@ -1,33 +1,28 @@
 package com.gto.datasynclib.test;
 
-import com.gto.datasynclib.DataSyncCodec;
-import com.gto.datasynclib.remote.RemoteInvoker;
-import com.gto.datasynclib.remote.RemoteNetwork;
-import com.gto.datasynclib.remote.RemoteRouting;
-import com.gto.datasynclib.DataSyncLib;
-import com.gto.datasynclib.FieldDataManager;
-import com.gto.datasynclib.FieldDefinitionStorage;
-import com.gto.datasynclib.IFieldDataHolder;
-import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.*;
 import com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity;
 import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
+import com.gto.datasynclib.datastream.codec.StreamCodec;
 import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.datastream.data.StringMapData;
-import com.gto.datasynclib.util.EnumUtil;
-import com.gto.datasynclib.util.FluidStackArrayHashStrategy;
-import com.gto.datasynclib.util.FluidStackHashStrategy;
-import com.gto.datasynclib.util.HashUtil;
-import com.gto.datasynclib.util.ItemStackArrayHashStrategy;
-import com.gto.datasynclib.util.ItemStackHashStrategy;
+import com.gto.datasynclib.remote.RemoteInvoker;
+import com.gto.datasynclib.remote.RemoteNetwork;
+import com.gto.datasynclib.remote.RemoteRouting;
+import com.gto.datasynclib.util.*;
 import com.gto.datasynclib.util.Registry;
-import it.unimi.dsi.fastutil.Hash;
 import io.netty.buffer.Unpooled;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.GlobalPos;
-import net.minecraft.core.SectionPos;
-import net.minecraft.core.Vec3i;
+import it.unimi.dsi.fastutil.Hash;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.ints.IntSet;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongList;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import net.minecraft.core.*;
 import net.minecraft.nbt.ByteArrayTag;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
@@ -153,7 +148,8 @@ public final class TestBlockEntityTests {
      * <p><b>Usage:</b> {@link DataSyncCodec#get(Class)} resolves the codec of a field type and exposes
      * {@code dataWriter/dataReader} (disk) and {@code streamWriter/streamReader} (network), so both paths
      * can be driven directly — which is what the assertions below do for primitive arrays, enums,
-     * ItemStack and the hand-written {@code GlobalPos}/{@code SectionPos}/{@code Vec3i} pairs.</p>
+     * ItemStack, the hand-written {@code GlobalPos}/{@code SectionPos}/{@code Vec3i} pairs and the
+     * hand-written FastUtil primitive collections.</p>
      */
     private void codecs() {
         expect("codecs.primitiveArray", DataSyncCodec.get(int[].class) != null, true);
@@ -186,6 +182,66 @@ public final class TestBlockEntityTests {
         var vec = new Vec3i(-1, 2, -3);
         var vecCodec = DataSyncCodec.get(Vec3i.class);
         expect("codecs.vec3iRoundTrip", vec, vecCodec.dataReader.decode(vecCodec.dataWriter.encode(vec), 0));
+
+        // ---- FastUtil primitive collections: hand-written, so nothing boxes ----
+        expect("codecs.intList", DataSyncCodec.get(IntList.class) == DataSyncCodec.INT_LIST_CODEC, true);
+        expect("codecs.intSet", DataSyncCodec.get(IntSet.class) == DataSyncCodec.INT_SET_CODEC, true);
+        expect("codecs.longList", DataSyncCodec.get(LongList.class) == DataSyncCodec.LONG_LIST_CODEC, true);
+        expect("codecs.longSet", DataSyncCodec.get(LongSet.class) == DataSyncCodec.LONG_SET_CODEC, true);
+
+        IntList intList = new IntArrayList(new int[]{3, 1, 4, 1, 5});
+        IntSet intSet = new IntOpenHashSet(new int[]{2, 7, 9});
+        LongList longList = new LongArrayList(new long[]{1L, -2L, 1L << 40});
+        LongSet longSet = new LongOpenHashSet(new long[]{-5L, 6L});
+        expect("codecs.intListDataRoundTrip", intList,
+                DataSyncCodec.INT_LIST_CODEC.dataReader.decode(DataSyncCodec.INT_LIST_CODEC.dataWriter.encode(intList), 0));
+        expect("codecs.intListStreamRoundTrip", intList, streamRoundTrip(ByteStreamCodec.INT_LIST_CODEC, intList));
+        expect("codecs.intSetDataRoundTrip", intSet,
+                DataSyncCodec.INT_SET_CODEC.dataReader.decode(DataSyncCodec.INT_SET_CODEC.dataWriter.encode(intSet), 0));
+        expect("codecs.intSetStreamRoundTrip", intSet, streamRoundTrip(ByteStreamCodec.INT_SET_CODEC, intSet));
+        expect("codecs.longListDataRoundTrip", longList,
+                DataSyncCodec.LONG_LIST_CODEC.dataReader.decode(DataSyncCodec.LONG_LIST_CODEC.dataWriter.encode(longList), 0));
+        expect("codecs.longListStreamRoundTrip", longList, streamRoundTrip(ByteStreamCodec.LONG_LIST_CODEC, longList));
+        expect("codecs.longSetDataRoundTrip", longSet,
+                DataSyncCodec.LONG_SET_CODEC.dataReader.decode(DataSyncCodec.LONG_SET_CODEC.dataWriter.encode(longSet), 0));
+        expect("codecs.longSetStreamRoundTrip", longSet, streamRoundTrip(ByteStreamCodec.LONG_SET_CODEC, longSet));
+        // An empty collection round-trips as an empty collection, not as an absent value.
+        expect("codecs.intListEmptyRoundTrip", new IntArrayList(),
+                DataSyncCodec.INT_LIST_CODEC.dataReader.decode(DataSyncCodec.INT_LIST_CODEC.dataWriter.encode(new IntArrayList()), 0));
+        // The disk payload is the primitive array of the matching array codec, so it stays compact…
+        expect("codecs.intListDataIsIntArray", Data.INT_ARRAY, DataSyncCodec.INT_LIST_CODEC.dataWriter.encode(intList).getId());
+        expect("codecs.longSetDataIsLongArray", Data.LONG_ARRAY, DataSyncCodec.LONG_SET_CODEC.dataWriter.encode(longSet).getId());
+        // …and the wire form is a VarInt size plus primitives: ints are VarInts, longs are raw.
+        expect("codecs.intListWireSize", 4, streamSize(ByteStreamCodec.INT_LIST_CODEC, new IntArrayList(new int[]{3, 1, 4})));
+        expect("codecs.longListWireSize", 17, streamSize(ByteStreamCodec.LONG_LIST_CODEC, new LongArrayList(new long[]{5L, 6L})));
+    }
+
+    /**
+     * Round-trips a value through one codec's network half, the way the sync path does.
+     */
+    private <T> T streamRoundTrip(StreamCodec<? super FriendlyByteBuf, T> codec, T value) {
+        var buf = Unpooled.buffer();
+        try {
+            var wrapper = new FriendlyByteBuf(buf);
+            codec.encode(wrapper, value);
+            return codec.decode(wrapper);
+        } finally {
+            buf.release();
+        }
+    }
+
+    /**
+     * The number of bytes one codec's network half writes for a value — the format pin the round-trip
+     * assertions above cannot give.
+     */
+    private <T> int streamSize(StreamCodec<? super FriendlyByteBuf, T> codec, T value) {
+        var buf = Unpooled.buffer();
+        try {
+            codec.encode(new FriendlyByteBuf(buf), value);
+            return buf.readableBytes();
+        } finally {
+            buf.release();
+        }
     }
 
     /**
@@ -753,17 +809,18 @@ public final class TestBlockEntityTests {
     }
 
     /**
-     * Remote calls end to end: the scanned table, the local name check, the wire prefix (holder-field
-     * path + method index), routing into nested holders — including two levels deep and a nested holder
-     * that declares the same method name as the root — the instance-free (static) form, the whole
-     * argument surface, and every failure the packet layer has to survive.
+     * Remote calls end to end: the scanned table, the declared direction, the wire prefix (holder index
+     * + method index), routing into nested holders — including two levels deep and a nested holder that
+     * declares the same method name as the root — the instance-free (static) form, the whole argument
+     * surface, and every failure the packet layer has to survive.
      *
-     * <p><b>Usage:</b> annotate a method with {@code @RemoteCall} (it must be {@code void}); a holder
-     * that sits inside another one answers {@link IFieldDataHolder#getParentHolder()} so a call made from
-     * it is addressed as a field path; then {@code manager.writeRemoteCall("name", args)} builds the
-     * payload and {@code manager.readRemoteCall(payload)} —
-     * {@link com.gto.datasynclib.remote.RemoteNetwork#handleReceived(Object, byte[])} for a real packet —
-     * applies it. {@link com.gto.datasynclib.remote.RemoteNetwork} or a packet of your own carries it.</p>
+     * <p><b>Usage:</b> annotate a method with {@code @RemoteCall} (it must be {@code void}, and
+     * {@code side} states which side may run it); the sender passes the object the packet will address
+     * and the holder the method lives on — {@code be.writeRemoteCall(be.b, "mark", args)}, or
+     * {@link FieldDataManager#writeRemoteCall(Object, Object, String, Object...)} — which builds the
+     * payload; {@link IFieldDataHolder#handleRemoteCall(Object, byte[])} (or
+     * {@link com.gto.datasynclib.remote.RemoteNetwork#handleReceived(Object, byte[])} for a real packet)
+     * then applies it to the object the packet addressed.</p>
      */
     private void remoteCall() {
         TestBlockEntity be = newEntity();
@@ -780,62 +837,100 @@ public final class TestBlockEntityTests {
         expect("remote.isVoid", manager.getRemoteMethod("remoteMark").method().getReturnType() == void.class, true);
         expect("remote.staticRecognised", manager.getRemoteMethod("staticMark").isStatic(), true);
         expect("remote.indexInRange", manager.getRemoteMethod("remoteMark").wireIndex() >= 0, true);
+        // ---- the declared direction of a method (@RemoteCall(side = ...)) ----
+        expect("remote.side.defaultBoth", LogicalSide.BOTH, manager.getRemoteMethod("remoteMark").side());
+        expect("remote.side.clientOnly", LogicalSide.CLIENT, manager.getRemoteMethod("clientOnlyMark").side());
+        expect("remote.side.serverOnly", LogicalSide.SERVER, manager.getRemoteMethod("serverOnlyMark").side());
+        expect("remote.side.runsOnAgrees", manager.getRemoteMethod("remoteMark").runsOn(LogicalSide.SERVER), true);
+        expect("remote.side.clientOnlyRejectsServer",
+                manager.getRemoteMethod("clientOnlyMark").runsOn(LogicalSide.SERVER), false);
+        expect("remote.side.serverOnlyRejectsClient",
+                manager.getRemoteMethod("serverOnlyMark").runsOn(LogicalSide.CLIENT), false);
+        expect("remote.side.unknownNeverRefused", manager.getRemoteMethod("serverOnlyMark").runsOn(null), true);
+        expect("remote.side.sideOfLevelLessTarget", null, RemoteInvoker.sideOf(be));
 
-        // ---- the holder's own position: root [], nested [b], third level [b, nested] ----
-        String[] outerFields = RemoteRouting.holderFieldNames(TestBlockEntity.class);
-        int[] bPath = be.b.getFieldDataManager().remotePath();
-        int[] cPath = be.b.nested.getFieldDataManager().remotePath();
-        int moduleIndex = Arrays.asList(outerFields).indexOf("module");
-        expect("remote.path.root", "[]", Arrays.toString(manager.remotePath()));
-        expect("remote.path.nestedLength", 1, bPath.length);
-        expect("remote.path.nestedField", "b", outerFields[bPath[0]]);
-        expect("remote.path.deepLength", 2, cPath.length);
-        expect("remote.path.deepFields", "[b, nested]",
-                "[" + outerFields[cPath[0]] + ", "
-                        + RemoteRouting.holderFieldNames(TestBlockEntity.B.class)[cPath[1]] + "]");
-        expect("remote.parentHolder", true, be.b.getParentHolder() == be);
-        expect("remote.parentHolderDeep", true, be.b.nested.getParentHolder() == be.b);
-        expect("remote.moduleIsAHolderField", moduleIndex >= 0, true);
+        // ---- the addressed object's holder tree is flattened per class, in a fixed order ----
+        String[] nodes = RemoteRouting.holderNodeNames(TestBlockEntity.class);
+        int bIndex = RemoteRouting.indexOf(be, be.b);
+        int cIndex = RemoteRouting.indexOf(be, be.b.nested);
+        int moduleIndex = Arrays.asList(nodes).indexOf("module");
+        expect("remote.tree.root", "self", nodes[0]);
+        expect("remote.tree.nestedIndex", "b", nodes[bIndex]);
+        expect("remote.tree.deepIndex", "nested", nodes[cIndex]);
+        expect("remote.tree.deepIsDeeperThanNested", true, cIndex > bIndex);
+        expect("remote.tree.rootIsZero", 0, RemoteRouting.indexOf(be, be));
+        expect("remote.tree.unknownHolder", -1, RemoteRouting.indexOf(be, new Object()));
+        expect("remote.moduleIsANode", moduleIndex > 0, true);
 
-        // ---- the wire prefix: a VarInt depth, one VarInt per field index, a VarInt method index ----
-        byte[] payload = manager.writeRemoteCall("remoteMark", 5);
-        byte[] nestedCall = be.b.getFieldDataManager().writeRemoteCall("remoteMark", 11);
-        byte[] deepCall = be.b.nested.getFieldDataManager().writeRemoteCall("cMark", 13);
+        // ---- the wire prefix: the target's node index, then the method's index in its class table ----
+        byte[] payload = be.writeRemoteCall(be, "remoteMark", 5);
+        byte[] nestedCall = be.writeRemoteCall(be.b, "remoteMark", 11);
+        byte[] deepCall = be.writeRemoteCall(be.b.nested, "cMark", 13);
         var route = RemoteInvoker.readRoute(payload);
-        expect("remote.prefix.rootDepth", 0, route.path().length);
-        expect("remote.prefix.rootIndex", manager.getRemoteMethod("remoteMark").wireIndex(), route.index());
-        expect("remote.payloadSize.root", 3, payload.length); // depth + method index + one VarInt int
-        expect("remote.prefix.nestedPath", Arrays.toString(bPath),
-                Arrays.toString(RemoteInvoker.readRoute(nestedCall).path()));
-        expect("remote.payloadSize.nested", 4, nestedCall.length);
-        expect("remote.prefix.deepPath", Arrays.toString(cPath),
-                Arrays.toString(RemoteInvoker.readRoute(deepCall).path()));
-        expect("remote.payloadSize.deep", 5, deepCall.length);
+        expect("remote.prefix.rootNode", 0, route.holder());
+        expect("remote.prefix.rootMethod", manager.getRemoteMethod("remoteMark").wireIndex(), route.method());
+        expect("remote.payloadSize.root", 3, payload.length); // node + method index + one VarInt int
+        expect("remote.prefix.nestedNode", bIndex, RemoteInvoker.readRoute(nestedCall).holder());
+        expect("remote.payloadSize.nested", 3, nestedCall.length); // flat: same size at any depth
+        expect("remote.prefix.deepNode", cIndex, RemoteInvoker.readRoute(deepCall).holder());
+        expect("remote.payloadSize.deep", 3, deepCall.length);
 
         // ---- encode, decode and invoke: the two halves a packet handler sits between ----
         expect("remote.notInvokedYet", be.remoteMarked, 0);
-        manager.readRemoteCall(payload);
+        IFieldDataHolder.handleRemoteCall(be, payload);
         expect("remote.received", be.remoteMarked, 5);
         RemoteInvoker.handle(be, RemoteInvoker.write(be, "remoteMark", 7));
         expect("remote.receivedViaInvoker", be.remoteMarked, 7);
 
-        // ---- the packet-layer trigger: a holder target goes through its manager ----
-        RemoteNetwork.handleReceived(be, manager.writeRemoteCall("remoteMark", 9));
+        // ---- the packet-layer trigger ----
+        RemoteNetwork.handleReceived(be, be.writeRemoteCall(be, "remoteMark", 9));
         expect("remote.receivedViaNetwork", be.remoteMarked, 9);
 
-        // ---- a call from a nested holder lands on it, even though it declares the same name as the root
+        // ---- a call for a nested holder lands on it, even though it declares the same name as the root
         RemoteNetwork.handleReceived(be, nestedCall);
         expect("remote.nestedRouted", be.b.remoteMarked, 11);
         expect("remote.nestedRootUntouched", be.remoteMarked, 9);
-        manager.readRemoteCall(be.b.getFieldDataManager().writeRemoteCall("remoteMark", 12));
-        expect("remote.nestedRoutedFromManager", be.b.remoteMarked, 12);
+        IFieldDataHolder.handleRemoteCall(be, be.writeRemoteCall(be.b, "remoteMark", 12));
+        expect("remote.nestedRoutedFromPacketEntry", be.b.remoteMarked, 12);
         expect("remote.nestedRootStillUntouched", be.remoteMarked, 9);
 
-        // ...and one from the third level reaches it through two indices
+        // ...and one for the third level, addressed by its own node index
         RemoteNetwork.handleReceived(be, deepCall);
         expect("remote.deepRouted", be.b.nested.marked, 13);
         expect("remote.deepRootUntouched", be.remoteMarked, 9);
         expect("remote.deepSiblingUntouched", be.b.remoteMarked, 12);
+
+        // ---- an annotated default method declared on an interface is part of the table ----
+        // The block entity itself does not implement the feature, so its own table must not have it.
+        expect("remote.interfaceNotOnUnrelatedClass", manager.getRemoteMethod("featureMark") == null, true);
+        var featureOnB = be.b.getFieldDataManager().getRemoteMethod("featureMark");
+        expect("remote.interfaceDefaultFound", featureOnB != null, true);
+        expect("remote.interfaceDefaultDeclaringClass", TestBlockEntity.RemoteFeature.class, featureOnB.declaringClass());
+        expect("remote.interfaceDefaultSide", LogicalSide.CLIENT, featureOnB.side());
+        expect("remote.interfaceDefaultIsDefaultMethod", featureOnB.method().isDefault(), true);
+        // B overrides the default without annotating it: the call must reach the override, not the default body.
+        RemoteInvoker.handle(be.b, RemoteInvoker.write(be.b, "featureMark", 31), LogicalSide.CLIENT);
+        expect("remote.interfaceOverrideDispatched", be.b.featureOverridden, 31);
+        expect("remote.interfaceDefaultBodySkipped", be.b.featureDefaultMarked, 0);
+        // C does not override it, so the default body runs and funnels into the hook.
+        expect("remote.interfaceDefaultOnNested", be.b.nested.getFieldDataManager().getRemoteMethod("featureMark") != null, true);
+        RemoteInvoker.handle(be.b.nested, RemoteInvoker.write(be.b.nested, "featureMark", 32), LogicalSide.CLIENT);
+        expect("remote.interfaceDefaultInvoked", be.b.nested.featureMarked, 32);
+        expect("remote.interfaceDefaultOnlyOnTarget", be.b.featureOverridden, 31);
+        // ...including through the packet path, where the call is routed to the nested node first.
+        RemoteNetwork.handleReceived(be, be.writeRemoteCall(be.b, "featureMark", 33), LogicalSide.CLIENT);
+        expect("remote.interfaceViaPacket", be.b.featureOverridden, 33);
+        expect("remote.interfaceWrongSideRefused",
+                throwsRuntime(() -> RemoteInvoker.handle(be.b, RemoteInvoker.write(be.b, "featureMark", 34), LogicalSide.SERVER)));
+        expect("remote.interfaceWrongSideNotInvoked", be.b.featureOverridden, 33);
+        // An interface contributed by a superclass counts too, and the call runs the default body.
+        var inherited = RemoteInvoker.method(TestBlockEntity.FeatureDerived.class, "inheritedMark");
+        expect("remote.interfaceThroughSuperclass", inherited != null, true);
+        expect("remote.interfaceThroughSuperclassDeclarer", TestBlockEntity.InheritedFeature.class, inherited.declaringClass());
+        expect("remote.interfaceOnDirectImplementor", RemoteInvoker.method(TestBlockEntity.FeatureBase.class, "inheritedMark") != null, true);
+        var featureDerived = new TestBlockEntity.FeatureDerived();
+        RemoteInvoker.handle(featureDerived, RemoteInvoker.write(featureDerived, "inheritedMark", 35));
+        expect("remote.interfaceThroughSuperclassInvoked", featureDerived.inheritedMarked, 35);
 
         // ---- an instance-free (static) call needs no target object ----
         TestBlockEntity.staticMarked = 0;
@@ -844,42 +939,77 @@ public final class TestBlockEntityTests {
         RemoteNetwork.handleReceived(be, RemoteInvoker.write(TestBlockEntity.class, "staticMark", 22));
         expect("remote.staticViaNetwork", TestBlockEntity.staticMarked, 22);
 
+        // ---- direction: a call declared for one side does not run on the other ----
+        byte[] clientOnly = be.writeRemoteCall(be, "clientOnlyMark", 41);
+        byte[] serverOnly = be.writeRemoteCall(be, "serverOnlyMark", 42);
+        be.clientOnlyMarked = 0;
+        be.serverOnlyMarked = 0;
+        // refused before the body runs, and refused loudly: a wrong-side call means the peer is wrong
+        expect("remote.side.clientOnlyRefusedOnServer",
+                throwsRuntime(() -> IFieldDataHolder.handleRemoteCall(be, clientOnly, LogicalSide.SERVER)));
+        expect("remote.side.clientOnlyNotInvokedOnServer", be.clientOnlyMarked, 0);
+        expect("remote.side.serverOnlyRefusedOnClient",
+                throwsRuntime(() -> IFieldDataHolder.handleRemoteCall(be, serverOnly, LogicalSide.CLIENT)));
+        expect("remote.side.serverOnlyNotInvokedOnClient", be.serverOnlyMarked, 0);
+        // ...and runs on the side it was declared for
+        IFieldDataHolder.handleRemoteCall(be, clientOnly, LogicalSide.CLIENT);
+        expect("remote.side.clientOnlyRunsOnClient", be.clientOnlyMarked, 41);
+        IFieldDataHolder.handleRemoteCall(be, serverOnly, LogicalSide.SERVER);
+        expect("remote.side.serverOnlyRunsOnServer", be.serverOnlyMarked, 42);
+        // the two sides as the packet layer states them behave the same way
+        be.serverOnlyMarked = 0;
+        RemoteNetwork.handleReceived(be, serverOnly, LogicalSide.CLIENT);
+        expect("remote.side.networkRefusesWrongSide", be.serverOnlyMarked, 0);
+        RemoteNetwork.handleReceived(be, serverOnly, LogicalSide.SERVER);
+        expect("remote.side.networkRunsRightSide", be.serverOnlyMarked, 42);
+        // a target outside a level has no side, so the two-argument form never refuses
+        RemoteInvoker.handle(be, serverOnly, null);
+        expect("remote.side.noSidePasses", be.serverOnlyMarked, 42);
+        // a BOTH method still runs on either side
+        IFieldDataHolder.handleRemoteCall(be, be.writeRemoteCall(be, "remoteMark", 43), LogicalSide.SERVER);
+        expect("remote.side.bothRunsOnServer", be.remoteMarked, 43);
+        IFieldDataHolder.handleRemoteCall(be, be.writeRemoteCall(be, "remoteMark", 44), LogicalSide.CLIENT);
+        expect("remote.side.bothRunsOnClient", be.remoteMarked, 44);
+
         // ---- the argument surface: primitives, references, null and arrays ----
-        manager.readRemoteCall(manager.writeRemoteCall("rich", 31, "text", new int[]{1, 2, 3}, true));
+        IFieldDataHolder.handleRemoteCall(be, be.writeRemoteCall(be, "rich", 31, "text", new int[]{1, 2, 3}, true));
         expect("remote.args.int", be.richInt, 31);
         expect("remote.args.text", be.richText, "text");
         expect("remote.args.array", Arrays.toString(be.richArray), "[1, 2, 3]");
         expect("remote.args.flag", be.richFlag, true);
-        manager.readRemoteCall(manager.writeRemoteCall("rich", 32, null, null, false));
+        IFieldDataHolder.handleRemoteCall(be, be.writeRemoteCall(be, "rich", 32, null, null, false));
         expect("remote.args.nullText", be.richText, null);
         expect("remote.args.nullArray", be.richArray, null);
         expect("remote.args.false", be.richFlag, false);
 
         // ---- failures, none of which may reach a method ----
         int markedBefore = be.remoteMarked;
-        // a name this holder does not have is rejected locally, before a payload is built
-        expect("remote.unknownRejected", throwsRuntime(() -> manager.writeRemoteCall("missing")));
+        // a name the target does not have is rejected locally, before a payload is built
+        expect("remote.unknownRejected", throwsRuntime(() -> be.writeRemoteCall(be, "missing")));
         // ...and so are a wrong argument count and a null for a primitive parameter
-        expect("remote.arityRejected", throwsRuntime(() -> manager.writeRemoteCall("remoteMark", 1, 2)));
+        expect("remote.arityRejected", throwsRuntime(() -> be.writeRemoteCall(be, "remoteMark", 1, 2)));
         expect("remote.primitiveNullRejected",
-                throwsRuntime(() -> manager.writeRemoteCall("remoteMark", (Object) null)));
+                throwsRuntime(() -> be.writeRemoteCall(be, "remoteMark", (Object) null)));
+        // a holder that is not part of the addressed tree cannot be addressed through it
+        expect("remote.foreignTargetRejected",
+                throwsRuntime(() -> be.writeRemoteCall(newEntity(), "remoteMark", 1)));
         // a payload that cannot be read at all is dropped by the packet layer
         RemoteNetwork.handleReceived(be, new byte[]{99});
         expect("remote.malformedIgnored", be.remoteMarked, markedBefore);
-        // a method index the class does not have, and a field path the tree does not have
+        // a method index the target class does not have, and a node index the tree does not have
         RemoteNetwork.handleReceived(be, prefix(0, 99));
-        expect("remote.badIndexIgnored", be.remoteMarked, markedBefore);
-        RemoteNetwork.handleReceived(be, prefix(1, 99, 0));
-        expect("remote.badPathIgnored", be.remoteMarked, markedBefore);
-        // a field path that reaches a holder without remote methods must not fall back to the root
-        RemoteNetwork.handleReceived(be, prefix(1, moduleIndex, 0));
+        expect("remote.badMethodIgnored", be.remoteMarked, markedBefore);
+        RemoteNetwork.handleReceived(be, prefix(99, 0));
+        expect("remote.badNodeIgnored", be.remoteMarked, markedBefore);
+        // a node that carries no remote methods must not fall back to the root
+        RemoteNetwork.handleReceived(be, prefix(moduleIndex, 0));
         expect("remote.wrongHolderIgnored", be.remoteMarked, markedBefore);
         // bytes left over after the arguments mean the two sides disagree about the class
-        byte[] withJunk = manager.writeRemoteCall("remoteMark", 77);
+        byte[] withJunk = be.writeRemoteCall(be, "remoteMark", 77);
         RemoteNetwork.handleReceived(be, Arrays.copyOf(withJunk, withJunk.length + 2));
         expect("remote.leftoverRejected", be.remoteMarked, markedBefore);
-        // none of that broke the routing: the nested holder is still reachable
-        RemoteNetwork.handleReceived(be, be.b.getFieldDataManager().writeRemoteCall("remoteMark", 78));
+        // none of that broke the addressing: the nested holder is still reachable
+        RemoteNetwork.handleReceived(be, be.writeRemoteCall(be.b, "remoteMark", 78));
         expect("remote.nestedStillRouted", be.b.remoteMarked, 78);
         expect("remote.rootSurvivedEverything", be.remoteMarked, markedBefore);
     }

@@ -7,12 +7,12 @@ import com.gto.datasynclib.util.EnumUtil;
 import com.gto.datasynclib.util.HashUtil;
 import com.gto.datasynclib.util.StreamCodecs;
 import com.mojang.serialization.Codec;
+import it.unimi.dsi.fastutil.ints.IntList;
+import it.unimi.dsi.fastutil.ints.IntSet;
+import it.unimi.dsi.fastutil.longs.LongList;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.GlobalPos;
-import net.minecraft.core.Registry;
-import net.minecraft.core.SectionPos;
-import net.minecraft.core.Vec3i;
+import net.minecraft.core.*;
 import net.minecraft.core.particles.ParticleType;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -64,7 +64,8 @@ import java.util.UUID;
  * {@link #ENUM_CACHE} and {@link #ARRAY_CACHE}.
  *
  * <p>Pre-registered codecs cover Java primitives and their arrays, String, UUID, BigInteger,
- * the {@code Data}/{@code StringMapData} types themselves, and Minecraft types: Item, Block,
+ * the {@code Data}/{@code StringMapData} types themselves, the FastUtil {@code IntList}/{@code IntSet}/
+ * {@code LongList}/{@code LongSet} collections, and Minecraft types: Item, Block,
  * Fluid, EntityType, BlockEntityType, MobEffect, Enchantment, SoundEvent, Attribute,
  * ParticleType, MenuType, RecipeType, ItemStack, FluidStack, ResourceLocation, Vec2, Vec3,
  * Vec3i, BlockPos, ChunkPos, SectionPos, GlobalPos, Tag, CompoundTag, ListTag, Component,
@@ -73,12 +74,13 @@ import java.util.UUID;
  * construction.</p>
  *
  * <p>Types whose payload is a handful of primitives (Vec3i, SectionPos, AABB) use hand-written
- * codec pairs instead of {@link CombinedCodec#composite} to avoid boxing; see that method for
- * the trade-off.</p>
+ * codec pairs instead of {@link CombinedCodec#composite} to avoid boxing; the FastUtil primitive
+ * collections are hand-written for the same reason — a {@code collection(...)} codec would box every
+ * element. See that method for the trade-off.</p>
  *
  * <p>Downstream mods add their own types with the static {@code register(...)} family —
- * {@link #register(Class, ByteStreamCodec, DataCodec)} for a plain runtime type,
- * {@link #register(Class, ByteStreamCodec, DataCodec, Class[])} for a parameterized one, and
+ * {@link #register(Class, StreamCodec, DataCodec)} for a plain runtime type,
+ * {@link #register(Class, StreamCodec, DataCodec, Class[])} for a parameterized one, and
  * {@link #register(Class, Registry)} for registry entries. Register during mod construction:
  * the field-definition layer caches the resolved factory per field type, so a registration that
  * arrives after that type was first scanned can be shadowed, and the tables are only
@@ -189,11 +191,11 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     /**
      * Encoder for live network synchronization via {@link FriendlyByteBuf}.
      */
-    public final ByteStreamEncoder<? super T> streamWriter;
+    public final StreamEncoder<? super FriendlyByteBuf, ? super T> streamWriter;
     /**
      * Decoder for live network synchronization via {@link FriendlyByteBuf}.
      */
-    public final ByteStreamDecoder<? extends T> streamReader;
+    public final StreamDecoder<? super FriendlyByteBuf, ? extends T> streamReader;
     /**
      * Encoder for persistent storage via {@link com.gto.datasynclib.datastream.data.Data Data} objects.
      */
@@ -203,7 +205,7 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
      */
     public final DataDecoder<? extends T> dataReader;
 
-    private DataSyncCodec(ByteStreamEncoder<? super T> streamWriter, ByteStreamDecoder<? extends T> streamReader, DataEncoder<? super T> dataWriter, DataDecoder<? extends T> dataReader) {
+    private DataSyncCodec(StreamEncoder<? super FriendlyByteBuf, ? super T> streamWriter, StreamDecoder<? super FriendlyByteBuf, ? extends T> streamReader, DataEncoder<? super T> dataWriter, DataDecoder<? extends T> dataReader) {
         this.streamWriter = streamWriter;
         this.streamReader = streamReader;
         this.dataWriter = dataWriter;
@@ -219,9 +221,9 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
 
     @Override
     @SuppressWarnings("unchecked")
-    public ByteStreamCodec<T> toStreamCodec() {
-        // streamWriter == streamReader means the same ByteStreamCodec was supplied; return it directly.
-        return streamWriter == streamReader ? (ByteStreamCodec<T>) streamWriter : this;
+    public StreamCodec<? super FriendlyByteBuf, T> toStreamCodec() {
+        // streamWriter == streamReader means the same StreamCodec was supplied; return it directly.
+        return streamWriter == streamReader ? (StreamCodec<? super FriendlyByteBuf, T>) streamWriter : this;
     }
 
     /**
@@ -233,7 +235,7 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
         return this;
     }
 
-    // ===== ByteStreamCodec implementation =====
+    // ===== StreamCodec implementation =====
 
     @Override
     public void encode(FriendlyByteBuf buf, T obj) {
@@ -270,7 +272,7 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
      * @param dataWriter   encodes to persistent Data
      * @param dataReader   decodes from persistent Data
      */
-    public static <T> DataSyncCodec<T> of(ByteStreamEncoder<? super T> streamWriter, ByteStreamDecoder<? extends T> streamReader, DataEncoder<? super T> dataWriter, DataDecoder<? extends T> dataReader) {
+    public static <T> DataSyncCodec<T> of(StreamEncoder<? super FriendlyByteBuf, ? super T> streamWriter, StreamDecoder<? super FriendlyByteBuf, ? extends T> streamReader, DataEncoder<? super T> dataWriter, DataDecoder<? extends T> dataReader) {
         return new DataSyncCodec<>(streamWriter, streamReader, dataWriter, dataReader);
     }
 
@@ -279,13 +281,13 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
      * encode and decode for its respective medium).
      *
      * <p>Use when you have distinct optimized codecs for network and persistence.
-     * If both paths use the same codec, use {@link #of(ByteStreamCodec)} or
+     * If both paths use the same codec, use {@link #of(StreamCodec)} or
      * {@link #of(DataCodec)} instead.</p>
      *
      * @param streamCodec bidirectional network serializer
      * @param dataCodec   bidirectional persistence serializer
      */
-    public static <T> DataSyncCodec<T> of(ByteStreamCodec<T> streamCodec, DataCodec<T> dataCodec) {
+    public static <T> DataSyncCodec<T> of(StreamCodec<? super FriendlyByteBuf, T> streamCodec, DataCodec<T> dataCodec) {
         return new DataSyncCodec<>(streamCodec, streamCodec, dataCodec, dataCodec);
     }
 
@@ -297,7 +299,7 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
      * <p>Use when you have a working network codec and want a quick persistence path
      * without writing a separate Data codec. The data format will be a byte array.</p>
      */
-    public static <T> DataSyncCodec<T> of(ByteStreamCodec<T> streamCodec) {
+    public static <T> DataSyncCodec<T> of(StreamCodec<? super FriendlyByteBuf, T> streamCodec) {
         return of(streamCodec, DataCodec.of(streamCodec));
     }
 
@@ -433,7 +435,7 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
      * @param <T>          the type
      * @return the registered codec (also returned by future {@link #get(Class)} calls)
      */
-    public static <T> DataSyncCodec<T> register(Class<T> type, ByteStreamEncoder<T> streamWriter, ByteStreamDecoder<T> streamReader, DataEncoder<T> dataWriter, DataDecoder<T> dataReader) {
+    public static <T> DataSyncCodec<T> register(Class<T> type, StreamEncoder<? super FriendlyByteBuf, T> streamWriter, StreamDecoder<? super FriendlyByteBuf, T> streamReader, DataEncoder<T> dataWriter, DataDecoder<T> dataReader) {
         var codec = new DataSyncCodec<>(streamWriter, streamReader, dataWriter, dataReader);
         synchronized (CODECS) {
             CODECS.put(type, codec);
@@ -444,7 +446,7 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     /**
      * Registers a codec from a stream codec and a data codec.
      */
-    public static <T> DataSyncCodec<T> register(Class<T> type, ByteStreamCodec<T> streamCodec, DataCodec<T> dataCodec) {
+    public static <T> DataSyncCodec<T> register(Class<T> type, StreamCodec<? super FriendlyByteBuf, T> streamCodec, DataCodec<T> dataCodec) {
         return register(type, streamCodec, streamCodec, dataCodec, dataCodec);
     }
 
@@ -458,7 +460,7 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     /**
      * Registers a codec from a stream codec and a Mojang {@link Codec}, deriving the data codec automatically.
      */
-    public static <T> DataSyncCodec<T> register(Class<T> type, ByteStreamCodec<T> streamCodec, Codec<T> codec) {
+    public static <T> DataSyncCodec<T> register(Class<T> type, StreamCodec<? super FriendlyByteBuf, T> streamCodec, Codec<T> codec) {
         return register(type, streamCodec, DataCodec.of(codec));
     }
 
@@ -485,7 +487,7 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
      * @param <T>          the type
      * @return the registered codec
      */
-    public static <T> DataSyncCodec<T> register(Class<?> type, ByteStreamEncoder<T> streamWriter, ByteStreamDecoder<T> streamReader, DataEncoder<T> dataWriter, DataDecoder<T> dataReader, Class<?>... genericTypes) {
+    public static <T> DataSyncCodec<T> register(Class<?> type, StreamEncoder<? super FriendlyByteBuf, T> streamWriter, StreamDecoder<? super FriendlyByteBuf, T> streamReader, DataEncoder<T> dataWriter, DataDecoder<T> dataReader, Class<?>... genericTypes) {
         var codec = new DataSyncCodec<>(streamWriter, streamReader, dataWriter, dataReader);
         synchronized (GENERIC_CODECS) {
             GENERIC_CODECS.computeIfAbsent(type, k -> new HashMap<>()).put(HashUtil.arrayIdentityWrapper(genericTypes), codec);
@@ -494,9 +496,9 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     }
 
     /**
-     * Convenience overload of {@link #register(Class, ByteStreamEncoder, ByteStreamDecoder, DataEncoder, DataDecoder, Class[])} using one codec per path.
+     * Convenience overload of {@link #register(Class, StreamEncoder, StreamDecoder, DataEncoder, DataDecoder, Class[])} using one codec per path.
      */
-    public static <T> DataSyncCodec<T> register(Class<T> type, ByteStreamCodec<T> streamCodec, DataCodec<T> dataCodec, Class<?>... genericTypes) {
+    public static <T> DataSyncCodec<T> register(Class<T> type, StreamCodec<? super FriendlyByteBuf, T> streamCodec, DataCodec<T> dataCodec, Class<?>... genericTypes) {
         return register(type, streamCodec, streamCodec, dataCodec, dataCodec, genericTypes);
     }
 
@@ -518,6 +520,12 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     public static final DataSyncCodec<double[]> DOUBLES_CODEC = register(double[].class, ByteStreamCodec.DOUBLES_CODEC, DataCodec.DOUBLES_CODEC);
     public static final DataSyncCodec<short[]> SHORTS_CODEC = register(short[].class, ByteStreamCodec.SHORTS_CODEC, DataCodec.SHORTS_CODEC);
     public static final DataSyncCodec<char[]> CHARS_CODEC = register(char[].class, ByteStreamCodec.CHARS_CODEC, DataCodec.CHARS_CODEC);
+
+    // ---- FastUtil primitive collections (hand-written pairs: the primitives never box) ----
+    public static final DataSyncCodec<IntList> INT_LIST_CODEC = register(IntList.class, ByteStreamCodec.INT_LIST_CODEC, DataCodec.INT_LIST_CODEC);
+    public static final DataSyncCodec<IntSet> INT_SET_CODEC = register(IntSet.class, ByteStreamCodec.INT_SET_CODEC, DataCodec.INT_SET_CODEC);
+    public static final DataSyncCodec<LongList> LONG_LIST_CODEC = register(LongList.class, ByteStreamCodec.LONG_LIST_CODEC, DataCodec.LONG_LIST_CODEC);
+    public static final DataSyncCodec<LongSet> LONG_SET_CODEC = register(LongSet.class, ByteStreamCodec.LONG_SET_CODEC, DataCodec.LONG_SET_CODEC);
 
     // ---- boxed primitives, String, UUID, BigInteger ----
     public static final DataSyncCodec<Boolean> BOOLEAN_CODEC = register(Boolean.class, ByteStreamCodec.BOOLEAN_CODEC, DataCodec.BOOLEAN_CODEC);
@@ -638,4 +646,5 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
         FLOAT_CODEC.register(float.class);
         DOUBLE_CODEC.register(double.class);
     }
+
 }

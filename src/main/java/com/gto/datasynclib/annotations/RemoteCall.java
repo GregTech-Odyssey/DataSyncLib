@@ -1,5 +1,6 @@
 package com.gto.datasynclib.annotations;
 
+import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.remote.RemoteInvoker;
 import com.gto.datasynclib.remote.RemoteNetwork;
 
@@ -20,16 +21,20 @@ import java.lang.annotation.Target;
  *
  * <h3>How a method is resolved</h3>
  * <ol>
- *   <li>The <em>sending</em> holder's class hierarchy is scanned once and cached (see
- *       {@link RemoteInvoker#methods(Class)}) — annotated methods declared in superclasses are
- *       included, and an override in a subclass replaces the inherited entry</li>
+ *   <li>The <em>sending</em> holder's type hierarchy is scanned once and cached (see
+ *       {@link RemoteInvoker#methods(Class)}) — annotated methods declared in superclasses
+ *       <em>and in interfaces</em> are included, so a feature interface can declare
+ *       {@code @RemoteCall default void onSomethingClient(...)} and every implementor answers it; an
+ *       override (of a superclass method or of an interface default) replaces the inherited entry,
+ *       following Java's precedence: a class method beats an interface default</li>
  *   <li>The wire name is {@link #value()} when set, otherwise the Java method name; a name must be
  *       unique per class, so give overloads distinct names explicitly. The name is what the caller
  *       writes; on the wire the method travels as its index in that class's sorted name table, preceded
- *       by the holder-field path to the target — a few bytes in all</li>
- *   <li>The <em>receiving</em> side starts at the object the packet addressed and reads that field path
- *       (index {@code 0} is the object's first holder field, then that holder's, and so on), so a method
- *       declared on a nested holder — an
+ *       by the target's index in the addressed object's flattened holder tree — two bytes in all, at any
+ *       depth</li>
+ *   <li>The <em>receiving</em> side resolves that index against the object the packet addressed
+ *       ({@code 0} is that object itself, see
+ *       {@link com.gto.datasynclib.remote.RemoteRouting}), so a method declared on a nested holder — an
  *       {@link com.gto.datasynclib.annotations.AdditionalHolder @AdditionalHolder} sub-object, or any
  *       field whose type implements {@link com.gto.datasynclib.IFieldDataHolder} — is invoked on that
  *       nested object, even when it declares the same names as the object a packet addressed</li>
@@ -38,7 +43,7 @@ import java.lang.annotation.Target;
  * <h3>Arguments and return value</h3>
  * <p>Every parameter must have a {@link com.gto.datasynclib.DataSyncCodec} registered for its
  * type (primitives, {@code String}, enums, arrays and the pre-registered Minecraft types all do).
- * Arguments travel as the codec's <strong>network half</strong> ({@code ByteStreamCodec}, written
+ * Arguments travel as the codec's <strong>network half</strong> ({@code StreamCodec}, written
  * straight into the call's buffer like a synchronized field), so a call costs what its arguments
  * cost and nothing more; {@code null} is carried by a one-byte present/absent marker instead of a
  * {@code NullData} entry.</p>
@@ -48,27 +53,39 @@ import java.lang.annotation.Target;
  * ({@link RemoteInvoker#methods(Class)}). A call is fire-and-forget: anything the caller has to
  * observe travels back through the field synchronization instead.</p>
  *
+ * <h3>Which side may run it</h3>
+ * <p>{@link #side()} declares the logical side the method belongs to — {@link LogicalSide#SERVER},
+ * {@link LogicalSide#CLIENT} or {@link LogicalSide#BOTH} (the default). A call that arrives on the wrong
+ * side is rejected with a clear error before the method runs, so a method that mutates server state
+ * cannot be dragged onto a client by a packet, and a client-only reaction cannot be forced onto the
+ * server. The side of a received call comes from the object the packet addressed (its level); a target
+ * that is not in a level — a unit test, say — has no side, and the check is then skipped.</p>
+ *
  * <h3>Example</h3>
  * <pre>{@code
  * class MyBlockEntity extends BlockEntity {
  *     @RemoteCall
- *     public void requestUpgrade(int tier) { ... }
+ *     public void requestUpgrade(int tier) { ... }              // either side may call it
  *
- *     @RemoteCall("configure")
- *     private void configure(String key, int value) { ... }
+ *     @RemoteCall(side = LogicalSide.CLIENT)
+ *     public void onStructureFormedClient() { ... }             // client-only: the server rejects it
+ *
+ *     @RemoteCall(value = "configure", side = LogicalSide.SERVER)
+ *     private void configure(String key, int value) { ... }      // server-only, renamed on the wire
  * }
  *
- * // client side: encode and send
- * RemoteNetwork.callBlockEntityOnServer(be, "requestUpgrade", 3);
+ * // server side: encode and send (the packet layer carries it)
+ * byte[] payload = FieldDataManager.writeRemoteCall(be, be, "onStructureFormedClient");
  *
- * // server side (done by the packet handler): decode and invoke
- * RemoteInvoker.handle(be, packet.data());
+ * // the receiving side: decode and invoke on the side it arrived on
+ * IFieldDataHolder.handleRemoteCall(be, payload);
  * }</pre>
  *
  * <p><strong>Trust:</strong> a call arrives from another side, so only annotate methods that are
- * safe to run from there — the framework decodes the arguments with the registered codecs and
- * logs (rather than propagates) failures, but it does not check who sent the call. The invoked
- * method owns its side effects, including {@code setChanged()} for a block entity it mutates.</p>
+ * safe to run from there — the framework decodes the arguments with the registered codecs, enforces
+ * {@link #side()}, and logs (rather than propagates) failures, but it does not check who sent the call.
+ * The invoked method owns its side effects, including {@code setChanged()} for a block entity it
+ * mutates.</p>
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.METHOD)
@@ -84,4 +101,16 @@ public @interface RemoteCall {
      * @return the name used in the encoded call, never empty once read by the framework
      */
     String value() default "";
+
+    /**
+     * The logical side this method may run on — the direction of the call.
+     *
+     * <p>{@link LogicalSide#BOTH} (the default) lets either side invoke it; {@link LogicalSide#SERVER}
+     * and {@link LogicalSide#CLIENT} restrict it, and a call that arrives on the other side is refused
+     * before it is invoked. The check uses the level of the object the packet addressed, so a target
+     * outside a level has no side and the call is allowed.</p>
+     *
+     * @return the side the method belongs to
+     */
+    LogicalSide side() default LogicalSide.BOTH;
 }

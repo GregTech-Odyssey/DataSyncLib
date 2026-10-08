@@ -7,6 +7,7 @@ import com.gto.datasynclib.annotations.RemoteCall;
 import com.gto.datasynclib.remote.RemoteBlockEntityPacket;
 import com.gto.datasynclib.remote.RemoteEntityPacket;
 import com.gto.datasynclib.remote.RemoteInvoker;
+import com.gto.datasynclib.remote.RemoteNetwork;
 import lombok.experimental.UtilityClass;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
@@ -73,7 +74,7 @@ public class DataSyncNetwork {
     public void init() {
         if (initialized) return;
         initialized = true;
-
+        RemoteNetwork.init();
         // Index 0 — block entity payload, both directions (see handleBlockEntity)
         CHANNEL.registerMessage(0,
                 BlockEntitySyncPacket.class,
@@ -337,7 +338,7 @@ public class DataSyncNetwork {
 
     /**
      * Sends an already encoded call (for instance
-     * {@link com.gto.datasynclib.FieldDataManager#writeRemoteCall(String, Object...)}) to the server,
+     * {@link com.gto.datasynclib.FieldDataManager#writeRemoteCall(Object, Object, String, Object...)}) to the server,
      * to be invoked on the server-side block entity at the same position — the transport half of
      * {@link #callBlockEntityOnServer(BlockEntity, String, Object...)}, for callers that build their
      * own payload.

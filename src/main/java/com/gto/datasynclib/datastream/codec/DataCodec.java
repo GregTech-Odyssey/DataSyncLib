@@ -7,6 +7,14 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.DataResult;
 import com.mojang.serialization.DynamicOps;
 import io.netty.buffer.Unpooled;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.ints.IntSet;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
+import it.unimi.dsi.fastutil.longs.LongList;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -14,11 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import java.lang.reflect.Array;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.UUID;
+import java.util.*;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.IntFunction;
@@ -29,12 +33,14 @@ import java.util.function.Supplier;
  * persistent storage.
  *
  * <p>Extends both {@link DataDecoder} and {@link DataEncoder} for bidirectional serialization.
- * Contains built-in codec constants for all Java primitives, arrays, String, UUID, and BigInteger.
- * There is no per-interface registry: runtime type lookup goes through
+ * Contains built-in codec constants for all Java primitives, arrays, String, UUID, BigInteger,
+ * and the FastUtil primitive collections ({@link #INT_LIST_CODEC}, {@link #INT_SET_CODEC},
+ * {@link #LONG_LIST_CODEC}, {@link #LONG_SET_CODEC}). There is no per-interface registry: runtime
+ * type lookup goes through
  * {@link com.gto.datasynclib.DataSyncCodec#get(Class)}, the single table for both paths, and
  * {@link #get(Class)} hands back this path's own half of the result.</p>
  *
- * <p>Factory methods {@link #of} adapt from {@link ByteStreamCodec}, Mojang {@link com.mojang.serialization.Codec},
+ * <p>Factory methods {@link #of} adapt from {@link StreamCodec}, Mojang {@link com.mojang.serialization.Codec},
  * or custom encoder/decoder pairs. {@link #convert} adapts an existing codec with converter
  * functions, while {@link #map} / {@link #collection} / {@link #array} build container codecs.</p>
  *
@@ -56,7 +62,10 @@ import java.util.function.Supplier;
  * {@code Data} types directly, the way {@link com.gto.datasynclib.util.DataCodecs#VEC3I_CODEC}
  * does. Primitive <em>arrays</em> are already covered by primitive-backed codecs
  * ({@code BOOLEANS_CODEC}, {@code INTS_CODEC}, {@code LONGS_CODEC}, …), so {@link #array} is only
- * needed for object arrays. {@link #of(ByteStreamCodec)} additionally round-trips through an
+ * needed for object arrays, and the FastUtil primitive collections have their own
+ * ({@link #INT_LIST_CODEC} and friends, stored through the same array payload), so
+ * {@link #collection} is only for containers whose elements are objects anyway.
+ * {@link #of(StreamCodec)} additionally round-trips through an
  * intermediate buffer, which is convenient but not free either.</p>
  *
  * @param <T> the type this codec can encode and decode
@@ -91,7 +100,7 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
      * {@link com.gto.datasynclib.datastream.data.ByteArrayData}, so the disk form mirrors the
      * wire form at the cost of an extra buffer round-trip.
      */
-    static <T> DataCodec<T> of(ByteStreamCodec<T> codec) {
+    static <T> DataCodec<T> of(StreamCodec<? super FriendlyByteBuf, T> codec) {
         return new DataCodec<>() {
 
             @Override
@@ -298,7 +307,7 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
      * <p>No extra marker is needed on this path: the Data type system already tags every payload
      * with a type id, so an absent value costs one byte (the null tag) and a present one costs
      * exactly what this codec writes. The network path has no such tag, so
-     * {@link ByteStreamCodec#optional()} spends a boolean instead; a {@link CombinedCodec}
+     * {@link StreamCodec#optional()} spends a boolean instead; a {@link CombinedCodec}
      * overrides this method to wrap both paths at once.</p>
      *
      * <p>Equivalent to {@code DataCodec.optional(this)}.</p>
@@ -422,11 +431,11 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
 
     /**
      * Adapts this data codec to the network path — the instance form of
-     * {@link ByteStreamCodec#of(DataCodec)}: the {@link Data} payload is written inline
+     * {@link StreamCodec#of(DataCodec)}: the {@link Data} payload is written inline
      * ({@link Data#writeData(FriendlyByteBuf, Data)}), without the length-prefixed byte array that
      * {@link com.gto.datasynclib.DataSyncCodec#of(DataCodec)} goes through.
      */
-    default ByteStreamCodec<T> toStreamCodec() {
+    default StreamCodec<? super FriendlyByteBuf, T> toStreamCodec() {
         return ByteStreamCodec.of(this);
     }
 
@@ -1529,6 +1538,101 @@ public interface DataCodec<T> extends DataEncoder<T>, DataDecoder<T> {
         @Override
         public UUID decode(@NotNull Data data, int dataVersion) {
             return data.getUUID();
+        }
+    };
+
+    // ---- FastUtil primitive collections: stored as the primitive array payload, nothing boxes ----
+
+    /**
+     * A FastUtil {@link IntList}, stored as the {@link IntArrayData} behind {@link #INTS_CODEC}: the
+     * same {@code VarInt}-encoded array, taken from {@link IntList#toIntArray()} and read back
+     * element by element without a single wrapper object.
+     *
+     * <p>An empty list is stored as an empty array, so it round-trips as an empty list, and a
+     * {@code null} field is still the field layer's {@code NullData} marker rather than this codec's
+     * business.</p>
+     */
+    DataCodec<IntList> INT_LIST_CODEC = new DataCodec<>() {
+
+        @Override
+        public @NotNull Data encode(IntList obj) {
+            return IntArrayData.valueOf(obj.toIntArray());
+        }
+
+        @Override
+        public IntList decode(@NotNull Data data, int dataVersion) {
+            var array = data.getIntArray();
+            var list = new IntArrayList(array.length);
+            for (int i = 0; i < array.length; i++) {
+                list.add(array[i]);
+            }
+            return list;
+        }
+    };
+
+    /**
+     * A FastUtil {@link IntSet}, stored as the {@link IntArrayData} behind {@link #INTS_CODEC} in
+     * the set's iteration order and read back into an {@link IntOpenHashSet} — only the content is
+     * part of the format (see {@link StreamCodec#INT_SET_CODEC}).
+     */
+    DataCodec<IntSet> INT_SET_CODEC = new DataCodec<>() {
+
+        @Override
+        public @NotNull Data encode(IntSet obj) {
+            return IntArrayData.valueOf(obj.toIntArray());
+        }
+
+        @Override
+        public IntSet decode(@NotNull Data data, int dataVersion) {
+            var array = data.getIntArray();
+            var set = new IntOpenHashSet(array.length);
+            for (int i = 0; i < array.length; i++) {
+                set.add(array[i]);
+            }
+            return set;
+        }
+    };
+
+    /**
+     * A FastUtil {@link LongList}, stored as the {@link LongArrayData} behind {@link #LONGS_CODEC}.
+     */
+    DataCodec<LongList> LONG_LIST_CODEC = new DataCodec<>() {
+
+        @Override
+        public @NotNull Data encode(LongList obj) {
+            return LongArrayData.valueOf(obj.toLongArray());
+        }
+
+        @Override
+        public LongList decode(@NotNull Data data, int dataVersion) {
+            var array = data.getLongArray();
+            var list = new LongArrayList(array.length);
+            for (int i = 0; i < array.length; i++) {
+                list.add(array[i]);
+            }
+            return list;
+        }
+    };
+
+    /**
+     * A FastUtil {@link LongSet}, stored as the {@link LongArrayData} behind {@link #LONGS_CODEC}
+     * and read back into a {@link LongOpenHashSet}.
+     */
+    DataCodec<LongSet> LONG_SET_CODEC = new DataCodec<>() {
+
+        @Override
+        public @NotNull Data encode(LongSet obj) {
+            return LongArrayData.valueOf(obj.toLongArray());
+        }
+
+        @Override
+        public LongSet decode(@NotNull Data data, int dataVersion) {
+            var array = data.getLongArray();
+            var set = new LongOpenHashSet(array.length);
+            for (int i = 0; i < array.length; i++) {
+                set.add(array[i]);
+            }
+            return set;
         }
     };
 }

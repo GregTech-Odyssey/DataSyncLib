@@ -1,14 +1,13 @@
 package com.gto.datasynclib.datastream.data;
 
-import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
 import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.datastream.codec.DataDecoder;
 import com.gto.datasynclib.datastream.codec.DataEncoder;
+import com.gto.datasynclib.datastream.codec.StreamCodec;
 import com.mojang.datafixers.util.Pair;
 import com.mojang.serialization.Decoder;
 import com.mojang.serialization.Encoder;
 import io.netty.buffer.ByteBuf;
-import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -23,15 +22,15 @@ public record StringMapData(Map<String, Data> value) implements MapData {
 
     public static final StringMapData EMPTY = new StringMapData(Collections.emptyMap());
 
-    public static final ByteStreamCodec<StringMapData> BYTE_STREAM_CODEC = new ByteStreamCodec<>() {
+    public static final StreamCodec<ByteBuf, StringMapData> BYTE_STREAM_CODEC = new StreamCodec<>() {
 
         @Override
-        public void encode(FriendlyByteBuf stream, StringMapData obj) {
+        public void encode(ByteBuf stream, StringMapData obj) {
             obj.write(stream);
         }
 
         @Override
-        public StringMapData decode(FriendlyByteBuf stream) {
+        public StringMapData decode(ByteBuf stream) {
             return Data.readData(STRING_MAP, stream).asStringMapData();
         }
     };

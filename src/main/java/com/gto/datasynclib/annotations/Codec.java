@@ -12,7 +12,7 @@ import java.lang.annotation.Target;
  *
  * <h3>Mode 1: Static Codec Fields (recommended)</h3>
  * <p>Reference static fields of type {@link com.gto.datasynclib.datastream.codec.DataCodec}
- * and {@link com.gto.datasynclib.datastream.codec.ByteStreamCodec} declared in the same
+ * and {@link com.gto.datasynclib.datastream.codec.StreamCodec} declared in the same
  * class (or accessible from it). Use {@link #saveCodec()} for the persistence codec and
  * {@link #syncCodec()} for the network codec. If only {@code saveCodec} is specified,
  * the sync codec is automatically derived from it.</p>
@@ -53,10 +53,10 @@ public @interface Codec {
     String saveCodec() default "";
 
     /**
-     * Static field name from ByteStreamCodec class used for network synchronization.
+     * Static field name from StreamCodec class used for network synchronization.
      * Specifies the codec for syncing data over the network.
      *
-     * @return the ByteStreamCodec static field name
+     * @return the StreamCodec static field name
      */
     String syncCodec() default "";
 

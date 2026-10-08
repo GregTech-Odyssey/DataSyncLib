@@ -11,7 +11,7 @@ import java.util.function.Supplier;
 
 /**
  * A composite codec that bridges {@link com.gto.datasynclib.FieldDataManager} with
- * the {@link com.gto.datasynclib.datastream.codec.ByteStreamCodec} and
+ * the {@link com.gto.datasynclib.datastream.codec.StreamCodec} and
  * {@link com.gto.datasynclib.datastream.codec.DataCodec} interfaces.
  *
  * <p>This class wraps an annotated POJO class, using its own internal
@@ -51,13 +51,13 @@ public class FieldDataCodec<T> implements CombinedCodec<T>, IFieldDataHolder {
     private final Supplier<T> constructor;
     private final LazyFieldDataManager fieldDataManager;
 
-    private final ByteStreamEncoder<? super T> streamWriter;
-    private final ByteStreamDecoder<? extends T> streamReader;
+    private final StreamEncoder<FriendlyByteBuf, ? super T> streamWriter;
+    private final StreamDecoder<FriendlyByteBuf, ? extends T> streamReader;
     private final DataEncoder<? super T> dataWriter;
     private final DataDecoder<? extends T> dataReader;
     private final ThreadLocal<T> currentInstance = new ThreadLocal<>();
 
-    public FieldDataCodec(Class<T> objClass, Supplier<T> constructor, ByteStreamEncoder<? super T> extraStreamWriter, ByteStreamDecoder<? extends T> extraStreamReader, DataEncoder<? super T> extraDataWriter, DataDecoder<? extends T> extraDataReader) {
+    public FieldDataCodec(Class<T> objClass, Supplier<T> constructor, StreamEncoder<FriendlyByteBuf, ? super T> extraStreamWriter, StreamDecoder<FriendlyByteBuf, ? extends T> extraStreamReader, DataEncoder<? super T> extraDataWriter, DataDecoder<? extends T> extraDataReader) {
         this.constructor = constructor;
         this.fieldDataManager = new LazyFieldDataManager(this, objClass);
         this.streamWriter = extraStreamWriter;

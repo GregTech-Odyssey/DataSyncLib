@@ -1,15 +1,10 @@
 package com.gto.datasynclib.test;
 
-import com.gto.datasynclib.DataSyncCodec;
-import com.gto.datasynclib.DataSyncLib;
-import com.gto.datasynclib.FieldDataManager;
-import com.gto.datasynclib.IFieldDataHolder;
+import com.gto.datasynclib.*;
 import com.gto.datasynclib.annotations.*;
 import com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity;
 import com.gto.datasynclib.listener.ObjNotifiableHolder;
 import com.gto.datasynclib.network.DataSyncNetwork;
-import com.gto.datasynclib.annotations.RemoteCall;
-import com.gto.datasynclib.remote.RemoteNetwork;
 import com.gto.datasynclib.util.FieldDataCodec;
 import com.gto.datasynclib.util.NbtUtil;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
@@ -17,11 +12,7 @@ import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import lombok.Getter;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.core.GlobalPos;
-import net.minecraft.core.SectionPos;
-import net.minecraft.core.Vec3i;
+import net.minecraft.core.*;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
@@ -56,6 +47,8 @@ import java.util.function.Function;
  *   <li>{@code @AdditionalHolder(childManager = true)} → a plain POJO with its own manager</li>
  *   <li>{@code @Codec} / {@code @Conversion} → custom serialization and type adaptation</li>
  *   <li>{@code @SaveToDisk(listener)} / {@code @SyncToClient(listener)} → change-notification hooks</li>
+ *   <li>{@code @RemoteCall} on a method, on a superclass method, or on a feature interface's
+ *       {@code default} method → a remote-call target of the holder that answers it</li>
  * </ul>
  * <p>{@code TestBlockEntityTests} is the executable documentation for all of it — read the two side by
  * side. Fields and nested types are package-private on purpose so the suite can read and mutate them
@@ -266,6 +259,24 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     }
 
     /**
+     * Client-only remote target: a call that arrives on the server side must be refused before the
+     * method body runs, and vice versa for {@link #serverOnlyMark(int)}.
+     */
+    int clientOnlyMarked = 0;
+
+    @RemoteCall(side = LogicalSide.CLIENT)
+    public void clientOnlyMark(int value) {
+        clientOnlyMarked = value;
+    }
+
+    int serverOnlyMarked = 0;
+
+    @RemoteCall(side = LogicalSide.SERVER)
+    public void serverOnlyMark(int value) {
+        serverOnlyMarked = value;
+    }
+
+    /**
      * Exercises the {@code @SaveToDisk(listener = ...)} hook added in this version.
      */
     @SaveToDisk(listener = "onLoaded")
@@ -418,14 +429,6 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
             tagData.putInt("aaa", tagData.getInt("aaa") + 1);
             DataSyncNetwork.syncBlockEntityToClient(this, false, true);
         }
-        // Remote-call ping-pong, so the module can be watched live: the server asks every client tracking
-        // this block entity to mark it, and the client's own call comes back the other way (clientTick).
-        // Every five seconds, to stay readable in the log.
-        if (level.getGameTime() % 100 == 0) {
-            RemoteNetwork.callBlockEntityOnClients(this, "remoteMark", (int) (level.getGameTime() % 1000));
-            DataSyncLib.LOGGER.info("remote: server tick {}, remoteMarked={} (calls received from the client)",
-                    level.getGameTime(), remoteMarked);
-        }
     }
 
     /**
@@ -439,12 +442,6 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
             DataSyncNetwork.syncBlockEntityToServer(this, false, true);
             DataSyncLib.LOGGER.info("tagData: {}", tagData);
             DataSyncLib.LOGGER.info("a.a: {}", a.a);
-        }
-        // The other half of the in-game remote-call check: a call made on the client, sent to the server.
-        if (level.getGameTime() % 100 == 20) {
-            RemoteNetwork.callBlockEntityOnServer(this, "remoteMark", (int) (level.getGameTime() % 1000) + 1);
-            DataSyncLib.LOGGER.info("remote: client tick {}, remoteMarked={} (calls received from the server)",
-                    level.getGameTime(), remoteMarked);
         }
     }
 
@@ -474,7 +471,7 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     /**
      * Nested {@link IFieldDataHolder}: handled by {@code FieldDataHolderAccess}.
      */
-    static class B implements IFieldDataHolder {
+    static class B implements IFieldDataHolder, RemoteFeature {
 
         /**
          * The owner this holder sits in — what a remote call from here is addressed with; no modifier needed.
@@ -524,6 +521,26 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
         }
 
         /**
+         * The interface's annotated default, overridden here <em>without</em> {@code @RemoteCall}: the
+         * call is allow-listed by the annotation on {@link RemoteFeature#featureMark(int)}, and must
+         * still reach this override instead of the default body — which would have set
+         * {@link #featureDefaultMarked} through {@link #acceptFeatureMark(int)}.
+         */
+        int featureOverridden = 0;
+
+        int featureDefaultMarked = 0;
+
+        @Override
+        public void featureMark(int value) {
+            featureOverridden = value;
+        }
+
+        @Override
+        public void acceptFeatureMark(int value) {
+            featureDefaultMarked = value;
+        }
+
+        /**
          * Third-level holder: a call made from here is addressed by the path
          * {@code [index of b, index of nested]}, so the receive side has to walk two fields.
          */
@@ -533,7 +550,7 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     /**
      * Holder nested two levels deep, under {@link B}.
      */
-    static class C implements IFieldDataHolder {
+    static class C implements IFieldDataHolder, RemoteFeature {
 
         /**
          * The owner this holder sits in — what a remote call from here is addressed with; no modifier needed.
@@ -558,6 +575,70 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
         public void cMark(int value) {
             this.marked = value;
         }
+
+        /**
+         * Set by the interface's {@code default} body, which this holder does not override — the other
+         * half of the {@link RemoteFeature} case.
+         */
+        int featureMarked = 0;
+
+        @Override
+        public void acceptFeatureMark(int value) {
+            featureMarked = value;
+        }
+    }
+
+    /**
+     * A feature interface with an annotated {@code default} method — the declaration a whole family of
+     * holders shares, and the reason the remote scan walks interfaces: the method lives here, not on the
+     * implementor, so scanning only the class chain would leave the call unreachable.
+     *
+     * <p>A {@code default} method cannot touch state itself, so it hands the value to the implementor's
+     * {@link #acceptFeatureMark(int)}; an implementor that overrides {@link #featureMark(int)} gets the
+     * call there instead — {@code B} does, {@code C} does not.</p>
+     */
+    interface RemoteFeature {
+
+        /**
+         * The implementor's half of {@link #featureMark(int)}.
+         */
+        void acceptFeatureMark(int value);
+
+        @RemoteCall(side = LogicalSide.CLIENT)
+        default void featureMark(int value) {
+            acceptFeatureMark(value);
+        }
+    }
+
+    /**
+     * Interface inherited only through a superclass: {@link FeatureBase} implements it and
+     * {@link FeatureDerived} only extends that, so the scan has to walk the interfaces of every class in
+     * the chain, not just of the most derived one.
+     */
+    interface InheritedFeature {
+
+        void acceptInheritedMark(int value);
+
+        @RemoteCall
+        default void inheritedMark(int value) {
+            acceptInheritedMark(value);
+        }
+    }
+
+    /**
+     * Superclass carrying an annotated interface; the class that gets scanned is {@link FeatureDerived}.
+     */
+    static class FeatureBase implements InheritedFeature {
+
+        int inheritedMarked = 0;
+
+        @Override
+        public void acceptInheritedMark(int value) {
+            inheritedMarked = value;
+        }
+    }
+
+    static class FeatureDerived extends FeatureBase {
     }
 
     /**
