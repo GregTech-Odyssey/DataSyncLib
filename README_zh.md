@@ -22,8 +22,8 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 | **FieldDefinitionStorage** | 全局缓存 — 扫描类层级中的注解字段，生成 `DataFieldDefinition[]` |
 | **FieldDataManager** | 每实例管理器 — 字段发现 → 变更检测 → 网络序列化 → 磁盘序列化 |
 | **DataField 体系** | `AbstractField`（值类型：原始/对象）、`AbstractFieldAccess`（容器类型：集合/Map/数组） |
-| **DataSyncCodec** | 统一编解码注册表，配对 `StreamCodec<B, T>` / `ByteStreamCodec`（网络）+ `DataCodec`（持久化） |
-| **Data 类型系统** | 19 种密封二进制类型，比 NBT Tag 更紧凑，支持 VarInt 变长编码 |
+| **DataSyncCodec** | 统一编解码注册表，配对 `StreamCodec<B, T>`（网络）+ `ValueCodec`（持久化）；内置缓冲区编解码器集中在 `ByteBufCodecs` |
+| **载体值类型（ValueOps）** | 19 种封闭二进制类型，比 NBT Tag 更紧凑，支持 VarInt 变长编码 |
 
 ## 核心特性
 
@@ -35,7 +35,7 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 - **📦 DataComponent 系统** — 基于标识（identity）的组件数据模型，内置合并语义
 - **🗂️ Registry 工具** — 泛型注册表，支持 freeze/unfreeze 生命周期，内置 3 种序列化方式
 - **⚡ 高性能** — MethodHandle 替代反射、FastUtil 集合、多级缓存、VarInt 紧凑编码
-- **🗜️ 自定义数据类型** — 19 种二进制 Data 类型系统，支持 CustomData 扩展
+- **🗜️ 自定义数据类型** — 19 种载体值类型（ValueOps），支持 CustomTypes 自定义类型扩展
 - **🧩 开箱即用** — 继承 `FieldDataHolderBlockEntity` 即可获得全部能力
 - **🪆 嵌套 Holder** — `@AdditionalHolder` 递归发现嵌套对象中的注解字段；`childManager` 模式为子对象生成独立子管理器
 - **🧬 泛型层级解析** — `ReflectUtil` 沿父类/接口解析完整泛型实参（如 `A<T> extends HashMap<String,T>` 可取得 `[String, T]`）
@@ -178,11 +178,11 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 
 ### 高级用法：Registry 全局 codec 自动注册
 
-`Registry` 是泛型注册表，支持按 key 排序分配稳定整数 id（网络流）与按 key 串化（磁盘）。当构造时传入**值的运行时类型**，`freeze()` 会自动把该注册表的 `streamCodec()` + `dataCodec()` 注册进全局 `DataSyncCodec`，无需手动调用。
+`Registry` 是泛型注册表，支持按 key 排序分配稳定整数 id（网络流）与按 key 串化（磁盘）。当构造时传入**值的运行时类型**，`freeze()` 会自动把该注册表的 `streamCodec()` + `valueCodec()` 注册进全局 `DataSyncCodec`，无需手动调用。
 
 ```java
 Registry<String, ResearchTag> TAGS = new Registry<>(
-        "gtocore:research_tag", DataCodec.STRING_CODEC,  // key codec（按 key 编解码）
+        "gtocore:research_tag", ValueCodec.STRING,  // key codec（按 key 编解码）
         t -> t.name,                                     // keyGetter：从值取回 key
         ResearchTag.class);                              // 值的运行时类型（用于全局注册）
 TAGS.unfreeze();
@@ -215,7 +215,7 @@ Class<?>[] args = ReflectUtil.getResolvedGenericArguments(fieldType, HashMap.cla
 | `@SaveToDisk` | 磁盘持久化 | `key`（自定义键名）、`skipWhen`、`saveEmpty`、`defaultValue`、`listener`（磁盘加载回调） |
 | `@Access` | 强制使用访问模式（容器类） | `instanceAsValue` |
 | `@AdditionalHolder` | 递归扫描嵌套对象字段，或为子对象生成独立子管理器 | `childManager`（true=子管理器模式） |
-| `@Codec` | 自定义序列化方式 | `saveCodec` / `syncCodec` / `writeToData` 等 |
+| `@Codec` | 自定义序列化方式 | `saveCodec` / `syncCodec` / `writeToValue` 等 |
 | `@Conversion` | 以另一种类型存储/同步字段（静态 `Function`） | `toManaged`（必填）、`toField`（可选） |
 | `@Strategy` | 自定义变更检测策略 | `value`（static 字段名） |
 | `@Generic` | 强制使用泛型工厂链 | — |
@@ -250,18 +250,18 @@ Class<?>[] args = ReflectUtil.getResolvedGenericArguments(fieldType, HashMap.cla
 
 ```
 BlockEntity.saveAdditional(tag)
-  └── tag.putByteArray("field_save", writeToData().writeToBytes())
-        └── FieldDataManager.writeToData()
+  └── tag.putByteArray("field_save", JavaValueOps.INSTANCE.toBytes(writeToValue(JavaValueOps.INSTANCE)))
+        └── FieldDataManager.writeToValue()
               ├── writeCustomSaveData()
-              └── 遍历 saveFields → field.writeToData()
-                    └── 生成 StringMapData(key → Data)
+              └── 遍历 saveFields → field.writeToValue()
+                    └── 生成 carrier string map (key → value)
 
 BlockEntity.load(tag)
   ├── 优先检查 "field_sync"（区块加载同步数据）
   └── 否则读取 "field_save"（磁盘持久化数据）
-        └── FieldDataManager.readFromData(data, VERSION)
+        └── FieldDataManager.readFromValue(data, JavaValueOps.create(VERSION))
               ├── readCustomSaveData()
-              └── 遍历 saveFields → field.readFromData()
+              └── 遍历 saveFields → field.readFromValue()
 ```
 
 ## 文档

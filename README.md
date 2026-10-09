@@ -21,7 +21,7 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 - **FieldDefinitionStorage**: Scans class hierarchy for annotated fields, caches metadata globally
 - **FieldDataManager**: Per-instance lifecycle manager — detects changes, serializes to network/disk
 - **DataField hierarchy**: `AbstractField` (primitive values), `ObjField` (objects with codecs), `AbstractFieldAccess` (collections/maps/arrays)
-- **DataSyncCodec**: Unified codec registry pairing `StreamCodec<B, T>` / `ByteStreamCodec` (network) with `DataCodec` (persistence)
+- **DataSyncCodec**: Unified codec registry pairing `StreamCodec<B, T>` (network) with `ValueCodec` (persistence); the built-in buffer codecs live in `ByteBufCodecs`
 - **Data type system**: 19-type sealed binary format, more compact than NBT, with VarInt encoding
 
 ## Key Features
@@ -32,7 +32,7 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 - **🔧 Extensible Codec** — Unified `DataSyncCodec` registry with 30+ pre-registered types, custom codec support via `@Codec`.
 - **📢 Change Notification** — Per-field listener callbacks + `NotifiableHolder` system for reactive updates.
 - **📦 DataComponent System** — Identity-keyed component data model via `DataComponentRegistry` + `DataComponentMap` with merge semantics.
-- **🗂️ Registry Utility** — Generic registry with freeze/unfreeze lifecycle and built-in serialization (ByteStream/Data/Mojang Codec).
+- **🗂️ Registry Utility** — Generic registry with freeze/unfreeze lifecycle and built-in serialization (Stream/Data/Mojang Codec).
 - **⚡ High Performance** — MethodHandle instead of reflection, FastUtil collections, multi-level caching, VarInt compact encoding.
 - **🗜️ Data Type System** — Custom 19-type binary Data system, more compact than NBT Tag, with custom type extension.
 - **🧩 Ready to Use** — Extend `FieldDataHolderBlockEntity` to get full capabilities out of the box.
@@ -177,11 +177,11 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 
 ### Advanced: Registry Global Codec Auto-Registration
 
-`Registry` is a generic registry that assigns stable integer IDs (for the compact network `streamCodec`) and encodes by key (for the self-describing disk `dataCodec`). When you supply the **value's runtime type**, `freeze()` automatically registers both codecs into the global `DataSyncCodec`.
+`Registry` is a generic registry that assigns stable integer IDs (for the compact network `streamCodec`) and encodes by key (for the self-describing disk `valueCodec`). When you supply the **value's runtime type**, `freeze()` automatically registers both codecs into the global `DataSyncCodec`.
 
 ```java
 Registry<String, ResearchTag> TAGS = new Registry<>(
-        "gtocore:research_tag", DataCodec.STRING_CODEC,  // key codec (encode/decode by key)
+        "gtocore:research_tag", ValueCodec.STRING,  // key codec (encode/decode by key)
         t -> t.name,                                     // keyGetter: derive key from value
         ResearchTag.class);                              // value runtime type (for global registration)
 TAGS.unfreeze();
@@ -214,7 +214,7 @@ Supports generic superclasses, generic interfaces (`List<T>`), multi-level inher
 | `@SaveToDisk` | Disk persistence | `key`, `skipWhen`, `saveEmpty`, `defaultValue`, `defaultValueGetter`, `listener` (disk-load callback) |
 | `@Access` | Force access-mode (for containers) | `instanceAsValue` |
 | `@AdditionalHolder` | Recursively scan nested object fields, or spawn a dedicated child manager | `childManager` (true = child-manager mode) |
-| `@Codec` | Custom serialization | `saveCodec` / `syncCodec` / `writeToData` / `readFromData` etc. |
+| `@Codec` | Custom serialization | `saveCodec` / `syncCodec` / `writeToValue` / `readFromValue` etc. |
 | `@Conversion` | Store/sync a field as another type via static `Function`s | `toManaged` (required), `toField` (optional) |
 | `@Strategy` | Custom change detection strategy | `value` (static field name) |
 | `@Generic` | Force generic-type factory resolution | — |
@@ -249,18 +249,18 @@ Client receive
 
 ```
 BlockEntity.saveAdditional(tag)
-  └── tag.putByteArray("field_save", writeToData().writeToBytes())
-        └── FieldDataManager.writeToData()
+  └── tag.putByteArray("field_save", JavaValueOps.INSTANCE.toBytes(writeToValue(JavaValueOps.INSTANCE)))
+        └── FieldDataManager.writeToValue()
               ├── writeCustomSaveData()
-              └── Iterate saveFields → field.writeToData()
-                    └── Produces StringMapData(key → Data)
+              └── Iterate saveFields → field.writeToValue()
+                    └── Produces carrier string map (key → value)
 
 BlockEntity.load(tag)
   ├── Prefer "field_sync" (chunk-load sync data)
   └── Fallback "field_save" (disk persistence data)
-        └── FieldDataManager.readFromData(data, VERSION)
+        └── FieldDataManager.readFromValue(data, JavaValueOps.create(VERSION))
               ├── readCustomSaveData()
-              └── Iterate saveFields → field.readFromData()
+              └── Iterate saveFields → field.readFromValue()
 ```
 
 ## Documentation

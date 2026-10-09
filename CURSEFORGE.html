@@ -141,7 +141,7 @@ private MyConfig config = new MyConfig();</code></pre>
 <tr><td><code>@SaveToDisk</code></td><td>Disk persistence</td><td><code>key</code>, <code>skipWhen</code>, <code>saveEmpty</code>, <code>defaultValue</code>, <code>defaultValueGetter</code></td></tr>
 <tr><td><code>@Access</code></td><td>Force access-mode for containers</td><td><code>instanceAsValue</code></td></tr>
 <tr><td><code>@AdditionalHolder</code></td><td>Recursively scan nested object fields</td><td>—</td></tr>
-<tr><td><code>@Codec</code></td><td>Custom serialization</td><td><code>saveCodec</code> / <code>syncCodec</code> / <code>writeToData</code> / <code>readFromData</code></td></tr>
+<tr><td><code>@Codec</code></td><td>Custom serialization</td><td><code>saveCodec</code> / <code>syncCodec</code> / <code>writeToValue</code> / <code>readFromValue</code></td></tr>
 <tr><td><code>@Strategy</code></td><td>Custom change detection strategy</td><td><code>value</code> (static field name)</td></tr>
 <tr><td><code>@Generic</code></td><td>Force generic-type factory resolution</td><td>—</td></tr>
 <tr><td><code>@AddToManager</code></td><td>Add to manager without auto sync/persist</td><td>—</td></tr>
@@ -193,7 +193,7 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 <tr><td><strong>FieldDefinitionStorage</strong></td><td>Global cache — scans class hierarchy for annotated fields</td></tr>
 <tr><td><strong>FieldDataManager</strong></td><td>Per-instance lifecycle manager — field discovery, change detection, serialization</td></tr>
 <tr><td><strong>DataField hierarchy</strong></td><td><code>AbstractField</code> (primitive values), <code>ObjField</code> (objects with codecs), <code>AbstractFieldAccess</code> (collections/maps/arrays)</td></tr>
-<tr><td><strong>DataSyncCodec</strong></td><td>Unified codec registry pairing <code>ByteStreamCodec</code> (network) with <code>DataCodec</code> (persistence)</td></tr>
+<tr><td><strong>DataSyncCodec</strong></td><td>Unified codec registry pairing <code>StreamCodec&lt;B, T&gt;</code> (network) with <code>ValueCodec</code> (persistence); the built-in buffer codecs live in <code>ByteBufCodecs</code></td></tr>
 <tr><td><strong>Data type system</strong></td><td>19-type sealed binary format, more compact than NBT, with VarInt encoding</td></tr>
 </table>
 

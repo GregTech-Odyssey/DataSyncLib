@@ -145,7 +145,7 @@ li { margin: 4px 0; }
         </div>
         <div class="nav-section"><div class="nav-section-title">Utilities</div>
             <a href="#utils-nbt">NbtUtil</a>
-            <a href="#utils-codecs">DataCodecs / StreamCodecs</a>
+            <a href="#utils-codecs">ValueCodecs / StreamCodecExtends</a>
             <a href="#utils-reflect">ReflectUtil</a>
             <a href="#utils-hash">HashUtil</a>
             <a href="#utils-enum">EnumUtil</a>
@@ -238,7 +238,7 @@ li { margin: 4px 0; }
         <tr><td>Management</td><td>FieldDataManager, LazyFieldDataManager</td><td>Per-instance lifecycle: change detection, serialization, deserialization, with re-entrancy guards</td></tr>
         <tr><td>Field</td><td>DataField, BooleanField, IntField, ObjCodecField&hellip;</td><td>Concrete field read/write, change detection, and buffer serialization implementations</td></tr>
         <tr><td>Access</td><td>CollectionAccess, MapAccess, SerializableAccess&hellip;</td><td>Proxy access and serialization for final fields (collections/Maps/custom types)</td></tr>
-        <tr><td>Codec</td><td>DataSyncCodec, ByteStreamCodec, DataCodec</td><td>Type-level codec registration and invocation, unifying network and persistence paths</td></tr>
+        <tr><td>Codec</td><td>DataSyncCodec, StreamCodec, ValueCodec, ByteBufCodecs</td><td>Type-level codec registration and invocation, unifying network and persistence paths</td></tr>
         <tr><td>Transport</td><td>DataSyncNetwork, BlockEntitySyncPacket, EntitySyncPacket</td><td>Network packet send/receive for both BlockEntity and Entity, C2S/S2C bidirectional</td></tr>
     </tbody>
 </table>
@@ -285,7 +285,7 @@ li { margin: 4px 0; }
          ▼                                       ▼
 ┌──────────────────┐                   ┌──────────────────┐
 │  Minecraft save   │   saveAdditional  │ FieldDataManager │
-│  (write NBT)      │ ←─────────────── │  writeToData()   │
+│  (write NBT)      │ ←─────────────── │  writeToValue()   │
 └──────────────────┘                   │ writeToNetworkBuf│
                                        └────────┬─────────┘
                                                 │ network packet
@@ -338,12 +338,12 @@ li { margin: 4px 0; }
 <table>
     <thead><tr><th>Aspect</th><th>DataSyncLib Data</th><th>Minecraft NBT/Tag</th></tr></thead>
     <tbody>
-        <tr><td>Type count</td><td>19 (incl. IntMap, LongMap, DataMap, CustomData)</td><td>13</td></tr>
+        <tr><td>Type count</td><td>19 (incl. IntMap, LongMap, DataMap, CustomTypes)</td><td>13</td></tr>
         <tr><td>Integer encoding</td><td>VarInt/VarLong variable-length; small values use 1 byte</td><td>Fixed-width (4/8 bytes)</td></tr>
         <tr><td>Map support</td><td>StringMap, IntMap, LongMap, DataMap — 4 variants</td><td>CompoundTag only (String→Tag)</td></tr>
         <tr><td>List element types</td><td>Mixed types supported (each element carries its own type ID)</td><td>Single uniform type required</td></tr>
-        <tr><td>Null values</td><td>Explicit NullData type; distinguishes "null" from "absent"</td><td>Absent is treated as null</td></tr>
-        <tr><td>Custom types</td><td>CustomData with user-registered serialization</td><td>Not supported</td></tr>
+        <tr><td>Null values</td><td>Explicit carrier null value type; distinguishes "null" from "absent"</td><td>Absent is treated as null</td></tr>
+        <tr><td>Custom types</td><td>CustomTypes with user-registered serialization</td><td>Not supported</td></tr>
         <tr><td>Type-safe API</td><td>Sealed interface + discriminant methods (toXxxData / asXxxData)</td><td>getId() + instanceof checks</td></tr>
         <tr><td>Default safety</td><td>All getters return safe defaults (0, "", emptyList, etc.)</td><td>Missing keys return null or throw</td></tr>
         <tr><td>Serialized size</td><td>VarInt type IDs + VarInt length prefixes => more compact</td><td>Fixed 1-byte type ID + fixed-width lengths</td></tr>
@@ -355,25 +355,25 @@ li { margin: 4px 0; }
 <table>
     <thead><tr><th>ID</th><th>Data Class</th><th>Java Type</th><th>Purpose</th></tr></thead>
     <tbody>
-        <tr><td>0</td><td>NullData</td><td>null</td><td>Explicit null marker</td></tr>
-        <tr><td>1</td><td>ByteData</td><td>boolean</td><td>Boolean (0/1)</td></tr>
-        <tr><td>2</td><td>ByteData</td><td>byte</td><td>Single byte</td></tr>
-        <tr><td>3</td><td>ShortData</td><td>short</td><td>Short integer</td></tr>
+        <tr><td>0</td><td>carrier null value</td><td>null</td><td>Explicit null marker</td></tr>
+        <tr><td>1</td><td>BOOLEAN</td><td>reserved</td><td>A boolean is stored as a byte 0/1 (see id 2)</td></tr>
+        <tr><td>2</td><td>BYTE</td><td>Byte</td><td>Single byte (booleans use this slot too)</td></tr>
+        <tr><td>3</td><td>SHORT</td><td>Short</td><td>Short integer</td></tr>
         <tr><td>4</td><td>CharData</td><td>char</td><td>Character</td></tr>
-        <tr><td>5</td><td>IntData</td><td>int</td><td>Integer (most common)</td></tr>
-        <tr><td>6</td><td>LongData</td><td>long</td><td>Long integer</td></tr>
-        <tr><td>7</td><td>FloatData</td><td>float</td><td>Single-precision float</td></tr>
-        <tr><td>8</td><td>DoubleData</td><td>double</td><td>Double-precision float</td></tr>
-        <tr><td>9</td><td>ByteArrayData</td><td>byte[]</td><td>Byte array (incl. boolean[])</td></tr>
-        <tr><td>10</td><td>IntArrayData</td><td>int[]</td><td>Int array (incl. short[], char[], float[])</td></tr>
-        <tr><td>11</td><td>LongArrayData</td><td>long[]</td><td>Long array (incl. double[])</td></tr>
-        <tr><td>12</td><td>StringData</td><td>String</td><td>UTF-8 string</td></tr>
-        <tr><td>13</td><td>ListData</td><td>List&lt;Data&gt;</td><td>Mixed-type ordered list</td></tr>
-        <tr><td>14</td><td>StringMapData</td><td>Map&lt;String, Data&gt;</td><td>String-keyed map (most common compound type)</td></tr>
-        <tr><td>15</td><td>CustomData</td><td>user-defined</td><td>Extensible custom type</td></tr>
-        <tr><td>16</td><td>DataMapData</td><td>Map&lt;Data, Data&gt;</td><td>Data-keyed map</td></tr>
-        <tr><td>17</td><td>IntMapData</td><td>Int2ObjectMap&lt;Data&gt;</td><td>Int-keyed map (FastUtil-backed)</td></tr>
-        <tr><td>18</td><td>LongMapData</td><td>Long2ObjectMap&lt;Data&gt;</td><td>Long-keyed map (FastUtil-backed)</td></tr>
+        <tr><td>5</td><td>INT</td><td>Integer</td><td>Integer (most common)</td></tr>
+        <tr><td>6</td><td>LONG</td><td>Long</td><td>Long integer</td></tr>
+        <tr><td>7</td><td>FLOAT</td><td>Float</td><td>Single-precision float</td></tr>
+        <tr><td>8</td><td>DOUBLE</td><td>Double</td><td>Double-precision float</td></tr>
+        <tr><td>9</td><td>carrier byte array</td><td>byte[]</td><td>Byte array (incl. boolean[])</td></tr>
+        <tr><td>10</td><td>carrier int array</td><td>int[]</td><td>Int array (incl. short[], char[], float[])</td></tr>
+        <tr><td>11</td><td>carrier long array</td><td>long[]</td><td>Long array (incl. double[])</td></tr>
+        <tr><td>12</td><td>STRING</td><td>String</td><td>UTF-8 string</td></tr>
+        <tr><td>13</td><td>carrier list</td><td>List&lt;Data&gt;</td><td>Mixed-type ordered list</td></tr>
+        <tr><td>14</td><td>carrier string map</td><td>Map&lt;String, Data&gt;</td><td>String-keyed map (most common compound type)</td></tr>
+        <tr><td>15</td><td>CustomTypes</td><td>user-defined</td><td>Extensible custom type</td></tr>
+        <tr><td>16</td><td>carrier value map</td><td>Map&lt;Data, Data&gt;</td><td>Data-keyed map</td></tr>
+        <tr><td>17</td><td>carrier int map</td><td>Int2ObjectMap&lt;Data&gt;</td><td>Int-keyed map (FastUtil-backed)</td></tr>
+        <tr><td>18</td><td>carrier long map</td><td>Long2ObjectMap&lt;Data&gt;</td><td>Long-keyed map (FastUtil-backed)</td></tr>
     </tbody>
 </table>
 
@@ -413,8 +413,8 @@ li { margin: 4px 0; }
         <tr><td>scheduleUpdate(LogicalSide)</td><td>Default. Called on field update notification. Override to trigger UI refresh etc.</td></tr>
         <tr><td>writeCustomSyncData(buf, writeAll)</td><td>Write additional custom data to the network buffer before standard field sync</td></tr>
         <tr><td>readCustomSyncData(buf)</td><td>Read additional custom data from the network buffer before standard field sync</td></tr>
-        <tr><td>writeCustomSaveData(data)</td><td>Write additional custom data to StringMapData before standard field persistence</td></tr>
-        <tr><td>readCustomSaveData(data, version)</td><td>Read additional custom data from StringMapData before standard field loading</td></tr>
+        <tr><td>writeCustomSaveData(map, ops)</td><td>Write additional custom data to carrier string map before standard field persistence</td></tr>
+        <tr><td>readCustomSaveData(map, ops)</td><td>Read additional custom data from carrier string map before standard field loading</td></tr>
     </tbody>
 </table>
 
@@ -449,8 +449,8 @@ li { margin: 4px 0; }
         <tr><td>detectChange(side, source, autoDetectOnly)</td><td>Detect whether field value has changed. autoDetectOnly=true: only checks fields with autoDetect=true; false=force-detect all fields</td></tr>
         <tr><td>writeToBuffer(side, source, buf, writeAll)</td><td>Write field value to network buffer. writeAll=true writes all fields regardless of dirty state</td></tr>
         <tr><td>readFromBuffer(side, source, buf)</td><td>Read and set field value from network buffer, also triggers listener callbacks</td></tr>
-        <tr><td>writeToData(source)</td><td>Encode field value to a Data object for persistence</td></tr>
-        <tr><td>readFromData(source, data, version)</td><td>Decode and restore field value from a Data object</td></tr>
+        <tr><td>writeToValue(source)</td><td>Encode field value to a Data object for persistence</td></tr>
+        <tr><td>readFromValue(source, data, ops)</td><td>Decode and restore field value from a Data object</td></tr>
         <tr><td>mustDetect()</td><td>Default false. When true, detectChange is always called even if not marked dirty</td></tr>
     </tbody>
 </table>
@@ -477,7 +477,7 @@ li { margin: 4px 0; }
     <li><strong>Field discovery &amp; instantiation</strong> — reads class-level metadata from <code>FieldDefinitionStorage</code>, creates DataField implementations for each field</li>
     <li><strong>Change detection</strong> — <code>updateFieldDirtyFlags(LogicalSide, boolean autoDetectOnly)</code> iterates sync fields, calling detectChange</li>
     <li><strong>Network serialization</strong> — writes custom sync data first, then each dirty field as (VarInt fieldIndex, fieldPayload) pairs</li>
-    <li><strong>Data persistence</strong> — via <code>writeToData()</code>/<code>readFromData()</code> using the StringMapData format</li>
+    <li><strong>Data persistence</strong> — via <code>writeToValue()</code>/<code>readFromValue()</code> using the carrier string map format</li>
     <li><strong>Re-entrancy protection</strong> — <code>updating</code> and <code>writing</code> volatile flags prevent recursion</li>
     <li><strong>Directional field management</strong> — maintains three independent arrays: syncToClientFields[], syncToServerFields[], saveFields[]</li>
 </ul>
@@ -489,8 +489,8 @@ li { margin: 4px 0; }
         <tr><td>updateFieldDirtyFlags(side, autoDetectOnly)</td><td>Iterates sync fields calling detectChange. Returns true if any change or dirty flag found</td></tr>
         <tr><td>writeToNetworkBuffer(side, writeAll)</td><td>Serializes dirty fields to byte[]. writeAll=true writes all fields</td></tr>
         <tr><td>readFromNetworkBuffer(side, data)</td><td>Deserializes byte[] and restores field values, triggers listener and scheduleUpdate</td></tr>
-        <tr><td>writeToData()</td><td>Serializes all @SaveToDisk fields to StringMapData</td></tr>
-        <tr><td>readFromData(data, dataVersion)</td><td>Deserializes and restores all persisted fields from StringMapData</td></tr>
+        <tr><td>writeToValue()</td><td>Serializes all @SaveToDisk fields to carrier string map</td></tr>
+        <tr><td>readFromValue(data, JavaValueOps.create(dataVersion))</td><td>Deserializes and restores all persisted fields from carrier string map</td></tr>
         <tr><td>markFieldsForSync(fields...)</td><td>Marks fields as dirty by DataFieldDefinition or field name string</td></tr>
         <tr><td>hasSyncFields(side) / hasSaveFields()</td><td>Query whether managed fields of the given type exist</td></tr>
     </tbody>
@@ -559,8 +559,8 @@ li { margin: 4px 0; }
 <table>
     <thead><tr><th>Component</th><th>Type</th><th>Purpose</th></tr></thead>
     <tbody>
-        <tr><td>streamWriter</td><td>ByteStreamEncoder&lt;T&gt;</td><td>Write objects to FriendlyByteBuf (network sync)</td></tr>
-        <tr><td>streamReader</td><td>ByteStreamDecoder&lt;T&gt;</td><td>Read objects from FriendlyByteBuf (network sync)</td></tr>
+        <tr><td>streamWriter</td><td>StreamEncoder&lt;FriendlyByteBuf, T&gt;</td><td>Write objects to FriendlyByteBuf (network sync)</td></tr>
+        <tr><td>streamReader</td><td>StreamDecoder&lt;FriendlyByteBuf, T&gt;</td><td>Read objects from FriendlyByteBuf (network sync)</td></tr>
         <tr><td>dataWriter</td><td>DataEncoder&lt;T&gt;</td><td>Encode objects to Data objects (persistence)</td></tr>
         <tr><td>dataReader</td><td>DataDecoder&lt;T&gt;</td><td>Decode objects from Data objects (persistence)</td></tr>
     </tbody>
@@ -568,7 +568,7 @@ li { margin: 4px 0; }
 <p>Features:</p>
 <ul>
     <li><strong>FastUtil-backed registry</strong> — internal <code>Reference2ReferenceOpenHashMap</code> for type-to-codec mapping, O(1) identity-keyed lookup</li>
-    <li><strong>Multi-source construction</strong> — of(streamCodec) / of(dataCodec) / of(streamCodec, dataCodec) / of(streamCodec, mojangCodec)</li>
+    <li><strong>Multi-source construction</strong> — of(streamCodec) / of(valueCodec) / of(streamCodec, valueCodec) / of(mojangCodec)</li>
     <li><strong>Auto-generated enums</strong> — all enum types auto-generate codecs on first access via ConcurrentHashMapCache</li>
     <li><strong>Auto-generated arrays</strong> — all non-primitive array types auto-generate codecs on first access via ConcurrentHashMapCache</li>
     <li><strong>Generic support</strong> — register() accepts Class&lt;?&gt;... genericTypes, using identityHashCode-wrapped arrays as cache keys</li>
@@ -577,7 +577,7 @@ li { margin: 4px 0; }
 
 <!-- ===== FieldDataCodec ===== -->
 <h2 id="field-data-codec">FieldDataCodec — POJO Codec</h2>
-<p><code>FieldDataCodec&lt;T&gt;</code> wraps an annotated POJO class, serializing all its <code>@SaveToDisk</code>/<code>@SyncToClient</code> fields as a single unit. It implements both <code>ByteStreamCodec&lt;T&gt;</code> and <code>DataCodec&lt;T&gt;</code>, so it can be referenced directly in the <code>@Codec</code> annotation.</p>
+<p><code>FieldDataCodec&lt;T&gt;</code> wraps an annotated POJO class, serializing all its <code>@SaveToDisk</code>/<code>@SyncToClient</code> fields as a single unit. It implements both <code>StreamCodec&lt;FriendlyByteBuf, T&gt;</code> and <code>ValueCodec&lt;T&gt;</code>, so it can be referenced directly in the <code>@Codec</code> annotation.</p>
 
 <div class="code-block"><pre><span class="kw">private static final</span> <span class="typ">FieldDataCodec</span>&lt;<span class="typ">MyConfig</span>&gt; CONFIG_CODEC =
     <span class="typ">FieldDataManager</span>.createCodec(<span class="typ">MyConfig</span>.class, <span class="typ">MyConfig</span>::<span class="kw">new</span>);
@@ -587,7 +587,7 @@ li { margin: 4px 0; }
 <span class="an">@Codec</span>(saveCodec = <span class="str">"CONFIG_CODEC"</span>, syncCodec = <span class="str">"CONFIG_CODEC"</span>)
 <span class="kw">private</span> <span class="typ">MyConfig</span> config = <span class="kw">new</span> <span class="typ">MyConfig</span>();</pre></div>
 
-<p>Internally, <code>FieldDataCodec</code> implements <code>IFieldDataHolder</code> and uses a <code>ThreadLocal</code> to expose the current POJO instance to its internal <code>FieldDataManager</code> during encode/decode. All annotated fields are serialized via <code>writeAllToData()</code> / <code>readAllFromData()</code>.</p>
+<p>Internally, <code>FieldDataCodec</code> implements <code>IFieldDataHolder</code> and uses a <code>ThreadLocal</code> to expose the current POJO instance to its internal <code>FieldDataManager</code> during encode/decode. All annotated fields are serialized via <code>writeAllToValue()</code> / <code>readAllFromValue()</code>.</p>
 
 <p>Creation:</p>
 <div class="code-block"><pre><span class="cmt">// Simple</span>
@@ -605,7 +605,7 @@ li { margin: 4px 0; }
 <p>The DataComponent system provides an optional component-based data model, similar to vanilla Minecraft's DataComponents. It manages typed keys via <code>DataComponentRegistry</code> and stores data in <code>DataComponentMap</code>, with efficient merge semantics.</p>
 
 <h3>DataComponentRegistry</h3>
-<p>Extends <code>Registry&lt;String, DataComponentKey&lt;?&gt;&gt;</code> and simultaneously implements <code>ByteStreamCodec&lt;DataComponentMap&gt;</code>, <code>DataCodec&lt;DataComponentMap&gt;</code>, and Mojang's <code>Codec&lt;DataComponentMap&gt;</code> — usable directly as a codec for all three serialization paths.</p>
+<p>Extends <code>Registry&lt;String, DataComponentKey&lt;?&gt;&gt;</code> and simultaneously implements <code>StreamCodec&lt;FriendlyByteBuf, DataComponentMap&gt;</code>, <code>ValueCodec&lt;DataComponentMap&gt;</code>, and Mojang's <code>Codec&lt;DataComponentMap&gt;</code> — usable directly as a codec for all three serialization paths.</p>
 <pre><code><span class="cmt">// Create registry</span>
 <span class="typ">DataComponentRegistry</span> registry = <span class="kw">new</span> <span class="typ">DataComponentRegistry</span>(<span class="str">"my_mod"</span>);
 registry.unfreeze();
@@ -669,8 +669,8 @@ map.merge(otherMap);                           <span class="cmt">// bulk merge a
         <tr><td>getId(value) / getKey(value)</td><td>Reverse-lookup integer ID or key</td></tr>
         <tr><td>containsKey(key) / containsValue(value)</td><td>Existence checks</td></tr>
         <tr><td>unfreeze() / freeze()</td><td>Lifecycle: unfreeze to register → freeze to lock and build indices</td></tr>
-        <tr><td>streamCodec()</td><td>Returns an integer-ID-based ByteStreamCodec&lt;V&gt;</td></tr>
-        <tr><td>dataCodec(keyCodec)</td><td>Returns a key-serialization-based DataCodec&lt;V&gt;</td></tr>
+        <tr><td>streamCodec()</td><td>Returns an integer-ID-based StreamCodec&lt;FriendlyByteBuf, V&gt;</td></tr>
+        <tr><td>valueCodec(keyCodec)</td><td>Returns a key-serialization-based ValueCodec&lt;V&gt;</td></tr>
         <tr><td>codec(keyCodec)</td><td>Returns a Mojang Codec&lt;V&gt;</td></tr>
     </tbody>
 </table>
@@ -681,7 +681,7 @@ reg.register(<span class="str">"foo"</span>, fooInstance);
 reg.register(<span class="str">"bar"</span>, barInstance);
 reg.freeze();
 
-<span class="kw">int</span> id = reg.getId(fooInstance);        <span class="cmt">// auto-assigned integer ID<br></span><span class="cmt"></span><span class="typ">MyType</span> v = reg.get(<span class="str">"foo"</span>);              <span class="cmt">// lookup by key<br></span><span class="cmt"></span><span class="typ">ByteStreamCodec</span>&lt;<span class="typ">MyType</span>&gt; c = reg.streamCodec();  <span class="cmt">// for network sync</span></code></pre>
+<span class="kw">int</span> id = reg.getId(fooInstance);        <span class="cmt">// auto-assigned integer ID<br></span><span class="cmt"></span><span class="typ">MyType</span> v = reg.get(<span class="str">"foo"</span>);              <span class="cmt">// lookup by key<br></span><span class="cmt"></span><span class="typ">StreamCodec</span>&lt;<span class="typ">FriendlyByteBuf</span>, <span class="typ">MyType</span>&gt; c = reg.streamCodec();  <span class="cmt">// for network sync</span></code></pre>
 
 <!-- ===== NotifiableHolder ===== -->
 <h2 id="notifiable-holder">NotifiableHolder System</h2>
@@ -713,13 +713,13 @@ reg.freeze();
 
 <!-- ===== UTILITIES ===== -->
 <h2 id="utils-nbt">NbtUtil — NBT Conversion (v26.7.3 Revamp)</h2>
-<p><code>NbtUtil</code> provides NBT ↔ Data conversion, with 3 <code>CustomData.Type</code> registrations. However, <strong>conversion is generally discouraged</strong> — use CustomData wrapping instead for zero-copy performance.</p>
+<p><code>NbtUtil</code> provides NBT ↔ Data conversion, with 3 <code>CustomTypes.Type</code> registrations. However, <strong>conversion is generally discouraged</strong> — use CustomTypes wrapping instead for zero-copy performance.</p>
 
-<div class="note warn"><strong>⚠️ Recommendation: Prefer CustomData over convertToXxx</strong><br>
-CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), while <code>convertToData/convertToTag</code> recursively convert the entire tree, allocating new objects — O(n) time and memory.<br>
+<div class="note warn"><strong>⚠️ Recommendation: Prefer CustomTypes over convertToXxx</strong><br>
+CustomTypes <strong>wraps</strong> the original NBT object directly (zero-copy), while <code>convertToData/convertToTag</code> recursively convert the entire tree, allocating new objects — O(n) time and memory.<br>
 <strong>Only use convertToData when importing existing NBT data into the Data type system; only use convertToTag when you explicitly need NBT output from Data.</strong></div>
 
-<h3>CustomData Type Registrations (Recommended)</h3>
+<h3>CustomTypes Type Registrations (Recommended)</h3>
 <table>
     <thead><tr><th>Constant</th><th>ID</th><th>Wraps</th><th>Notes</th></tr></thead>
     <tbody>
@@ -729,7 +729,7 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
     </tbody>
 </table>
 
-<div class="code-block"><pre><span class="cmt">// ✅ Recommended: CustomData zero-copy wrapping</span>
+<div class="code-block"><pre><span class="cmt">// ✅ Recommended: CustomTypes zero-copy wrapping</span>
 <span class="typ">Data</span> data = <span class="typ">NbtUtil</span>.COMPOUND_TAG_TYPE.create(tag.copy());
 
 <span class="cmt">// ❌ Discouraged: full conversion (recursively allocates new objects)</span>
@@ -744,28 +744,28 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 <h3>Data → NBT Conversion Limitations</h3>
 <p>NBT has 13 types while Data has 19. The following 4 Data types <strong>cannot be converted back to NBT</strong> and will throw <code>MatchException</code>:</p>
 <ul>
-    <li><code>DataMapData</code> (ID 16) — NBT has no Data→Data map</li>
-    <li><code>IntMapData</code> (ID 17) — NBT has no Int→Data map</li>
-    <li><code>LongMapData</code> (ID 18) — NBT has no Long→Data map</li>
-    <li><code>CustomData</code> (ID 15) — user-defined types, NBT cannot represent</li>
+    <li><code>carrier value map</code> (ID 16) — NBT has no Data→Data map</li>
+    <li><code>carrier int map</code> (ID 17) — NBT has no Int→Data map</li>
+    <li><code>carrier long map</code> (ID 18) — NBT has no Long→Data map</li>
+    <li><code>CustomTypes</code> (ID 15) — user-defined types, NBT cannot represent</li>
 </ul>
 
-<p>Fully-supported bidirectional types: EndTag↔NullData, ByteTag↔ByteData, ShortTag↔ShortData, IntTag↔IntData, LongTag↔LongData, FloatTag↔FloatData, DoubleTag↔DoubleData, StringTag↔StringData, ByteArrayTag↔ByteArrayData, IntArrayTag↔IntArrayData, LongArrayTag↔LongArrayData, ListTag↔ListData (element-by-element), CompoundTag↔StringMapData (entry-by-entry).</p>
+<p>Fully-supported bidirectional types: EndTag↔carrier null value, ByteTag↔Byte, ShortTag↔Short, IntTag↔Int, LongTag↔Long, FloatTag↔Float, DoubleTag↔Double, StringTag↔String, ByteArrayTag↔carrier byte array, IntArrayTag↔carrier int array, LongArrayTag↔carrier long array, ListTag↔carrier list (element-by-element), CompoundTag↔carrier string map (entry-by-entry).</p>
 
-<h2 id="utils-codecs">DataCodecs / StreamCodecs — Minecraft Type Codecs</h2>
-<p>Pre-registered codec constants for common Minecraft types, used by <code>DataSyncCodec</code>.</p>
+<h2 id="utils-codecs">ValueCodecs / StreamCodecExtends — Minecraft Type Codecs</h2>
+<p>Pre-registered codec constants for common Minecraft types, used by <code>DataSyncCodec</code>. <code>StreamCodecExtends</code> is an extension of the 1.21-shaped <code>ByteBufCodecs</code>: the primitives and container builders are declared there and their constants are inherited here, so <code>StreamCodecExtends.STRING_UTF8</code> resolves as well. Only <em>fields</em> are inherited — the static builders (<code>list()</code>, <code>optional(…)</code>, …) are still called on <code>ByteBufCodecs</code>.</p>
 
 <table>
-    <thead><tr><th>Constant</th><th>DataCodec Format</th><th>StreamCodec Format</th></tr></thead>
+    <thead><tr><th>Constant</th><th>ValueCodec Format</th><th>StreamCodec Format</th></tr></thead>
     <tbody>
-        <tr><td><code>RESOURCE_LOCATION_CODEC</code></td><td>StringData("namespace:path")</td><td>UTF strings (namespace + path)</td></tr>
-        <tr><td><code>BLOCK_POS_CODEC</code></td><td>IntArrayData [x, y, z]</td><td>Long (<code>BlockPos.asLong()</code>)</td></tr>
-        <tr><td><code>TAG_CODEC</code></td><td>CustomData → NbtUtil.TAG_TYPE</td><td>1-byte type ID + NBT write</td></tr>
-        <tr><td><code>COMPOUND_TAG_CODEC</code></td><td>CustomData → NbtUtil.COMPOUND_TAG_TYPE</td><td>Direct NBT write (no type ID)</td></tr>
-        <tr><td><code>LIST_TAG_CODEC</code></td><td>CustomData → NbtUtil.LIST_TAG_TYPE</td><td>Direct NBT write (no type ID)</td></tr>
+        <tr><td><code>RESOURCE_LOCATION</code></td><td>STRING("namespace:path")</td><td>UTF strings (namespace + path)</td></tr>
+        <tr><td><code>BLOCK_POS_CODEC</code></td><td>carrier int array [x, y, z]</td><td>Long (<code>BlockPos.asLong()</code>)</td></tr>
+        <tr><td><code>TAG_CODEC</code></td><td>CustomTypes → NbtUtil.TAG_TYPE</td><td>1-byte type ID + NBT write</td></tr>
+        <tr><td><code>COMPOUND_TAG_CODEC</code></td><td>CustomTypes → NbtUtil.COMPOUND_TAG_TYPE</td><td>Direct NBT write (no type ID)</td></tr>
+        <tr><td><code>LIST_TAG_CODEC</code></td><td>CustomTypes → NbtUtil.LIST_TAG_TYPE</td><td>Direct NBT write (no type ID)</td></tr>
         <tr><td><code>ITEM_STACK_CODEC</code></td><td>CompoundTag (save/load)</td><td><code>FriendlyByteBuf.writeItem()</code></td></tr>
         <tr><td><code>FLUID_STACK_CODEC</code></td><td>CompoundTag (writeToNBT)</td><td><code>FluidStack.writeToPacket()</code></td></tr>
-        <tr><td><code>COMPONENT_CODEC</code></td><td>StringData (JSON)</td><td><code>FriendlyByteBuf.writeComponent()</code></td></tr>
+        <tr><td><code>COMPONENT</code></td><td>STRING (JSON)</td><td><code>FriendlyByteBuf.writeComponent()</code></td></tr>
     </tbody>
 </table>
 
@@ -802,7 +802,7 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 <p>Enum name/serialized-name caching with "fixed enum" concept for encoding optimization.</p>
 
 <h3>Fixed vs Non-Fixed Enums</h3>
-<p>Fixed enums (registered via <code>addFixedEnum()</code>) have stable ordinal order and use <strong>IntData</strong> (ordinal) encoding — more compact. Non-fixed enums use <strong>StringData</strong> (serialized name) encoding — better forward compatibility.</p>
+<p>Fixed enums (registered via <code>addFixedEnum()</code>) have stable ordinal order and use <strong>INT</strong> (ordinal) encoding — more compact. Non-fixed enums use <strong>STRING</strong> (serialized name) encoding — better forward compatibility.</p>
 
 <table>
     <thead><tr><th>Method</th><th>Description</th></tr></thead>
@@ -890,7 +890,7 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
     <tbody>
         <tr><td>@AddToManager</td><td>FIELD</td><td>Meta-annotation. Marks a field for FieldDataManager management. @SaveToDisk/@SyncToClient/@SyncToServer all extend this</td></tr>
         <tr><td>@Access</td><td>FIELD</td><td>Marks a non-final field to use final-field Access mode. instanceAsValue=true encodes the container instance itself (nullable, recreated on read)</td></tr>
-        <tr><td>@Codec</td><td>FIELD</td><td>Custom serialization. Two modes: ① <code>saveCodec</code>/<code>syncCodec</code> reference static fields (e.g. FieldDataCodec); ② <code>writeToData</code>/<code>readFromData</code>/<code>writeToBuffer</code>/<code>readFromBuffer</code> reference instance methods</td></tr>
+        <tr><td>@Codec</td><td>FIELD</td><td>Custom serialization. Two modes: ① <code>saveCodec</code>/<code>syncCodec</code> reference static fields (e.g. FieldDataCodec); ② <code>writeToValue</code>/<code>readFromValue</code>/<code>writeToBuffer</code>/<code>readFromBuffer</code> reference instance methods</td></tr>
         <tr><td>@Conversion</td><td>FIELD</td><td>Stores/syncs a field as another type. <code>toManaged</code> names a static <code>Function&lt;A, B&gt;</code> field in the same class; its return type B becomes the managed type (codecs, strategies and factories are resolved for B). <code>toField</code> names the inverse <code>Function&lt;B, A&gt;</code> and may be omitted for final or access-mode fields</td></tr>
         <tr><td>@Strategy</td><td>FIELD</td><td>Specifies the Hash.Strategy for change detection, referencing a static field by name</td></tr>
         <tr><td>@Generic</td><td>FIELD</td><td>Forces generic type handling for the field. Use when the field is generic but auto-detection fails</td></tr>
@@ -1065,7 +1065,7 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 <ol>
     <li><strong>Mark dirty chunk</strong> — call <code>setChanged()</code> after data changes</li>
     <li><strong>Minecraft auto-saves</strong> — vanilla periodically checks dirty chunks and calls <code>saveAdditional()</code></li>
-    <li><strong>Framework serializes</strong> — <code>FieldDataHolderBlockEntity.saveAdditional()</code> auto-calls <code>writeToData()</code></li>
+    <li><strong>Framework serializes</strong> — <code>FieldDataHolderBlockEntity.saveAdditional()</code> auto-calls <code>writeToValue()</code></li>
 </ol>
 <div class="note warn"><strong>Critical:</strong> without calling <code>setChanged()</code>, data will <strong>not</strong> be written to disk. Call it immediately after modifying any <code>@SaveToDisk</code> field.</div>
 
@@ -1075,19 +1075,19 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
     <span class="typ">MyCustomType</span>.class,
     (buf, obj) -> buf.writeInt(obj.getValue()),              <span class="cmt">// streamWriter</span>
     buf -> <span class="kw">new</span> <span class="typ">MyCustomType</span>(buf.readInt()),                   <span class="cmt">// streamReader</span>
-    obj -> <span class="typ">IntData</span>.valueOf(obj.getValue()),                 <span class="cmt">// dataWriter</span>
+    ops -> <span class="typ">ValueCodec</span>.INT.encode(ops, obj.getValue()),      <span class="cmt">// disk half</span>
     (data, version) -> <span class="kw">new</span> <span class="typ">MyCustomType</span>(data.getInt())        <span class="cmt">// dataReader</span>
 );
 
-<span class="cmt">// Method 2: use ByteStreamCodec + DataCodec</span>
+<span class="cmt">// Method 2: use StreamCodec + ValueCodec</span>
 <span class="typ">DataSyncCodec</span>.register(<span class="typ">MyCustomType</span>.class,
-    <span class="typ">ByteStreamCodec</span>.of(myWriter, myReader),
-    <span class="typ">DataCodec</span>.of(myDataWriter, myDataReader)
+    <span class="typ">StreamCodec</span>.of(myWriter, myReader),
+    <span class="typ">ValueCodec</span>.of(myDataWriter, myDataReader)
 );
 
-<span class="cmt">// Method 3: use ByteStreamCodec + Mojang Codec</span>
+<span class="cmt">// Method 3: use StreamCodec + Mojang Codec</span>
 <span class="typ">DataSyncCodec</span>.register(<span class="typ">MyCustomType</span>.class,
-    <span class="typ">ByteStreamCodec</span>.of(myWriter, myReader),
+    <span class="typ">StreamCodec</span>.of(myWriter, myReader),
     myMojangCodec
 );
 
@@ -1114,11 +1114,11 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
 
 <h3>Custom Serialization Methods (@Codec)</h3>
 <pre><code><span class="an">@SaveToDisk</span>
-<span class="an">@Codec</span>(writeToData = <span class="str">"customWrite"</span>, readFromData = <span class="str">"customRead"</span>)
+<span class="an">@Codec</span>(writeToValue = <span class="str">"customWrite"</span>, readFromValue = <span class="str">"customRead"</span>)
 <span class="kw">private</span> <span class="typ">MyType</span> customField;
 
 <span class="kw">private</span> <span class="typ">Data</span> <span class="typ">customWrite</span>(<span class="typ">MyType</span> value) {
-    <span class="kw">return</span> <span class="typ">StringData</span>.valueOf(value.serialize());
+    <span class="kw">return</span> ops.createString(value.serialize());
 }
 
 <span class="kw">private</span> <span class="typ">MyType</span> <span class="typ">customRead</span>(<span class="typ">Data</span> data, <span class="kw">int</span> version) {
@@ -1176,8 +1176,8 @@ CustomData <strong>wraps</strong> the original NBT object directly (zero-copy), 
         <tr><td>FluidStack</td><td>FLUID_STACK_CODEC</td><td>Fluid stack</td></tr>
         <tr><td>Component</td><td>COMPONENT_CODEC</td><td>Chat component</td></tr>
         <tr><td>BlockState</td><td>BLOCK_STATE_CODEC</td><td>Block state</td></tr>
-        <tr><td>Data</td><td>DATA_CODEC</td><td>Data type system itself (passthrough)</td></tr>
-        <tr><td>StringMapData</td><td>MAP_DATA_CODEC</td><td>String-keyed map data</td></tr>
+        
+        
         <tr><td>Enum (all)</td><td>Auto-generated</td><td>All enum types get auto-generated codecs</td></tr>
         <tr><td>T[] (non-primitive)</td><td>Auto-generated</td><td>All non-primitive array types get auto-generated codecs</td></tr>
     </tbody>

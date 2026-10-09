@@ -144,7 +144,7 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 | `@SaveToDisk` | Disk persistence | `key`, `skipWhen`, `saveEmpty`, `defaultValue`, `defaultValueGetter` |
 | `@Access` | Force access-mode for containers | `instanceAsValue` |
 | `@AdditionalHolder` | Recursively scan nested object fields | — |
-| `@Codec` | Custom serialization | `saveCodec` / `syncCodec` / `writeToData` / `readFromData` |
+| `@Codec` | Custom serialization | `saveCodec` / `syncCodec` / `writeToValue` / `readFromValue` |
 | `@Strategy` | Custom change detection strategy | `value` (static field name) |
 | `@Generic` | Force generic-type factory resolution | — |
 | `@AddToManager` | Add to manager without auto sync/persist | — |
@@ -194,7 +194,7 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 | **FieldDefinitionStorage** | Global cache — scans class hierarchy for annotated fields |
 | **FieldDataManager** | Per-instance lifecycle manager — field discovery, change detection, serialization |
 | **DataField hierarchy** | `AbstractField` (primitive values), `ObjField` (objects with codecs), `AbstractFieldAccess` (collections/maps/arrays) |
-| **DataSyncCodec** | Unified codec registry pairing `StreamCodec<B, T>` / `ByteStreamCodec` (network) with `DataCodec` (persistence) |
+| **DataSyncCodec** | Unified codec registry pairing `StreamCodec<B, T>` (network) with `ValueCodec` (persistence); the built-in buffer codecs live in `ByteBufCodecs` |
 | **Data type system** | 19-type sealed binary format, more compact than NBT, with VarInt encoding |
 
 ---
