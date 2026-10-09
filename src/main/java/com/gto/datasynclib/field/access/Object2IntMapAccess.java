@@ -3,10 +3,8 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.IntData;
-import com.gto.datasynclib.datastream.data.ListData;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntMaps;
 import net.minecraft.network.FriendlyByteBuf;
@@ -24,9 +22,12 @@ import org.jetbrains.annotations.NotNull;
  * The map is cleared and re-populated on receive.</p>
  *
  * <h3>Persistence format:</h3>
- * <p>Interleaved key-value pairs in a {@link com.gto.datasynclib.datastream.data.ListData}:
+ * <p>Interleaved key-value pairs in a carrier list:
  * {@code [keyData0, IntData(value0), keyData1, IntData(value1), ...]}</p>
  */
+
+import java.util.ArrayList;
+
 public class Object2IntMapAccess<K> extends AbstractFieldAccess<Object2IntMap> {
 
     private final DataSyncCodec<K> keyCodec;
@@ -72,23 +73,25 @@ public class Object2IntMapAccess<K> extends AbstractFieldAccess<Object2IntMap> {
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull Object2IntMap instance) {
-        if (instance.isEmpty()) return NullData.INSTANCE;
-        var list = new ListData();
+    protected @NotNull Object doWriteValue(@NotNull Object source, @NotNull Object2IntMap instance, @NotNull ValueOps ops) {
+        if (instance.isEmpty()) return ops.createNull();
+        var list = new ArrayList<Object>(instance.size() * 2);
         Object2IntMaps.fastForEach(instance, e -> {
-            list.add(keyCodec.dataWriter.encode((K) e.getKey()));
-            list.add(IntData.valueOf(e.getIntValue()));
+            list.add(keyCodec.encode(ops, (K) e.getKey()));
+            list.add(e.getIntValue());
         });
-        return list;
+        return ops.createList(list);
     }
 
     @Override
-    protected void doReadData(@NotNull Object2IntMap instance, @NotNull Data data, int dataVersion) {
-        var list = data.getList();
+    protected void doReadValue(@NotNull Object2IntMap instance, @NotNull Object data, @NotNull ValueOps ops) {
+        // an empty container was stored as the null value, which is a missing payload, not a failure
+        if (!ops.isList(data)) return;
+        var list = ops.getList(data);
         var size = list.size();
         instance.clear();
         for (int i = 0; i < size; i++) {
-            instance.put(keyCodec.dataReader.decode(list.get(i++), dataVersion), list.get(i).getInt());
+            instance.put(keyCodec.decode(ops, list.get(i++)), ops.getInt(list.get(i)));
         }
     }
 }

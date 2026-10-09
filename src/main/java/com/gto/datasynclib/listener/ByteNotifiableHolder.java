@@ -1,9 +1,9 @@
 package com.gto.datasynclib.listener;
 
 import com.gto.datasynclib.IDataSerializable;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.ByteData;
-import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.util.holder.ByteHolder;
 import lombok.Setter;
 import lombok.experimental.Accessors;
@@ -77,12 +77,12 @@ public final class ByteNotifiableHolder extends ByteHolder implements IDataSeria
     }
 
     @Override
-    public Data writeData() {
-        return ByteData.valueOf(value);
+    public @NotNull Object writeValue(@NotNull ValueOps ops) {
+        return value;
     }
 
     @Override
-    public void readData(@NotNull Data data, int dataVersion) {
-        value = data.getByte();
+    public void readValue(@NotNull Object data, @NotNull ValueOps ops) {
+        value = ops.getByte(data);
     }
 }

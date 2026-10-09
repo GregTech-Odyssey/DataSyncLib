@@ -1,6 +1,7 @@
 package com.gto.datasynclib.annotations;
 
 import com.gto.datasynclib.FieldDataManager;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
@@ -14,7 +15,7 @@ import java.lang.annotation.Target;
  * <p>A field annotated solely with {@code @AddToManager} (without {@link SaveToDisk},
  * {@link SyncToClient}, or {@link SyncToServer}) is registered in the holder's definition
  * list ({@code FieldDefinitionStorage#allDefinitions}) and participates in
- * {@link FieldDataManager#writeAllToData()} / {@link FieldDataManager#readAllFromData(com.gto.datasynclib.datastream.data.Data, int)},
+ * {@link FieldDataManager#writeAllToValue(ValueOps)} / {@link FieldDataManager#readAllFromValue(Object, ValueOps)},
  * but is NOT included in automatic sync or incremental save operations.</p>
  *
  * <p>This is conceptually the "base annotation" that the other three annotations

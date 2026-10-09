@@ -1,13 +1,10 @@
 package com.gto.datasynclib;
 
 import com.gto.datasynclib.annotations.RemoteCall;
-import com.gto.datasynclib.datastream.codec.DataDecoder;
-import com.gto.datasynclib.datastream.codec.DataEncoder;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.datastream.codec.StreamDecoder;
 import com.gto.datasynclib.datastream.codec.StreamEncoder;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.NullData;
-import com.gto.datasynclib.datastream.data.StringMapData;
 import com.gto.datasynclib.remote.RemoteInvoker;
 import com.gto.datasynclib.remote.RemoteMethod;
 import com.gto.datasynclib.remote.RemoteRouting;
@@ -25,6 +22,7 @@ import org.jetbrains.annotations.Nullable;
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -42,8 +40,9 @@ import java.util.function.Supplier;
  *   <li><strong>Serializes for network</strong> — via {@link #writeToNetworkBuffer(LogicalSide, boolean)}
  *       and {@link #readFromNetworkBuffer(LogicalSide, byte[])}, using an index-addressing protocol
  *       where only changed fields are written (each prefixed by a VarInt field index)</li>
- *   <li><strong>Serializes for disk</strong> — via {@link #writeToData()} and
- *       {@link #readFromData(com.gto.datasynclib.datastream.data.Data, int)} using {@link com.gto.datasynclib.datastream.data.StringMapData}</li>
+ *   <li><strong>Serializes for disk</strong> — via {@link #writeToValue(ValueOps)} and
+ *       {@link #readFromValue(Object, ValueOps)}, building one carrier string map that
+ *       {@link JavaValueOps#toBytes(Object)} turns into the bytes of a save file</li>
  *   <li><strong>Serializes remote calls</strong> — {@link #writeRemoteCall(Object, Object, String, Object...)}
  *       produces the {@code byte[]} for a {@link RemoteCall @RemoteCall}
  *       invocation (validated against the lazily cached {@link #getRemoteMethods()} table) and
@@ -69,8 +68,8 @@ public class FieldDataManager {
         return new FieldDataCodec<>(objClass, constructor);
     }
 
-    public static <T> FieldDataCodec<T> createCodec(Class<T> objClass, Supplier<T> constructor, StreamEncoder<FriendlyByteBuf, ? super T> extraStreamWriter, StreamDecoder<FriendlyByteBuf, ? extends T> extraStreamReader, DataEncoder<? super T> extraDataWriter, DataDecoder<? extends T> extraDataReader) {
-        return new FieldDataCodec<>(objClass, constructor, extraStreamWriter, extraStreamReader, extraDataWriter, extraDataReader);
+    public static <T> FieldDataCodec<T> createCodec(Class<T> objClass, Supplier<T> constructor, StreamEncoder<FriendlyByteBuf, ? super T> extraStreamWriter, StreamDecoder<FriendlyByteBuf, ? extends T> extraStreamReader) {
+        return new FieldDataCodec<>(objClass, constructor, extraStreamWriter, extraStreamReader);
     }
 
     public final IFieldDataHolder holder;
@@ -457,128 +456,134 @@ public class FieldDataManager {
         }
     }
 
+    /**
+     * Serializes one field for disk persistence, on the native carrier.
+     *
+     * @param field the field name (as declared, or its {@code @SaveToDisk(key = ...)} override)
+     * @return the field's value, {@code null} for an explicit null, or {@link DataField#NOT_PERSISTED}
+     */
     @NotNull
-    public Data writeFieldToData(String field) {
+    public Object writeFieldToValue(String field, @NotNull ValueOps ops) {
         var d = storage.definitionMap.get(field);
         if (d != null) {
             var f = allFieldMap.get(d);
-            if (f != null) return f.writeToData(holder.getSource(d));
+            if (f != null) return f.writeToValue(holder.getSource(d), ops);
         }
         throw ReflectUtil.createFieldNotFoundException(field);
     }
 
-    public void readFieldFromData(@NotNull Data data, int dataVersion, String field) {
+    /**
+     * Reads one field back from a carrier value — the counterpart of
+     * {@link #writeFieldToValue(String, ValueOps)}.
+     */
+    public void readFieldFromValue(@NotNull Object data, @NotNull ValueOps ops, String field) {
         var d = storage.definitionMap.get(field);
         if (d != null) {
             var f = allFieldMap.get(d);
             if (f != null) {
-                f.readFromData(holder.getSource(d), data, dataVersion);
+                f.readFromValue(holder.getSource(d), data, ops);
                 return;
             }
         }
         throw ReflectUtil.createFieldNotFoundException(field);
     }
 
+    /**
+     * Serializes the named fields into a carrier string map, skipping the ones that have nothing to
+     * store ({@link DataField#NOT_PERSISTED}) and the explicit nulls of fields that do not
+     * {@code saveEmpty}.
+     *
+     * @return the map, or {@code null} when no field contributed
+     */
     @NotNull
-    public Data writeFieldsToData(String... fields) {
-        StringMapData data = new StringMapData();
+    public Object writeFieldsToValue(@NotNull ValueOps ops, String... fields) {
+        Map<String, Object> data = new HashMap<>();
         for (var field : fields) {
             var d = storage.definitionMap.get(field);
-            if (d != null) {
-                var f = allFieldMap.get(d);
-                if (f != null) {
-                    var result = f.writeToData(holder.getSource(d));
-                    if (result.isNone()) continue;
-                    if (result != NullData.INSTANCE || d.saveEmpty) data.put(d.key, result);
-                } else {
-                    throw ReflectUtil.createFieldNotFoundException(field);
-                }
-            } else {
-                throw ReflectUtil.createFieldNotFoundException(field);
-            }
+            if (d == null) throw ReflectUtil.createFieldNotFoundException(field);
+            var f = allFieldMap.get(d);
+            if (f == null) throw ReflectUtil.createFieldNotFoundException(field);
+            var result = f.writeToValue(holder.getSource(d), ops);
+            if (result == DataField.NOT_PERSISTED) continue;
+            if (!ops.isNull(result) || d.saveEmpty) data.put(d.key, result);
         }
-        return data.isEmpty() ? NullData.INSTANCE : data;
+        return data.isEmpty() ? ops.createNull() : ops.createStringMap(data);
     }
 
-    public void readFieldsFromData(@NotNull Data data, int dataVersion, String... fields) {
-        if (data instanceof StringMapData(Map<String, Data> map)) {
-            for (var field : fields) {
-                var d = storage.definitionMap.get(field);
-                if (d != null) {
-                    var tag = map.get(d.key);
-                    if (tag != null) {
-                        var f = allFieldMap.get(d);
-                        if (f != null) {
-                            f.readFromData(holder.getSource(d), tag, dataVersion);
-                        } else {
-                            throw ReflectUtil.createFieldNotFoundException(field);
-                        }
-                    }
-                } else {
-                    throw ReflectUtil.createFieldNotFoundException(field);
-                }
-            }
+    /**
+     * Reads the named fields back from a carrier string map; an absent key leaves the field alone.
+     */
+    public void readFieldsFromValue(@NotNull Object data, @NotNull ValueOps ops, String... fields) {
+        if (!ops.isStringMap(data)) return;
+        var map = ops.getStringMap(data);
+        for (var field : fields) {
+            var d = storage.definitionMap.get(field);
+            if (d == null) throw ReflectUtil.createFieldNotFoundException(field);
+            if (!map.containsKey(d.key)) continue;
+            var f = allFieldMap.get(d);
+            if (f == null) throw ReflectUtil.createFieldNotFoundException(field);
+            f.readFromValue(holder.getSource(d), map.get(d.key), ops);
         }
     }
 
     /**
-     * Serializes every {@code @SaveToDisk} field (plus custom save data) into a Data tree.
+     * Serializes every {@code @SaveToDisk} field (plus the holder's custom save data) into a carrier
+     * string map — the form a save file holds, and the one
+     * {@link com.gto.datasynclib.datastream.codec.JavaValueOps#toBytes(Object)} turns into bytes.
      *
-     * @return a {@link StringMapData} keyed by each field's storage key, or
-     * {@link NullData#INSTANCE} when there is nothing to write
+     * <p>Fields are written in definition order, which is sorted by storage key: a save is therefore
+     * byte-for-byte reproducible, where the Data-era map was a hash map.</p>
+     *
+     * @return the map, or the carrier's null value when there is nothing to write
      */
     @NotNull
-    public Data writeToData() {
-        StringMapData data = new StringMapData();
-        holder.writeCustomSaveData(data);
-        for (var field : saveFields) {
-            var d = field.getDefinition();
-            var result = field.writeToData(holder.getSource(d));
-            if (result.isNone()) continue;
-            if (result != NullData.INSTANCE || d.saveEmpty) data.put(d.key, result);
-        }
-        return data.isEmpty() ? NullData.INSTANCE : data;
+    public Object writeToValue(@NotNull ValueOps ops) {
+        return writeToValue(ops, saveFields);
     }
 
     /**
-     * Reads field data from MapData
-     *
-     * @param data the MapData to read from
+     * The {@link #writeToValue(ValueOps)} of every managed field, including the ones that are
+     * only {@code @AddToManager} and therefore never saved by the incremental path.
      */
-    public void readFromData(@NotNull Data data, int dataVersion) {
-        if (data instanceof StringMapData mapData) {
-            holder.readCustomSaveData(mapData, dataVersion);
-            var map = mapData.value();
-            for (var field : saveFields) {
-                var d = field.getDefinition();
-                var tag = map.get(d.key);
-                if (tag != null) field.readFromData(holder.getSource(d), tag, dataVersion);
-            }
-        }
-    }
-
     @NotNull
-    public Data writeAllToData() {
-        StringMapData data = new StringMapData();
-        holder.writeCustomSaveData(data);
-        for (var field : allFields) {
-            var d = field.getDefinition();
-            var result = field.writeToData(holder.getSource(d));
-            if (result.isNone()) continue;
-            if (result != NullData.INSTANCE || d.saveEmpty) data.put(d.key, result);
-        }
-        return data.isEmpty() ? NullData.INSTANCE : data;
+    public Object writeAllToValue(@NotNull ValueOps ops) {
+        return writeToValue(ops, allFields);
     }
 
-    public void readAllFromData(@NotNull Data data, int dataVersion) {
-        if (data instanceof StringMapData mapData) {
-            holder.readCustomSaveData(mapData, dataVersion);
-            var map = mapData.value();
-            for (var field : allFields) {
-                var d = field.getDefinition();
-                var tag = map.get(d.key);
-                if (tag != null) field.readFromData(holder.getSource(d), tag, dataVersion);
-            }
+    private Object writeToValue(ValueOps ops, DataField<?>[] fields) {
+        Map<String, Object> data = new HashMap<>(fields.length);
+        holder.writeCustomSaveData(data, ops);
+        for (var field : fields) {
+            var d = field.getDefinition();
+            var result = field.writeToValue(holder.getSource(d), ops);
+            if (result == DataField.NOT_PERSISTED) continue;
+            if (!ops.isNull(result) || d.saveEmpty) data.put(d.key, result);
+        }
+        return data.isEmpty() ? ops.createNull() : ops.createStringMap(data);
+    }
+
+    /**
+     * Restores the {@code @SaveToDisk} fields from {@link #writeToValue(ValueOps)}.
+     */
+    public void readFromValue(@NotNull Object data, @NotNull ValueOps ops) {
+        readFromValue(data, ops, saveFields);
+    }
+
+    /**
+     * Restores every managed field from {@link #writeAllToValue(ValueOps)}.
+     */
+    public void readAllFromValue(@NotNull Object data, @NotNull ValueOps ops) {
+        readFromValue(data, ops, allFields);
+    }
+
+    private void readFromValue(Object data, ValueOps ops, DataField<?>[] fields) {
+        if (!ops.isStringMap(data)) return;
+        var map = ops.getStringMap(data);
+        holder.readCustomSaveData(map, ops);
+        for (var field : fields) {
+            var d = field.getDefinition();
+            if (!map.containsKey(d.key)) continue;
+            field.readFromValue(holder.getSource(d), map.get(d.key), ops);
         }
     }
 }

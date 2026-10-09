@@ -1,9 +1,12 @@
 package com.gto.datasynclib;
 
-import com.gto.datasynclib.datastream.data.StringMapData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.Map;
 
 /**
  * Lightweight {@link IFieldDataHolder} adapter that grants a plain sub-object its
@@ -64,13 +67,13 @@ public final class ChildFieldDataHolder implements IFieldDataHolder {
     }
 
     @Override
-    public void writeCustomSaveData(StringMapData data) {
-        if (target instanceof IFieldDataHolder h) h.writeCustomSaveData(data);
+    public void writeCustomSaveData(Map<String, Object> data, ValueOps ops) {
+        if (target instanceof IFieldDataHolder h) h.writeCustomSaveData(data, ops);
     }
 
     @Override
-    public void readCustomSaveData(StringMapData data, int dataVersion) {
-        if (target instanceof IFieldDataHolder h) h.readCustomSaveData(data, dataVersion);
+    public void readCustomSaveData(Map<String, Object> data, ValueOps ops) {
+        if (target instanceof IFieldDataHolder h) h.readCustomSaveData(data, ops);
     }
 
     @Override

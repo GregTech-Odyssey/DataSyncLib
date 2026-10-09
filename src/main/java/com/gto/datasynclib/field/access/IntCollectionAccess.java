@@ -2,9 +2,8 @@ package com.gto.datasynclib.field.access;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.IntArrayData;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import it.unimi.dsi.fastutil.ints.IntCollection;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
@@ -22,9 +21,8 @@ import org.jetbrains.annotations.NotNull;
  * re-populated on the receiving end (in-place mutation).</p>
  *
  * <h3>Persistence format:</h3>
- * <p>Writes as {@link com.gto.datasynclib.datastream.data.IntArrayData} (compact
- * VarInt-encoded int array). Returns {@link com.gto.datasynclib.datastream.data.NullData#INSTANCE}
- * for empty collections.</p>
+ * <p>Writes as the carrier''s {@code INT_ARRAY} value (a compact VarInt-encoded int array), and the
+ * null value for an empty collection.</p>
  */
 public final class IntCollectionAccess extends AbstractFieldAccess<IntCollection> {
 
@@ -60,15 +58,16 @@ public final class IntCollectionAccess extends AbstractFieldAccess<IntCollection
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull IntCollection instance) {
-        if (instance.isEmpty()) return NullData.INSTANCE;
-        return new IntArrayData(instance.toIntArray());
+    protected @NotNull Object doWriteValue(@NotNull Object source, @NotNull IntCollection instance, @NotNull ValueOps ops) {
+        if (instance.isEmpty()) return ops.createNull();
+        return ops.createIntArray(instance.toIntArray());
     }
 
     @Override
-    protected void doReadData(@NotNull IntCollection instance, @NotNull Data data, int dataVersion) {
+    protected void doReadValue(@NotNull IntCollection instance, @NotNull Object data, @NotNull ValueOps ops) {
         instance.clear();
-        var array = data.getIntArray();
+        if (!ops.isIntArray(data)) return;
+        var array = ops.getIntArray(data);
         for (var element : array) {
             instance.add(element);
         }

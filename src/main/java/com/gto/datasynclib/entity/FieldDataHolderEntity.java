@@ -1,9 +1,9 @@
 package com.gto.datasynclib.entity;
 
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LazyFieldDataManager;
-import com.gto.datasynclib.datastream.data.Data;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -60,7 +60,7 @@ import org.jetbrains.annotations.NotNull;
  * <h3>Data version ({@link #VERSION}):</h3>
  * <p>Whatever {@link #VERSION} holds when the entity is saved is written to the NBT key
  * {@code "field_data_dataVersion"} and handed back to
- * {@link FieldDataManager#readFromData(com.gto.datasynclib.datastream.data.Data, int)} on load, where
+ * {@link FieldDataManager#readFromValue(Object, ValueOps)} on load, where
  * it can drive migration. Like the block entity base, it is a single {@code static} shared by every
  * holder — assign it once during mod init, or override {@link #addAdditionalSaveData} /
  * {@link #readAdditionalSaveData} to version per entity type.</p>
@@ -105,7 +105,7 @@ public class FieldDataHolderEntity extends Entity implements IFieldDataHolder {
     @Override
     public void addAdditionalSaveData(@NotNull CompoundTag tag) {
         tag.putInt("field_data_dataVersion", VERSION);
-        tag.putByteArray("field_save", getFieldDataManager().writeToData().writeToBytes());
+        tag.putByteArray("field_save", JavaValueOps.INSTANCE.toBytes(getFieldDataManager().writeToValue(JavaValueOps.INSTANCE)));
     }
 
     /**
@@ -116,7 +116,8 @@ public class FieldDataHolderEntity extends Entity implements IFieldDataHolder {
     @Override
     public void readAdditionalSaveData(@NotNull CompoundTag tag) {
         if (tag.contains("field_save")) {
-            getFieldDataManager().readFromData(Data.readData(tag.getByteArray("field_save")), tag.getInt("field_data_dataVersion"));
+            getFieldDataManager().readFromValue(JavaValueOps.INSTANCE.fromBytes(tag.getByteArray("field_save")),
+                    JavaValueOps.create(tag.getInt("field_data_dataVersion")));
         }
     }
 }

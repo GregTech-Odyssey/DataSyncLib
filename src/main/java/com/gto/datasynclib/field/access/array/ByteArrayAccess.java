@@ -2,9 +2,8 @@ package com.gto.datasynclib.field.access.array;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.ByteArrayData;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import net.minecraft.network.FriendlyByteBuf;
 import org.apache.commons.lang3.ArrayUtils;
@@ -67,16 +66,15 @@ public final class ByteArrayAccess extends AbstractFieldAccess<byte[]> {
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, byte @NotNull [] instance) {
+    protected @NotNull Object doWriteValue(@NotNull Object source, byte @NotNull [] instance, @NotNull ValueOps ops) {
         if (definition.hasDefaultValue() && Arrays.equals(instance, definition.getDefaultValue(source)))
-            return NullData.NONE;
-        return ByteArrayData.valueOf(instance);
+            return NOT_PERSISTED;
+        return ops.createByteArray(instance);
     }
 
     @Override
-    protected void doReadData(byte @NotNull [] instance, @NotNull Data data, int dataVersion) {
-        var list = data.getByteArray();
-        var length = Math.min(list.length, instance.length);
-        System.arraycopy(list, 0, instance, 0, length);
+    protected void doReadValue(byte @NotNull [] instance, @NotNull Object data, @NotNull ValueOps ops) {
+        var array = ops.getByteArray(data);
+        System.arraycopy(array, 0, instance, 0, Math.min(array.length, instance.length));
     }
 }

@@ -3,9 +3,8 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.ListData;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
@@ -16,6 +15,9 @@ import java.util.Map;
  * Change detection uses hashCode() comparison.
  * Entries are written as alternating key-value pairs.
  */
+
+import java.util.ArrayList;
+
 public final class MapAccess<K, V> extends AbstractFieldAccess<Map> {
 
     private final DataSyncCodec<K> keyCodec;
@@ -66,23 +68,25 @@ public final class MapAccess<K, V> extends AbstractFieldAccess<Map> {
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull Map instance) {
-        if (instance.isEmpty()) return NullData.INSTANCE;
-        var list = new ListData();
+    protected @NotNull Object doWriteValue(@NotNull Object source, @NotNull Map instance, @NotNull ValueOps ops) {
+        if (instance.isEmpty()) return ops.createNull();
+        var list = new ArrayList<Object>(instance.size() * 2);
         instance.forEach((k, v) -> {
-            list.add(keyCodec.dataWriter.encode((K) k));
-            list.add(valueCodec.dataWriter.encode((V) v));
+            list.add(ops.isNull(k) ? ops.createNull() : keyCodec.encode(ops, (K) k));
+            list.add(ops.isNull(v) ? ops.createNull() : valueCodec.encode(ops, (V) v));
         });
-        return list;
+        return ops.createList(list);
     }
 
     @Override
-    protected void doReadData(@NotNull Map instance, @NotNull Data data, int dataVersion) {
-        var list = data.getList();
+    protected void doReadValue(@NotNull Map instance, @NotNull Object data, @NotNull ValueOps ops) {
+        // an empty container was stored as the null value, which is a missing payload, not a failure
+        if (!ops.isList(data)) return;
+        var list = ops.getList(data);
         var size = list.size();
         instance.clear();
         for (int i = 0; i < size; i++) {
-            instance.put(keyCodec.dataReader.decode(list.get(i++), dataVersion), valueCodec.dataReader.decode(list.get(i), dataVersion));
+            instance.put(keyCodec.decode(ops, list.get(i++)), valueCodec.decode(ops, list.get(i)));
         }
     }
 }

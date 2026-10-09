@@ -1,9 +1,9 @@
 package com.gto.datasynclib.listener;
 
 import com.gto.datasynclib.IDataSerializable;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.FloatData;
 import com.gto.datasynclib.util.holder.FloatHolder;
 import lombok.Setter;
 import lombok.experimental.Accessors;
@@ -77,12 +77,12 @@ public final class FloatNotifiableHolder extends FloatHolder implements IDataSer
     }
 
     @Override
-    public Data writeData() {
-        return FloatData.valueOf(value);
+    public @NotNull Object writeValue(@NotNull ValueOps ops) {
+        return value;
     }
 
     @Override
-    public void readData(@NotNull Data data, int dataVersion) {
-        value = data.getFloat();
+    public void readValue(@NotNull Object data, @NotNull ValueOps ops) {
+        value = ops.getFloat(data);
     }
 }

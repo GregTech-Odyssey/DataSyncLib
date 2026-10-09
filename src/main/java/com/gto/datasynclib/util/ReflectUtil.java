@@ -207,7 +207,7 @@ public final class ReflectUtil {
         if (fieldType == null) return null;
         // Build the full binding map from the field's own concrete arguments through the hierarchy
         // (classes, interfaces, arbitrary depth).
-        var bindings = new java.util.LinkedHashMap<TypeVariable<?>, Type>();
+        var bindings = new java.util.HashMap<TypeVariable<?>, Type>();
         if (fieldType instanceof ParameterizedType parameterized) {
             resolveSuperTypeBindings(parameterized, getRawType(parameterized.getRawType()), bindings);
         } else if (fieldType instanceof Class<?> clazz) {

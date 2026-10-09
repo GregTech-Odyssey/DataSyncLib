@@ -3,14 +3,15 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataField;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.ListData;
-import com.gto.datasynclib.datastream.data.NullData;
-import com.gto.datasynclib.datastream.data.StringMapData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import lombok.Getter;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Base class for <strong>container-type</strong> field implementations (collections, maps,
@@ -21,14 +22,14 @@ import org.jetbrains.annotations.Nullable;
  * <ul>
  *   <li><strong>Public interface methods</strong> (from {@link com.gto.datasynclib.DataField}):
  *     {@link #detectChange}, {@link #writeToBuffer}, {@link #readFromBuffer},
- *     {@link #writeToData}, {@link #readFromData} — handle the common logic:
+ *     {@link #writeToValue}, {@link #readFromValue} — handle the common logic:
  *     null checks, instance identity tracking, {@code instanceAsValue} wrapping, and listener
  *     invocation. Skip predicates are evaluated in exactly two places: the {@code skipSync}
- *     check in {@link #detectChange} and the {@code skipSave} check in {@link #writeToData};
- *     {@code writeToBuffer}/{@code readFromBuffer}/{@code readFromData} perform no skip checks.</li>
+ *     check in {@link #detectChange} and the {@code skipSave} check in {@link #writeToValue};
+ *     {@code writeToBuffer}/{@code readFromBuffer}/{@code readFromValue} perform no skip checks.</li>
  *   <li><strong>Protected template methods</strong> (implemented by subclasses):
  *     {@link #hasChange}, {@link #doWriteBuffer}, {@link #doReadBuffer},
- *     {@link #doWriteData}, {@link #doReadData} — provide type-specific
+ *     {@link #doWriteValue}, {@link #doReadValue} — provide type-specific
  *     serialization logic for the container's <em>contents</em> only.</li>
  * </ul>
  *
@@ -42,7 +43,7 @@ import org.jetbrains.annotations.Nullable;
  *       {@link com.gto.datasynclib.DataFieldDefinition#instanceAsValue} = {@code true},
  *       the container itself (not just its contents) is serialized. This handles fields
  *       that may be {@code null} and need full instance replacement on deserialization.
- *       Also supports a legacy data version ({@code dataVersion == -1}) migration path.</li>
+ *       Also supports a legacy data version ({@code ops.dataVersion() == -1}) migration path.</li>
  *   <li><strong>Dirty flag:</strong> {@link #detectChange} never clears the flag itself;
  *       {@link com.gto.datasynclib.FieldDataManager#writeToNetworkBuffer} clears it via
  *       {@code clearChanged(source)} only for fields it actually serialized.</li>
@@ -151,45 +152,47 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
     }
 
     @Override
-    public final @NotNull Data writeToData(@NotNull Object source) {
+    public final @NotNull Object writeToValue(@NotNull Object source, @NotNull ValueOps ops) {
         var definition = this.definition;
         var value = getInstance(source);
         if (definition.instanceAsValue) {
             if (value == null) {
-                return NullData.INSTANCE;
+                return ops.createNull();
             } else {
-                if (definition.skipSave(source, value)) return NullData.NONE;
-                return ListData.of(definition.encode(source, value), doWriteData(source, value));
+                if (definition.skipSave(source, value)) return NOT_PERSISTED;
+                return ops.createList(List.of(definition.encode(source, value, ops), doWriteValue(source, value, ops)));
             }
         } else {
-            if (value == null) return NullData.NONE;
-            if (definition.skipSave(source, value)) return NullData.NONE;
-            return doWriteData(source, value);
+            if (value == null) return NOT_PERSISTED;
+            if (definition.skipSave(source, value)) return NOT_PERSISTED;
+            return doWriteValue(source, value, ops);
         }
     }
 
     @Override
-    public final void readFromData(@NotNull Object source, @NotNull Data data, int dataVersion) {
+    public final void readFromValue(@NotNull Object source, @NotNull Object data, @NotNull ValueOps ops) {
         T value = null;
         if (definition.instanceAsValue) {
-            if (dataVersion == -1) {
-                if (data instanceof StringMapData mapData && !mapData.isEmpty()) {
-                    var uid = mapData.get("uid");
-                    value = definition.decode(source, uid, dataVersion);
-                    doReadData(value, mapData.get("payload").getStringMap().get("d"), dataVersion);
-                    definition.set(source, value);
+            if (ops.dataVersion() == -1) {
+                if (ops.isStringMap(data)) {
+                    var mapData = ops.getStringMap(data);
+                    if (!mapData.isEmpty()) {
+                        value = definition.decode(source, mapData.get("uid"), ops);
+                        doReadValue(value, ops.getStringMap(mapData.get("payload")).get("d"), ops);
+                        definition.set(source, value);
+                    }
                 }
             } else {
-                if (data != NullData.INSTANCE) {
-                    var list = data.getList();
-                    value = definition.decode(source, list.getFirst(), dataVersion);
-                    if (value != null) doReadData(value, list.get(1), dataVersion);
+                if (!ops.isNull(data)) {
+                    var list = ops.getList(data);
+                    value = definition.decode(source, list.get(0), ops);
+                    if (value != null) doReadValue(value, list.get(1), ops);
                 }
                 definition.set(source, value);
             }
         } else {
             value = getInstance(source);
-            if (value != null) doReadData(value, data, dataVersion);
+            if (value != null) doReadValue(value, data, ops);
         }
         // Load listener (@SaveToDisk(listener = "...")): `value` is the container that has just
         // been read (in place, or freshly decoded for `instanceAsValue` fields), or null when the
@@ -235,14 +238,15 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
     protected abstract void doReadBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull FriendlyByteBuf data);
 
     /**
-     * Template method: serialize the container's <em>contents</em> to a Data object.
-     * Called by {@link #writeToData} after null/instance/skip handling.
+     * Template method: serialize the container's <em>contents</em> onto the native carrier. Called by
+     * {@link #writeToValue} after null/instance/skip handling; returning {@link
+     * com.gto.datasynclib.DataField#NOT_PERSISTED} suppresses the field.
      */
-    protected abstract @NotNull Data doWriteData(@NotNull Object source, @NotNull T instance);
+    protected abstract @NotNull Object doWriteValue(@NotNull Object source, @NotNull T instance, @NotNull ValueOps ops);
 
     /**
-     * Template method: deserialize the container's <em>contents</em> from a Data object.
-     * Called by {@link #readFromData} after null/instance handling.
+     * Template method: deserialize the container's <em>contents</em> from a carrier value. Called by
+     * {@link #readFromValue} after null/instance handling.
      */
-    protected abstract void doReadData(@NotNull T instance, @NotNull Data data, int dataVersion);
+    protected abstract void doReadValue(@NotNull T instance, @NotNull Object data, @NotNull ValueOps ops);
 }

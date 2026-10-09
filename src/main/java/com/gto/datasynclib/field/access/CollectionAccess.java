@@ -3,9 +3,8 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.ListData;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
@@ -16,6 +15,9 @@ import java.util.Collection;
  * Change detection uses hashCode() comparison.
  * Each element is individually encoded/decoded with null support.
  */
+
+import java.util.ArrayList;
+
 public final class CollectionAccess<E> extends AbstractFieldAccess<Collection> {
 
     private final DataSyncCodec<E> elementCodec;
@@ -67,29 +69,21 @@ public final class CollectionAccess<E> extends AbstractFieldAccess<Collection> {
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull Collection instance) {
-        if (instance.isEmpty()) return NullData.INSTANCE;
-        var list = new ListData();
-        instance.forEach(element -> {
-            if (element == null) {
-                list.addNull();
-            } else {
-                list.add(elementCodec.dataWriter.encode((E) element));
-            }
-        });
-        return list;
+    protected @NotNull Object doWriteValue(@NotNull Object source, @NotNull Collection instance, @NotNull ValueOps ops) {
+        if (instance.isEmpty()) return ops.createNull();
+        var list = new ArrayList<>(instance.size());
+        instance.forEach(element -> list.add(ops.isNull(element) ? ops.createNull() : elementCodec.encode(ops, (E) element)));
+        return ops.createList(list);
     }
 
     @Override
-    protected void doReadData(@NotNull Collection instance, @NotNull Data data, int dataVersion) {
-        var list = data.getList();
+    protected void doReadValue(@NotNull Collection instance, @NotNull Object data, @NotNull ValueOps ops) {
+        // an empty container was stored as the null value, which is a missing payload, not a failure
+        if (!ops.isList(data)) return;
+        var list = ops.getList(data);
         instance.clear();
         for (var element : list) {
-            if (element != NullData.INSTANCE) {
-                instance.add(elementCodec.dataReader.decode(element, dataVersion));
-            } else {
-                instance.add(null);
-            }
+            instance.add(ops.isNull(element) ? null : elementCodec.decode(ops, element));
         }
     }
 }

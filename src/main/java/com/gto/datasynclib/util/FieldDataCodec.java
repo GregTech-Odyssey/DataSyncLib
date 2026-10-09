@@ -1,18 +1,18 @@
 package com.gto.datasynclib.util;
 
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.*;
 import com.gto.datasynclib.datastream.codec.*;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.StringMapData;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.Map;
 import java.util.function.Supplier;
 
 /**
  * A composite codec that bridges {@link com.gto.datasynclib.FieldDataManager} with
  * the {@link com.gto.datasynclib.datastream.codec.StreamCodec} and
- * {@link com.gto.datasynclib.datastream.codec.DataCodec} interfaces.
+ * {@link com.gto.datasynclib.datastream.codec.ValueCodec} interface.
  *
  * <p>This class wraps an annotated POJO class, using its own internal
  * {@link com.gto.datasynclib.FieldDataManager} to serialize/deserialize <em>all</em> managed
@@ -53,21 +53,18 @@ public class FieldDataCodec<T> implements CombinedCodec<T>, IFieldDataHolder {
 
     private final StreamEncoder<FriendlyByteBuf, ? super T> streamWriter;
     private final StreamDecoder<FriendlyByteBuf, ? extends T> streamReader;
-    private final DataEncoder<? super T> dataWriter;
-    private final DataDecoder<? extends T> dataReader;
+
     private final ThreadLocal<T> currentInstance = new ThreadLocal<>();
 
-    public FieldDataCodec(Class<T> objClass, Supplier<T> constructor, StreamEncoder<FriendlyByteBuf, ? super T> extraStreamWriter, StreamDecoder<FriendlyByteBuf, ? extends T> extraStreamReader, DataEncoder<? super T> extraDataWriter, DataDecoder<? extends T> extraDataReader) {
+    public FieldDataCodec(Class<T> objClass, Supplier<T> constructor, StreamEncoder<FriendlyByteBuf, ? super T> extraStreamWriter, StreamDecoder<FriendlyByteBuf, ? extends T> extraStreamReader) {
         this.constructor = constructor;
         this.fieldDataManager = new LazyFieldDataManager(this, objClass);
         this.streamWriter = extraStreamWriter;
         this.streamReader = extraStreamReader;
-        this.dataWriter = extraDataWriter;
-        this.dataReader = extraDataReader;
     }
 
     public FieldDataCodec(Class<T> objClass, Supplier<T> constructor) {
-        this(objClass, constructor, null, null, null, null);
+        this(objClass, constructor, null, null);
     }
 
     @Override
@@ -90,14 +87,14 @@ public class FieldDataCodec<T> implements CombinedCodec<T>, IFieldDataHolder {
         if (streamReader != null) streamReader.decode(buf);
     }
 
+    // A FieldDataCodec is a holder only so the codec can reach its own manager; the manager never
+    // walks it as a nested holder of another object, so there is no custom entry to add either way.
     @Override
-    public void writeCustomSaveData(StringMapData data) {
-        if (dataWriter != null) dataWriter.encode(currentInstance.get());
+    public void writeCustomSaveData(Map<String, Object> data, ValueOps ops) {
     }
 
     @Override
-    public void readCustomSaveData(StringMapData data, int dataVersion) {
-        if (dataReader != null) dataReader.decode(data, dataVersion);
+    public void readCustomSaveData(Map<String, Object> data, ValueOps ops) {
     }
 
     @Override
@@ -122,25 +119,27 @@ public class FieldDataCodec<T> implements CombinedCodec<T>, IFieldDataHolder {
         }
     }
 
+    // ===== ValueCodec implementation — the object as one carrier string map =====
+
     @Override
-    public T decode(@NotNull Data data, int dataVersion) {
+    public Object encode(ValueOps ops, T obj) {
+        currentInstance.set(obj);
+        try {
+            return fieldDataManager.get().writeAllToValue(ops);
+        } finally {
+            currentInstance.remove();
+        }
+    }
+
+    @Override
+    public T decode(ValueOps ops, Object data) {
         var obj = constructor.get();
         currentInstance.set(obj);
         try {
-            fieldDataManager.get().readAllFromData(data, dataVersion);
+            fieldDataManager.get().readAllFromValue(data, ops);
         } finally {
             currentInstance.remove();
         }
         return obj;
-    }
-
-    @Override
-    public @NotNull Data encode(T obj) {
-        currentInstance.set(obj);
-        try {
-            return fieldDataManager.get().writeAllToData();
-        } finally {
-            currentInstance.remove();
-        }
     }
 }

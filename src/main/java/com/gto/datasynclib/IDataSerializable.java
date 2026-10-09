@@ -1,6 +1,7 @@
 package com.gto.datasynclib;
 
-import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
@@ -17,8 +18,8 @@ import org.jetbrains.annotations.NotNull;
  * <ul>
  *   <li><strong>Network:</strong> {@link #writeBuffer}/{@link #readBuffer} — uses
  *       {@link FriendlyByteBuf} for live client-server sync</li>
- *   <li><strong>Persistence:</strong> {@link #writeData}/{@link #readData} — uses
- *       {@link Data} objects for disk save/load</li>
+ *   <li><strong>Persistence:</strong> {@link #writeValue}/{@link #readValue} — uses
+ *       carrier values for disk save/load</li>
  * </ul>
  *
  * <h3>Change tracking:</h3>
@@ -28,7 +29,7 @@ import org.jetbrains.annotations.NotNull;
  * return {@code true} from {@code detectChange()}.</p>
  *
  * <h3>Data version migration:</h3>
- * <p>The {@code dataVersion} parameter in {@link #readData(Data, int)} enables
+ * <p>The {@code dataVersion} on the ops passed to {@link #readValue(Object, ValueOps)} enables
  * backward-compatible data migration — check the version and adapt the deserialization
  * logic for older formats.</p>
  *
@@ -85,17 +86,23 @@ public interface IDataSerializable {
     void readBuffer(LogicalSide side, @NotNull FriendlyByteBuf buf);
 
     /**
-     * Serializes the object's data to a {@link Data} tree for persistent storage.
+     * Serializes the object's data onto the native carrier for persistent storage — the value a
+     * field's {@code writeToValue} returns, which {@code JavaValueOps#toBytes(Object)} turns into the
+     * id+payload bytes of a save file.
      *
-     * @return the Data object containing the serialized state (never null)
+     * @param ops the carrier the value is built with
+     * @return the carrier value holding the object's state (never {@code null} unless the object
+     * itself is null)
      */
-    Data writeData();
+    @NotNull
+    Object writeValue(@NotNull ValueOps ops);
 
     /**
-     * Deserializes the object's data from a {@link Data} tree during loading.
+     * Deserializes the object's data from a carrier value during loading.
      *
-     * @param data        the Data object containing the previously serialized state
-     * @param dataVersion the version of the data format, for handling migrations
+     * @param data the carrier value holding the previously serialized state
+     * @param ops  the carrier the value came from; {@code ValueOps#dataVersion()} is the version of
+     *             the data format, for handling migrations
      */
-    void readData(@NotNull Data data, int dataVersion);
+    void readValue(@NotNull Object data, @NotNull ValueOps ops);
 }

@@ -1,10 +1,9 @@
 package com.gto.datasynclib.field;
 
 import com.gto.datasynclib.DataFieldDefinition;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.ByteData;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.NullData;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
@@ -53,17 +52,17 @@ public final class ByteField extends AbstractField<Byte> {
     }
 
     @Override
-    public @NotNull Data writeToData(@NotNull Object source) {
+    public @NotNull Object writeToValue(@NotNull Object source, @NotNull ValueOps ops) {
         var definition = this.definition;
         var value = definition.getByte(source);
-        if (definition.skipSave(source, value)) return NullData.NONE;
-        if (definition.hasDefaultValue() && definition.getDefaultByteValue(source) == value) return NullData.NONE;
-        return ByteData.valueOf(value);
+        if (definition.skipSave(source, value)) return NOT_PERSISTED;
+        if (definition.hasDefaultValue() && definition.getDefaultByteValue(source) == value) return NOT_PERSISTED;
+        return value;
     }
 
     @Override
-    public void readFromData(@NotNull Object source, @NotNull Data data, int dataVersion) {
-        var value = data.getByte();
+    public void readFromValue(@NotNull Object source, @NotNull Object data, @NotNull ValueOps ops) {
+        var value = ops.getByte(data);
         definition.setByte(source, value);
         // @SaveToDisk(listener = "...") — disk-load hook, fired after the value is applied (never on the sync path).
         var listener = definition.getSaveListener();

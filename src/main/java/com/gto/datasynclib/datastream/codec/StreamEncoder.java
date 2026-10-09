@@ -11,8 +11,11 @@ import java.util.function.Function;
  * narrower one is expected, which is what {@link StreamCodec#composite}'s {@code ? super B} component
  * parameters express.</p>
  *
- * <p>Everything that touches a real buffer lives in {@link ByteStreamEncoder}: the container helpers
- * write a {@code VarInt} size, and {@code StreamCodec.of} builds the codec itself.</p>
+ * <p>Everything that touches a real buffer lives in {@link ByteBufCodecs}: the container helpers
+ * write a {@code VarInt} size, and {@code StreamCodec.of} builds the codec itself. A value that
+ * writes <em>itself</em> — its own member method taking the buffer — is expressed with
+ * {@link StreamMemberEncoder} instead, which keeps the value first so the method reference binds to
+ * it: {@code StreamCodec.ofMember(Point::write, Point::read)}.</p>
  *
  * @param <B> the buffer this encoder writes to
  * @param <T> the type of objects to encode

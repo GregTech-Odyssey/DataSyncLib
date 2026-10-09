@@ -1,8 +1,12 @@
 package com.gto.datasynclib;
 
-import com.gto.datasynclib.datastream.data.StringMapData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import net.minecraft.network.FriendlyByteBuf;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.Map;
 
 /**
  * Interface for objects whose annotated fields are managed by a {@link FieldDataManager}.
@@ -178,27 +182,28 @@ public interface IFieldDataHolder {
     }
 
     /**
-     * Writes custom save data.
-     * <p>
-     * Writes additional custom data to the MapData object before regular field persistence.
-     * The default implementation is empty; subclasses can override to implement
-     * custom data persistence.
+     * Writes custom save data into the entry map the manager is building, before the regular fields
+     * are persisted.
      *
-     * @param data the data map object used for storing persistent data
+     * <p>The map holds carrier values, so a value goes in as-is ({@code ops.createInt(3)},
+     * {@code ops.createString("x")}, a nested map, …) and is written by the manager with the same
+     * encoding as a field — {@code JavaValueOps#toBytes(Object)} on the whole entry then yields the
+     * save file. The default implementation is empty; override it to persist state the annotated
+     * fields do not cover.</p>
+     *
+     * @param data the entry map being written, keyed the way the fields are
+     * @param ops  the carrier the values are built with
      */
-    default void writeCustomSaveData(StringMapData data) {
+    default void writeCustomSaveData(Map<String, Object> data, @NotNull ValueOps ops) {
     }
 
     /**
-     * Reads custom save data.
-     * <p>
-     * Reads additional custom data from the MapData object before regular field loading.
-     * The default implementation is empty; subclasses can override to implement
-     * custom data persistence.
+     * Reads custom save data back from the entry map the manager just read.
      *
-     * @param data        the data map object containing persistent data
-     * @param dataVersion the version of the data being read, useful for migration
+     * @param data the entry map that was read, keyed the way the fields are
+     * @param ops  the carrier the values came from; {@link com.gto.datasynclib.datastream.codec.ValueOps#dataVersion()}
+     *             is the version of the data being read, useful for migration
      */
-    default void readCustomSaveData(StringMapData data, int dataVersion) {
+    default void readCustomSaveData(Map<String, Object> data, @NotNull ValueOps ops) {
     }
 }

@@ -11,7 +11,7 @@ import java.lang.annotation.Target;
  * <p>Supports two modes of operation:</p>
  *
  * <h3>Mode 1: Static Codec Fields (recommended)</h3>
- * <p>Reference static fields of type {@link com.gto.datasynclib.datastream.codec.DataCodec}
+ * <p>Reference static fields of type {@link com.gto.datasynclib.datastream.codec.ValueCodec}
  * and {@link com.gto.datasynclib.datastream.codec.StreamCodec} declared in the same
  * class (or accessible from it). Use {@link #saveCodec()} for the persistence codec and
  * {@link #syncCodec()} for the network codec. If only {@code saveCodec} is specified,
@@ -19,9 +19,12 @@ import java.lang.annotation.Target;
  *
  * <h3>Mode 2: Instance Methods</h3>
  * <p>When {@code saveCodec} is empty, specify instance methods on the declaring class
- * for manual serialization:</p>
+ * for manual serialization. They are invoked on the holder instance itself, so they take no
+ * source parameter:</p>
  * <ul>
- *   <li>{@link #writeToData()} / {@link #readFromData()} — for persistence (T → Data / Data → T)</li>
+ *   <li>{@link #writeToValue()} / {@link #readFromValue()} — for persistence
+ *       ({@code (ValueOps ops, T value) → Object} / {@code (ValueOps ops, Object data) → T}, on the
+ *       native carrier; {@code ops.dataVersion()} reports the stored format version)</li>
  *   <li>{@link #writeToBuffer()} / {@link #readFromBuffer()} — for network sync
  *       ((FriendlyByteBuf, T) → void / FriendlyByteBuf → T)</li>
  * </ul>
@@ -36,8 +39,16 @@ import java.lang.annotation.Target;
  * private MyObj data;
  *
  * // Using instance methods:
- * @Codec(writeToData = "myWriteToData", readFromData = "myReadFromData")
+ * @Codec(writeToValue = "myWrite", readFromValue = "myRead")
  * private MyObj data;
+ *
+ * private Object myWrite(ValueOps ops, MyObj value) {
+ *     return ops.createString(value.toString());
+ * }
+ *
+ * private MyObj myRead(ValueOps ops, Object data) {
+ *     return MyObj.parse(ops.getString(data));
+ * }
  * }</pre>
  */
 @Retention(RetentionPolicy.RUNTIME)
@@ -45,10 +56,10 @@ import java.lang.annotation.Target;
 public @interface Codec {
 
     /**
-     * Static field name from DataCodec class used for disk storage.
+     * Static field name from a ValueCodec class used for disk storage.
      * Specifies the codec for saving to and loading from disk.
      *
-     * @return the DataCodec static field name
+     * @return the ValueCodec static field name
      */
     String saveCodec() default "";
 
@@ -61,20 +72,25 @@ public @interface Codec {
     String syncCodec() default "";
 
     /**
-     * Instance method name for converting the field value to a Data object.
-     * Method signature: T -> Data, where T is the field type.
+     * Instance method name for converting the field value to a carrier value, invoked on the holder
+     * instance itself.
+     * Method signature: {@code (ValueOps ops, T value) -> Object}, where
+     * {@code T} is the field type and the returned object is a plain Java value the carrier
+     * understands ({@code Integer}, {@code String}, {@code List}, {@code Map}, …).
      *
-     * @return the method name for writing to Data
+     * @return the method name for writing the field
      */
-    String writeToData() default "";
+    String writeToValue() default "";
 
     /**
-     * Instance method name for restoring the field value from a Data object.
-     * Method signature: Data -> T, where T is the field type.
+     * Instance method name for restoring the field value from a carrier value, invoked on the holder
+     * instance itself.
+     * Method signature: {@code (ValueOps ops, Object data) -> T}, where
+     * {@code T} is the field type.
      *
-     * @return the method name for reading from Data
+     * @return the method name for reading the field
      */
-    String readFromData() default "";
+    String readFromValue() default "";
 
     /**
      * Instance method name for writing the field value to a FriendlyByteBuf.

@@ -5,13 +5,11 @@ import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.annotations.*;
-import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
+import com.gto.datasynclib.datastream.codec.ByteBufCodecs;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueCodec;
 import com.gto.datasynclib.datastream.codec.CombinedCodec;
-import com.gto.datasynclib.datastream.codec.DataCodec;
 import com.gto.datasynclib.datastream.codec.StreamCodec;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.NullData;
-import com.gto.datasynclib.datastream.data.StringMapData;
 import com.gto.datasynclib.listener.ObjNotifiableHolder;
 import com.gto.datasynclib.remote.RemoteBlockEntityPacket;
 import com.gto.datasynclib.remote.RemoteEntityPacket;
@@ -34,7 +32,7 @@ import java.util.function.Supplier;
  *
  * <p>Unlike the network-driven {@link TestBlockEntity}, this harness drives the managers
  * <em>directly</em>: each test builds a fresh holder, mutates fields, serializes to disk
- * ({@code writeToData}/{@code readFromData}) and to the network buffer
+ * ({@code writeToValue}/{@code readFromValue}) and to the network buffer
  * ({@code writeToNetworkBuffer}/{@code readFromNetworkBuffer}), then deserializes into a new
  * holder and compares field-by-field. It covers both long-standing features (primitives,
  * defaults, enum/array/collection, conversion, sync) and the newer
@@ -441,7 +439,7 @@ public final class DataSyncSelfTests {
     private void testRegistryGlobalCodec() {
         try {
             var registry = new Registry<String, MyTag>("test:tag",
-                    DataCodec.STRING_CODEC, t -> t.name, MyTag.class);
+                    ValueCodec.STRING, t -> t.name, MyTag.class);
             registry.unfreeze();
             registry.register("a", new MyTag("a", 1));
             registry.register("b", new MyTag("b", 2));
@@ -450,8 +448,8 @@ public final class DataSyncSelfTests {
             DataSyncCodec<MyTag> global = DataSyncCodec.get(MyTag.class);
             expect("registry.globalRegistered", global != null, true);
             if (global != null) {
-                var data = global.dataWriter.encode(new MyTag("b", 2));
-                MyTag decoded = global.dataReader.decode(data, 0);
+                var value = global.encode(JavaValueOps.INSTANCE, new MyTag("b", 2));
+                MyTag decoded = global.decode(JavaValueOps.INSTANCE, value);
                 expect("registry.roundTripName", decoded != null ? decoded.name : "", "b");
                 expect("registry.roundTripValue", decoded != null ? decoded.value : -1, 2);
             }
@@ -494,10 +492,10 @@ public final class DataSyncSelfTests {
         src.child.values.add(1);
         src.child.values.add(2);
 
-        Data saved = src.manager.writeToData();
+        Object saved = src.manager.writeToValue(JavaValueOps.INSTANCE);
 
         SyncHolder dst = new SyncHolder();
-        dst.manager.readFromData(saved, 0);
+        dst.manager.readFromValue(saved, JavaValueOps.INSTANCE);
 
         expect("disk.counter", src.counter, dst.counter);
         expect("disk.big", src.big, dst.big);
@@ -539,8 +537,8 @@ public final class DataSyncSelfTests {
         DefaultHolder src = new DefaultHolder();
         // num stays at default 5, flag stays false, maybe stays null -> none of these are written.
         // other stays 0 but has no @SaveToDisk default -> it IS written.
-        Data saved = src.manager.writeToData();
-        if (saved instanceof StringMapData map) {
+        Object saved = src.manager.writeToValue(JavaValueOps.INSTANCE);
+        if (saved instanceof Map<?, ?> map) {
             expect("defaults.numSkipped", !map.containsKey("num"), true);
             expect("defaults.flagSkipped", !map.containsKey("flag"), true);
             expect("defaults.nullSkipped", !map.containsKey("maybe"), true);
@@ -552,7 +550,7 @@ public final class DataSyncSelfTests {
 
         // Round-trip keeps defaults intact.
         DefaultHolder dst = new DefaultHolder();
-        dst.manager.readFromData(saved, 0);
+        dst.manager.readFromValue(saved, JavaValueOps.INSTANCE);
         expect("defaults.roundTrip.num", 5, dst.num);
         expect("defaults.roundTrip.flag", false, dst.flag);
         expect("defaults.roundTrip.maybe", null, dst.maybe);
@@ -695,23 +693,20 @@ public final class DataSyncSelfTests {
      * Covers the {@code optional} builders (instance and static; plain, default value, default
      * supplier) on both paths, plus the {@code asKey} / {@code asValue} map adapters: a {@code null}
      * value — and, with a default, one equal to the default — must be stored as the absent marker
-     * ({@code NullData.INSTANCE} on disk, a {@code false} boolean on the wire, one byte on either
+     * (the carrier''s null value on disk, a {@code false} boolean on the wire, one byte on either
      * path) and come back as {@code null} / the default, while every other value round-trips
      * unchanged.
      */
     private void testOptionalCodecs() {
-        // ---- optional(): null is the null tag, anything else is the payload itself ----
-        var dataOptional = DataCodec.STRING_CODEC.optional();
-        expect("optional.data.nullMarker", NullData.INSTANCE, dataOptional.encode(null));
-        expect("optional.data.value", DataCodec.STRING_CODEC.encode("x"), dataOptional.encode("x"));
-        String decodedNull = dataOptional.decode(NullData.INSTANCE);
-        expect("optional.data.decodeNull", null, decodedNull);
-        expect("optional.data.decodeValue", "x", dataOptional.decode(dataOptional.encode("x")));
-        // The static builder form assembles the same codec.
-        expect("optional.data.staticForm", dataOptional.encode("x"), DataCodec.optional(DataCodec.STRING_CODEC).encode("x"));
+        var ops = JavaValueOps.INSTANCE;
+        // ---- optional(): null is the null value, anything else is the payload itself ----
+        var nativeOptional = ValueCodec.STRING.optional();
+        expect("optional.native.nullMarker", true, ops.isNull(nativeOptional.encode(ops, null)));
+        expect("optional.native.value", "x", nativeOptional.decode(ops, nativeOptional.encode(ops, "x")));
+        expect("optional.native.decodeNull", null, nativeOptional.decode(ops, ops.createNull()));
 
         // ---- optional(): one boolean marker, then the payload ----
-        var streamOptional = ByteStreamCodec.optional(ByteStreamCodec.STRING_CODEC);
+        var streamOptional = ByteBufCodecs.optional(ByteBufCodecs.STRING_UTF8);
         byte[] absentBytes = streamEncode(streamOptional, null);
         expect("optional.stream.nullMarkerSize", absentBytes.length, 1);
         expect("optional.stream.nullMarkerFalse", absentBytes[0], (byte) 0);
@@ -722,58 +717,55 @@ public final class DataSyncSelfTests {
         expect("optional.stream.decodeValue", "x", streamDecode(streamOptional, presentBytes));
 
         // ---- optional(defaultValue): the default is stored as absent, exactly like null ----
-        var dataDefault = DataCodec.STRING_CODEC.optional("d");
-        expect("optional.default.data.nullMarker", NullData.INSTANCE, dataDefault.encode(null));
-        expect("optional.default.data.defaultMarker", NullData.INSTANCE, dataDefault.encode("d"));
-        expect("optional.default.data.value", DataCodec.STRING_CODEC.encode("x"), dataDefault.encode("x"));
-        expect("optional.default.data.decodeDefault", "d", dataDefault.decode(NullData.INSTANCE));
-        expect("optional.default.data.decodeValue", "x", dataDefault.decode(dataDefault.encode("x")));
+        var nativeDefault = ValueCodec.STRING.optional("d");
+        expect("optional.default.native.nullMarker", true, ops.isNull(nativeDefault.encode(ops, null)));
+        expect("optional.default.native.defaultMarker", true, ops.isNull(nativeDefault.encode(ops, "d")));
+        expect("optional.default.native.value", "x", nativeDefault.decode(ops, nativeDefault.encode(ops, "x")));
+        expect("optional.default.native.decodeDefault", "d", nativeDefault.decode(ops, ops.createNull()));
 
-        var streamDefault = ByteStreamCodec.optional(ByteStreamCodec.STRING_CODEC, "d");
+        var streamDefault = ByteBufCodecs.optional(ByteBufCodecs.STRING_UTF8, "d");
         expect("optional.default.stream.defaultMarkerSize", streamEncode(streamDefault, "d").length, 1);
         expect("optional.default.stream.decodeDefault", "d", streamDecode(streamDefault, streamEncode(streamDefault, "d")));
         expect("optional.default.stream.decodeValue", "x", streamDecode(streamDefault, streamEncode(streamDefault, "x")));
         // The static builder form takes the codec and the default side by side.
-        expect("optional.default.data.staticForm", NullData.INSTANCE, DataCodec.optional(DataCodec.STRING_CODEC, "d").encode("d"));
+
 
         // ---- optional(Supplier): a fresh mutable default per decode ----
         // A bare lambda or method reference is ambiguous between the value and the supplier
         // overload, so the supplier is spelled out here — the caveat documented on the builders.
         Supplier<List<String>> newList = ArrayList::new;
-        var listCodec = DataCodec.<String, List<String>>collection(ArrayList::new, DataCodec.STRING_CODEC);
-        var dataListDefault = listCodec.optional(newList);
-        expect("optional.supplier.data.emptyMarker", NullData.INSTANCE, dataListDefault.encode(new ArrayList<>()));
-        expect("optional.supplier.data.decode", List.of("a"), dataListDefault.decode(dataListDefault.encode(List.of("a"))));
-        List<String> firstDefault = dataListDefault.decode(NullData.INSTANCE);
-        List<String> secondDefault = dataListDefault.decode(NullData.INSTANCE);
-        expect("optional.supplier.data.default", true, firstDefault.isEmpty() && secondDefault.isEmpty());
-        expect("optional.supplier.data.freshInstance", true, firstDefault != secondDefault);
+        ValueCodec<List<String>> listCodec = ValueCodec.collection(ArrayList::new, ValueCodec.STRING);
+        var nativeListDefault = listCodec.optional(newList);
+        expect("optional.supplier.native.emptyMarker", true, ops.isNull(nativeListDefault.encode(ops, new ArrayList<>())));
+        expect("optional.supplier.native.decode", List.of("a"), nativeListDefault.decode(ops, nativeListDefault.encode(ops, List.of("a"))));
+        List<String> firstDefault = nativeListDefault.decode(ops, ops.createNull());
+        List<String> secondDefault = nativeListDefault.decode(ops, ops.createNull());
+        expect("optional.supplier.native.default", true, firstDefault.isEmpty() && secondDefault.isEmpty());
+        expect("optional.supplier.native.freshInstance", true, firstDefault != secondDefault);
 
         StreamCodec<FriendlyByteBuf, List<String>> streamListCodec =
-                ByteStreamCodec.collection(ArrayList::new, ByteStreamCodec.STRING_CODEC);
-        var streamListDefault = ByteStreamCodec.optional(streamListCodec, newList);
+                ByteBufCodecs.collection(ArrayList::new, ByteBufCodecs.STRING_UTF8);
+        var streamListDefault = ByteBufCodecs.optional(streamListCodec, newList);
         expect("optional.supplier.stream.emptyMarkerSize", streamEncode(streamListDefault, new ArrayList<>()).length, 1);
         expect("optional.supplier.stream.decode", List.of("a"),
                 streamDecode(streamListDefault, streamEncode(streamListDefault, new ArrayList<>(List.of("a")))));
         expect("optional.supplier.stream.default", new ArrayList<>(),
                 streamDecode(streamListDefault, streamEncode(streamListDefault, new ArrayList<>())));
-        expect("optional.supplier.data.staticForm", NullData.INSTANCE,
-                DataCodec.optional(listCodec, newList).encode(new ArrayList<>()));
+
 
         // ---- CombinedCodec: one codec, both paths ----
         var combinedOptional = DataSyncCodec.STRING_CODEC.optional();
-        expect("optional.combined.data.nullMarker", NullData.INSTANCE, combinedOptional.encode(null));
-        String combinedNull = combinedOptional.decode(combinedOptional.encode(null), 0);
-        expect("optional.combined.data.decodeNull", null, combinedNull);
-        expect("optional.combined.data.value", "v", combinedOptional.decode(combinedOptional.encode("v"), 0));
+        expect("optional.combined.disk.nullMarker", true, ops.isNull(combinedOptional.encode(ops, null)));
+        expect("optional.combined.disk.decodeNull", null, combinedOptional.decode(ops, ops.createNull()));
+        expect("optional.combined.disk.value", "v", combinedOptional.decode(ops, combinedOptional.encode(ops, "v")));
         String combinedStreamNull = streamDecode(combinedOptional, streamEncode(combinedOptional, null));
         expect("optional.combined.stream.decodeNull", null, combinedStreamNull);
         expect("optional.combined.stream.value", "v", streamDecode(combinedOptional, streamEncode(combinedOptional, "v")));
 
         var combinedDefault = DataSyncCodec.STRING_CODEC.optional("d");
-        expect("optional.combined.default.data.defaultMarker", NullData.INSTANCE, combinedDefault.encode("d"));
-        expect("optional.combined.default.data.decodeDefault", "d", combinedDefault.decode(NullData.INSTANCE, 0));
-        expect("optional.combined.default.data.decodeValue", "x", combinedDefault.decode(combinedDefault.encode("x"), 0));
+        expect("optional.combined.default.disk.defaultMarker", true, ops.isNull(combinedDefault.encode(ops, "d")));
+        expect("optional.combined.default.disk.decodeDefault", "d", combinedDefault.decode(ops, ops.createNull()));
+        expect("optional.combined.default.disk.decodeValue", "x", combinedDefault.decode(ops, combinedDefault.encode(ops, "x")));
         expect("optional.combined.default.stream.defaultMarkerSize", streamEncode(combinedDefault, "d").length, 1);
         expect("optional.combined.default.stream.decodeDefault", "d",
                 streamDecode(combinedDefault, streamEncode(combinedDefault, "d")));
@@ -782,9 +774,9 @@ public final class DataSyncSelfTests {
 
         DataSyncCodec<List<String>> combinedListCodec = CombinedCodec.collection(ArrayList::new, DataSyncCodec.STRING_CODEC);
         var combinedListDefault = combinedListCodec.optional(newList);
-        expect("optional.combined.supplier.diskMarker", NullData.INSTANCE, combinedListDefault.encode(new ArrayList<>()));
+        expect("optional.combined.supplier.diskMarker", true, ops.isNull(combinedListDefault.encode(ops, new ArrayList<>())));
         expect("optional.combined.supplier.diskValue", List.of("a"),
-                combinedListDefault.decode(combinedListDefault.encode(List.of("a")), 0));
+                combinedListDefault.decode(ops, combinedListDefault.encode(ops, List.of("a"))));
         expect("optional.combined.supplier.wireAbsent", List.of(),
                 streamDecode(combinedListDefault, streamEncode(combinedListDefault, new ArrayList<>())));
 
@@ -793,75 +785,74 @@ public final class DataSyncSelfTests {
         IntFunction<Map<String, Integer>> stringKeyed = HashMap::new;
         IntFunction<Map<Integer, String>> intKeyed = HashMap::new;
 
-        var keyedByString = DataCodec.STRING_CODEC.asKey(stringKeyed, DataCodec.INT_CODEC);
-        expect("map.asKey.data", Map.of("a", 1), keyedByString.decode(keyedByString.encode(Map.of("a", 1))));
-        var valuedByString = DataCodec.STRING_CODEC.asValue(intKeyed, DataCodec.INT_CODEC);
-        expect("map.asValue.data", Map.of(1, "a"), valuedByString.decode(valuedByString.encode(Map.of(1, "a"))));
+        ValueCodec<Map<String, Integer>> keyedByString = ValueCodec.map(stringKeyed, ValueCodec.STRING, ValueCodec.INT);
+        expect("map.asKey.native", Map.of("a", 1), keyedByString.decode(ops, keyedByString.encode(ops, Map.of("a", 1))));
+        ValueCodec<Map<Integer, String>> valuedByString = ValueCodec.map(intKeyed, ValueCodec.INT, ValueCodec.STRING);
+        expect("map.asValue.native", Map.of(1, "a"), valuedByString.decode(ops, valuedByString.encode(ops, Map.of(1, "a"))));
 
-        var streamKeyedByString = ByteStreamCodec.map(stringKeyed, ByteStreamCodec.STRING_CODEC, ByteStreamCodec.INT_CODEC);
+        var streamKeyedByString = ByteBufCodecs.map(stringKeyed, ByteBufCodecs.STRING_UTF8, ByteBufCodecs.VAR_INT);
         expect("map.asKey.stream", Map.of("a", 1),
                 streamDecode(streamKeyedByString, streamEncode(streamKeyedByString, Map.of("a", 1))));
-        var streamValuedByString = ByteStreamCodec.map(intKeyed, ByteStreamCodec.INT_CODEC, ByteStreamCodec.STRING_CODEC);
+        var streamValuedByString = ByteBufCodecs.map(intKeyed, ByteBufCodecs.VAR_INT, ByteBufCodecs.STRING_UTF8);
         expect("map.asValue.stream", Map.of(1, "a"),
                 streamDecode(streamValuedByString, streamEncode(streamValuedByString, Map.of(1, "a"))));
 
         var combinedKeyedByString = DataSyncCodec.STRING_CODEC.asKey(stringKeyed, DataSyncCodec.INT_CODEC);
         expect("map.asKey.combined.disk", Map.of("a", 1),
-                combinedKeyedByString.decode(combinedKeyedByString.encode(Map.of("a", 1)), 0));
+                combinedKeyedByString.decode(ops, combinedKeyedByString.encode(ops, Map.of("a", 1))));
         expect("map.asKey.combined.wire", Map.of("a", 1),
                 streamDecode(combinedKeyedByString, streamEncode(combinedKeyedByString, Map.of("a", 1))));
         var combinedValuedByString = DataSyncCodec.STRING_CODEC.asValue(intKeyed, DataSyncCodec.INT_CODEC);
         expect("map.asValue.combined.disk", Map.of(1, "a"),
-                combinedValuedByString.decode(combinedValuedByString.encode(Map.of(1, "a")), 0));
+                combinedValuedByString.decode(ops, combinedValuedByString.encode(ops, Map.of(1, "a"))));
         expect("map.asValue.combined.wire", Map.of(1, "a"),
                 streamDecode(combinedValuedByString, streamEncode(combinedValuedByString, Map.of(1, "a"))));
 
         // ---- the remaining instance mirrors of the static builders ----
         IntFunction<List<String>> listFactory = ArrayList::new;
-        var dataCollection = DataCodec.STRING_CODEC.collection(listFactory);
-        expect("mirror.collection.data", List.of("a", "b"),
-                dataCollection.decode(dataCollection.encode(new ArrayList<>(List.of("a", "b")))));
-        var streamCollection = ByteStreamCodec.collection(listFactory, ByteStreamCodec.STRING_CODEC);
+        var nativeCollection = ValueCodec.collection(listFactory, ValueCodec.STRING);
+        expect("mirror.collection.native", List.of("a", "b"),
+                nativeCollection.decode(ops, nativeCollection.encode(ops, new ArrayList<>(List.of("a", "b")))));
+        var streamCollection = ByteBufCodecs.collection(listFactory, ByteBufCodecs.STRING_UTF8);
         expect("mirror.collection.stream", List.of("a", "b"),
                 streamDecode(streamCollection, streamEncode(streamCollection, new ArrayList<>(List.of("a", "b")))));
 
-        var dataArray = DataCodec.STRING_CODEC.array(String.class);
-        expect("mirror.array.data", true,
-                Arrays.equals(new String[]{"a", "b"}, dataArray.decode(dataArray.encode(new String[]{"a", "b"}))));
-        var streamArray = ByteStreamCodec.array(String.class, ByteStreamCodec.STRING_CODEC);
+        var nativeArray = ValueCodec.array(String.class, ValueCodec.STRING);
+        expect("mirror.array.native", true,
+                Arrays.equals(new String[]{"a", "b"}, nativeArray.decode(ops, nativeArray.encode(ops, new String[]{"a", "b"}))));
+        var streamArray = ByteBufCodecs.array(String.class, ByteBufCodecs.STRING_UTF8);
         expect("mirror.array.stream", true,
                 Arrays.equals(new String[]{"a", "b"}, streamDecode(streamArray, streamEncode(streamArray, new String[]{"a", "b"}))));
 
-        var dataConverted = DataCodec.INT_CODEC.convert(Integer::parseInt, Object::toString);
-        expect("mirror.convert.data", "7", dataConverted.decode(dataConverted.encode("7")));
-        var streamConverted = ByteStreamCodec.INT_CODEC.convert(Integer::parseInt, Object::toString);
+        var nativeConverted = ValueCodec.INT.convert(Integer::parseInt, Object::toString);
+        expect("mirror.convert.native", "7", nativeConverted.decode(ops, nativeConverted.encode(ops, "7")));
+        var streamConverted = ByteBufCodecs.VAR_INT.convert(Integer::parseInt, Object::toString);
         expect("mirror.convert.stream", "7", streamDecode(streamConverted, streamEncode(streamConverted, "7")));
 
         var covered = DataSyncCodec.STRING_CODEC.collection(listFactory);
         expect("mirror.collection.combined.disk", List.of("a"),
-                covered.decode(covered.encode(new ArrayList<>(List.of("a"))), 0));
+                covered.decode(ops, covered.encode(ops, new ArrayList<>(List.of("a")))));
         expect("mirror.collection.combined.wire", List.of("a"),
                 streamDecode(covered, streamEncode(covered, new ArrayList<>(List.of("a")))));
         var coveredList = DataSyncCodec.STRING_CODEC.list();
-        expect("mirror.list.combined", List.of("a"), coveredList.decode(coveredList.encode(List.of("a")), 0));
+        expect("mirror.list.combined", List.of("a"), coveredList.decode(ops, coveredList.encode(ops, List.of("a"))));
         var coveredSet = DataSyncCodec.STRING_CODEC.set();
-        expect("mirror.set.combined", Set.of("a"), coveredSet.decode(coveredSet.encode(Set.of("a")), 0));
+        expect("mirror.set.combined", Set.of("a"), coveredSet.decode(ops, coveredSet.encode(ops, Set.of("a"))));
         var coveredArray = DataSyncCodec.STRING_CODEC.array(String.class);
         expect("mirror.array.combined.disk", true,
-                Arrays.equals(new String[]{"a"}, coveredArray.decode(coveredArray.encode(new String[]{"a"}), 0)));
+                Arrays.equals(new String[]{"a"}, coveredArray.decode(ops, coveredArray.encode(ops, new String[]{"a"}))));
         var coveredConverted = DataSyncCodec.INT_CODEC.convert(Integer::parseInt, Object::toString);
-        expect("mirror.convert.combined.disk", "7", coveredConverted.decode(coveredConverted.encode("7"), 0));
+        expect("mirror.convert.combined.disk", "7", coveredConverted.decode(ops, coveredConverted.encode(ops, "7")));
 
         // Cross-path mirrors: adapt a half to the other path, or to a combined codec.
-        var dataAsStream = DataCodec.STRING_CODEC.toStreamCodec();
-        expect("mirror.toStreamCodec", "x", streamDecode(dataAsStream, streamEncode(dataAsStream, "x")));
-        var streamAsData = DataCodec.of(ByteStreamCodec.STRING_CODEC);
-        expect("mirror.toDataCodec", "x", streamAsData.decode(streamAsData.encode("x")));
-        var fromData = DataCodec.STRING_CODEC.toDataSyncCodec();
-        expect("mirror.toDataSyncCodec.data", "x", fromData.decode(fromData.encode("x"), 0));
-        expect("mirror.toDataSyncCodec.wire", "x", streamDecode(fromData, streamEncode(fromData, "x")));
-        var fromStream = DataSyncCodec.of(ByteStreamCodec.STRING_CODEC);
-        expect("mirror.toDataSyncCodec.stream.disk", "x", fromStream.decode(fromStream.encode("x"), 0));
+        var valueAsStream = ByteBufCodecs.fromValueCodec(ValueCodec.STRING);
+        expect("mirror.valueAsStream", "x", streamDecode(valueAsStream, streamEncode(valueAsStream, "x")));
+        var fromValue = DataSyncCodec.of(ValueCodec.STRING);
+        expect("mirror.ofValueCodec.disk", "x", fromValue.decode(ops, fromValue.encode(ops, "x")));
+        expect("mirror.ofValueCodec.wire", "x", streamDecode(fromValue, streamEncode(fromValue, "x")));
+        var fromStream = DataSyncCodec.of(ByteBufCodecs.STRING_UTF8);
+        expect("mirror.ofStreamCodec.disk", "x", fromStream.decode(ops, fromStream.encode(ops, "x")));
+        expect("mirror.ofStreamCodec.wire", "x", streamDecode(fromStream, streamEncode(fromStream, "x")));
         expect("mirror.toDataSyncCodec.self", true, DataSyncCodec.STRING_CODEC.toDataSyncCodec() == DataSyncCodec.STRING_CODEC);
     }
 

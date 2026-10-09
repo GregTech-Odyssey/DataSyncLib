@@ -3,10 +3,8 @@ package com.gto.datasynclib.field.access.array;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.ListData;
-import com.gto.datasynclib.datastream.data.NullData;
-import com.gto.datasynclib.datastream.data.StringMapData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import com.gto.datasynclib.util.HashUtil;
 import net.minecraft.network.FriendlyByteBuf;
@@ -19,6 +17,9 @@ import java.util.Map;
  * Uses identity-based hash with per-element detectChange() propagation.
  * Supports legacy data version migration.
  */
+
+import java.util.ArrayList;
+
 public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSerializable[]> {
 
     private int hashCode;
@@ -69,40 +70,42 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, IDataSerializable @NotNull [] instance) {
-        var list = new ListData();
+    protected @NotNull Object doWriteValue(@NotNull Object source, IDataSerializable @NotNull [] instance, @NotNull ValueOps ops) {
+        var list = new ArrayList<Object>(instance.length);
         for (var element : instance) {
-            if (element != null) {
-                list.add(element.writeData());
-            } else {
-                list.addNull();
-            }
+            list.add(element == null ? ops.createNull() : element.writeValue(ops));
         }
-        if (definition.saveEmpty) return list;
-        for (var data : list) {
-            if (data != NullData.INSTANCE) return list;
+        if (definition.saveEmpty) return ops.createList(list);
+        for (var element : list) {
+            // the slots hold carrier values, so an absent one is the null value, never a Java null
+            if (!ops.isNull(element)) return ops.createList(list);
         }
-        return NullData.NONE;
+        return NOT_PERSISTED;
     }
 
     @Override
-    protected void doReadData(IDataSerializable @NotNull [] instance, @NotNull Data data, int dataVersion) {
-        var list = data.getList();
+    protected void doReadValue(IDataSerializable @NotNull [] instance, @NotNull Object data, @NotNull ValueOps ops) {
+        // an empty container was stored as the null value, which is a missing payload, not a failure
+        if (!ops.isList(data)) return;
+        var list = ops.getList(data);
         var length = Math.min(list.size(), instance.length);
-        if (dataVersion == -1) {
+        if (ops.dataVersion() == -1) {
+            // legacy layout: each element was a map of "uid"/"p" rather than the value itself
             for (int i = 0; i < length; i++) {
-                if (list.get(i) instanceof StringMapData(Map<String, Data> map) && !map.isEmpty()) {
-                    var element = instance[i];
-                    if (element != null) element.readData(map.get("p"), dataVersion);
+                var element = list.get(i);
+                if (ops.isStringMap(element)) {
+                    var map = ops.getStringMap(element);
+                    if (map.isEmpty()) continue;
+                    var serializable = instance[i];
+                    if (serializable != null) serializable.readValue(map.get("p"), ops);
                 }
             }
         } else {
             for (int i = 0; i < length; i++) {
-                var d = list.get(i);
-                if (d != NullData.INSTANCE) {
-                    var element = instance[i];
-                    if (element != null) element.readData(d, dataVersion);
-                }
+                var element = list.get(i);
+                if (ops.isNull(element)) continue;
+                var serializable = instance[i];
+                if (serializable != null) serializable.readValue(element, ops);
             }
         }
     }

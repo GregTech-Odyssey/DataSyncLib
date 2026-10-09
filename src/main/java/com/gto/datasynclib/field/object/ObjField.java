@@ -2,8 +2,8 @@ package com.gto.datasynclib.field.object;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.field.AbstractField;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
@@ -18,9 +18,9 @@ import org.jetbrains.annotations.NotNull;
  * <ul>
  *   <li>Network: a null value is written as a {@code false} presence flag, otherwise
  *       {@code true} followed by the encoded value.</li>
- *   <li>Disk: a null value becomes {@link NullData#INSTANCE} (and {@link NullData#INSTANCE}
+ *   <li>Disk: a null value becomes the carrier's null (and the carrier's null
  *       reads back as null); the {@code skipSave}/default-value filters are applied only to
- *       non-null values, and a suppressed field is signalled with {@link NullData#NONE}.</li>
+ *       non-null values, and a suppressed field is signalled with {@code DataField.NOT_PERSISTED}.</li>
  * </ul>
  */
 public abstract class ObjField<T> extends AbstractField<T> {
@@ -78,26 +78,26 @@ public abstract class ObjField<T> extends AbstractField<T> {
     }
 
     @Override
-    public final @NotNull Data writeToData(@NotNull Object source) {
+    public final @NotNull Object writeToValue(@NotNull Object source, @NotNull ValueOps ops) {
         var definition = this.definition;
         T value = definition.get(source);
-        if (value == null) {
-            return NullData.INSTANCE;
+        if (ops.isNull(value)) {
+            return ops.createNull();
         } else {
-            if (definition.skipSave(source, value)) return NullData.NONE;
+            if (definition.skipSave(source, value)) return NOT_PERSISTED;
             if (definition.hasDefaultValue() && definition.strategy.equals(value, definition.getDefaultValue(source)))
-                return NullData.NONE;
-            return write(source, value);
+                return NOT_PERSISTED;
+            return write(source, value, ops);
         }
     }
 
     @Override
-    public final void readFromData(@NotNull Object source, @NotNull Data data, int dataVersion) {
+    public final void readFromValue(@NotNull Object source, @NotNull Object data, @NotNull ValueOps ops) {
         T value;
-        if (data == NullData.INSTANCE) {
+        if (ops.isNull(data)) {
             value = null;
         } else {
-            value = read(source, data, dataVersion);
+            value = read(source, data, ops);
         }
         definition.set(source, value);
         // Load listener (@SaveToDisk(listener = "...")): `value` is the decoded value, or null when
@@ -124,15 +124,17 @@ public abstract class ObjField<T> extends AbstractField<T> {
     protected abstract @NotNull T read(@NotNull Object source, @NotNull FriendlyByteBuf data);
 
     /**
-     * Encodes a non-null value into a {@link Data} tree. Returning {@link NullData#NONE}
-     * suppresses the field; {@code null} is handled by {@link #writeToData} instead.
+     * Encodes a non-null value onto the native carrier. Returning {@link
+     * com.gto.datasynclib.DataField#NOT_PERSISTED} suppresses the field; {@code null} is handled by
+     * {@link #writeToValue} instead.
      */
-    protected abstract @NotNull Data write(@NotNull Object source, @NotNull T value);
+    protected abstract @NotNull Object write(@NotNull Object source, @NotNull T value, @NotNull ValueOps ops);
 
     /**
-     * Decodes a value from a {@link Data} tree.
+     * Decodes a value from a carrier value.
      *
-     * @param dataVersion the format version recorded when the data was written, for migration
+     * @param ops the carrier the value came from; {@link com.gto.datasynclib.datastream.codec.ValueOps#dataVersion()}
+     *            is the format version recorded when the data was written, for migration
      */
-    protected abstract @NotNull T read(@NotNull Object source, @NotNull Data data, int dataVersion);
+    protected abstract @NotNull T read(@NotNull Object source, @NotNull Object data, @NotNull ValueOps ops);
 }

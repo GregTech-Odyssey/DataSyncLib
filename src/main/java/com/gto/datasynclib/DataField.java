@@ -1,6 +1,7 @@
 package com.gto.datasynclib;
 
-import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
@@ -33,8 +34,8 @@ import java.util.function.Predicate;
  *       value has changed since last sync</li>
  *   <li>{@link #writeToBuffer} — serialize the current value to the network buffer</li>
  *   <li>{@link #readFromBuffer} — deserialize from the network buffer and apply the value</li>
- *   <li>{@link #writeToData} — serialize to a Data object for disk persistence</li>
- *   <li>{@link #readFromData} — deserialize from a Data object during loading</li>
+ *   <li>{@link #writeToValue} — serialize to the native carrier for disk persistence</li>
+ *   <li>{@link #readFromValue} — deserialize from a carrier value during loading</li>
  * </ol>
  *
  * @param <T> the declared type of the field this DataField manages
@@ -108,25 +109,35 @@ public interface DataField<T> {
     void readFromBuffer(@NotNull LogicalSide side, @NotNull Object source, @NotNull FriendlyByteBuf data);
 
     /**
-     * Serializes the field's current value to a {@link com.gto.datasynclib.datastream.data.Data}
-     * tree for disk persistence.
+     * Deserializes the field's value from a carrier value and applies it to the source object.
      *
      * @param source the owning object
-     * @return the serialized data, or {@link com.gto.datasynclib.datastream.data.NullData#NONE}
-     * to suppress this field from being written
+     * @param value  the value to read, as {@link #writeToValue(Object, ValueOps)} produced it
+     * @param ops    the carrier the value came from; {@link ValueOps#dataVersion()} is the version
+     *               of the data being read, for migration support
      */
-    @NotNull
-    Data writeToData(@NotNull Object source);
+    void readFromValue(@NotNull Object source, @NotNull Object value, @NotNull ValueOps ops);
 
     /**
-     * Deserializes the field's value from a {@link com.gto.datasynclib.datastream.data.Data}
-     * tree and applies it to the source object.
+     * Serializes the field's current value onto the native carrier — what
+     * {@link com.gto.datasynclib.FieldDataManager#writeToValue(ValueOps)} stores, and what
+     * {@link JavaValueOps#toBytes(Object)} turns into the id+payload bytes of a save file.
      *
-     * @param source      the owning object
-     * @param data        the serialized data to read from
-     * @param dataVersion the data format version, for migration support
+     * <p>Three outcomes: the value itself, {@code null} for an explicit null (written when the
+     * field is {@code saveEmpty}), or {@link #NOT_PERSISTED} for "write nothing at all" — a value
+     * at its default, a save predicate that says no, an empty container.</p>
+     *
+     * @param source the owning object
+     * @param ops    the carrier the value is built with
      */
-    void readFromData(@NotNull Object source, @NotNull Data data, int dataVersion);
+    @NotNull
+    Object writeToValue(@NotNull Object source, @NotNull ValueOps ops);
+
+    /**
+     * The marker {@link #writeToValue(Object, ValueOps)} returns when a field has nothing to
+     * store. Identity-compared by the manager, and never part of a serialized value.
+     */
+    Object NOT_PERSISTED = new Object();
 
     /**
      * Indicates whether this field type requires mandatory change detection.

@@ -46,7 +46,7 @@ import java.lang.annotation.Target;
  * Arguments travel as the codec's <strong>network half</strong> ({@code StreamCodec}, written
  * straight into the call's buffer like a synchronized field), so a call costs what its arguments
  * cost and nothing more; {@code null} is carried by a one-byte present/absent marker instead of a
- * {@code NullData} entry.</p>
+ * null-value entry.</p>
  *
  * <p>A remote call has <strong>no return channel</strong>, so an annotated method must be
  * {@code void} — a value-returning method is rejected when its class is scanned

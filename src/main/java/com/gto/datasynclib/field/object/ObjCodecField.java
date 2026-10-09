@@ -1,7 +1,8 @@
 package com.gto.datasynclib.field.object;
 
 import com.gto.datasynclib.DataFieldDefinition;
-import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
@@ -26,12 +27,12 @@ public class ObjCodecField<T> extends ObjField<T> {
     }
 
     @Override
-    protected final @NotNull Data write(@NotNull Object source, @NotNull T value) {
-        return definition.encode(source, value);
+    protected final @NotNull Object write(@NotNull Object source, @NotNull T value, @NotNull ValueOps ops) {
+        return definition.encode(source, value, ops);
     }
 
     @Override
-    protected final @NotNull T read(@NotNull Object source, @NotNull Data data, int dataVersion) {
-        return definition.decode(source, data, dataVersion);
+    protected final @NotNull T read(@NotNull Object source, @NotNull Object data, @NotNull ValueOps ops) {
+        return definition.decode(source, data, ops);
     }
 }

@@ -2,11 +2,11 @@ package com.gto.datasynclib.test;
 
 import com.gto.datasynclib.*;
 import com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity;
-import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
-import com.gto.datasynclib.datastream.codec.DataCodec;
+import com.gto.datasynclib.datastream.codec.ByteBufCodecs;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueCodec;
+import com.gto.datasynclib.datastream.codec.ValueOps.Type;
 import com.gto.datasynclib.datastream.codec.StreamCodec;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.StringMapData;
 import com.gto.datasynclib.remote.RemoteInvoker;
 import com.gto.datasynclib.remote.RemoteNetwork;
 import com.gto.datasynclib.remote.RemoteRouting;
@@ -146,7 +146,7 @@ public final class TestBlockEntityTests {
      * Built-in codec registry.
      *
      * <p><b>Usage:</b> {@link DataSyncCodec#get(Class)} resolves the codec of a field type and exposes
-     * {@code dataWriter/dataReader} (disk) and {@code streamWriter/streamReader} (network), so both paths
+     * {@code valueWriter/valueReader} (disk) and {@code streamWriter/streamReader} (network), so both paths
      * can be driven directly — which is what the assertions below do for primitive arrays, enums,
      * ItemStack, the hand-written {@code GlobalPos}/{@code SectionPos}/{@code Vec3i} pairs and the
      * hand-written FastUtil primitive collections.</p>
@@ -170,18 +170,36 @@ public final class TestBlockEntityTests {
         expect("codecs.mobEffect", DataSyncCodec.get(MobEffect.class) != null, true);
         expect("codecs.recipeType", DataSyncCodec.get(RecipeType.class) != null, true);
 
-        // Round-trip a couple of them through the data side directly.
+        // Round-trip a couple of them through the disk half directly.
+        var nativeOps = JavaValueOps.INSTANCE;
         var globalPos = GlobalPos.of(Level.NETHER, new BlockPos(4, 5, 6));
         var codec = DataSyncCodec.get(GlobalPos.class);
         expect("codecs.globalPosRoundTrip", globalPos,
-                codec.dataReader.decode(codec.dataWriter.encode(globalPos), 0));
+                codec.decode(nativeOps, codec.encode(nativeOps, globalPos)));
         var sectionPos = SectionPos.of(7, 8, 9);
         var sectionCodec = DataSyncCodec.get(SectionPos.class);
         expect("codecs.sectionPosRoundTrip", sectionPos.asLong(),
-                sectionCodec.dataReader.decode(sectionCodec.dataWriter.encode(sectionPos), 0).asLong());
+                sectionCodec.decode(nativeOps, sectionCodec.encode(nativeOps, sectionPos)).asLong());
         var vec = new Vec3i(-1, 2, -3);
         var vecCodec = DataSyncCodec.get(Vec3i.class);
-        expect("codecs.vec3iRoundTrip", vec, vecCodec.dataReader.decode(vecCodec.dataWriter.encode(vec), 0));
+        expect("codecs.vec3iRoundTrip", vec, vecCodec.decode(nativeOps, vecCodec.encode(nativeOps, vec)));
+
+        // The same codecs on the native carrier — the half the persistence path actually runs on now.
+        // The bridged Data pair above and this pair have to agree: they are two views of one codec.
+        expect("codecs.vec3iNativeRoundTrip", vec, vecCodec.decode(nativeOps, vecCodec.encode(nativeOps, vec)));
+        expect("codecs.globalPosNativeRoundTrip", globalPos, codec.decode(nativeOps, codec.encode(nativeOps, globalPos)));
+        expect("codecs.sectionPosNativeRoundTrip", sectionPos.asLong(),
+                sectionCodec.decode(nativeOps, sectionCodec.encode(nativeOps, sectionPos)).asLong());
+        expect("codecs.nativeHalfRoundTrip", vec, vecCodec.decode(nativeOps, vecCodec.encode(nativeOps, vec)));
+        // A composite combined codec is composed from native halves: the disk form is the same tuple
+        // the Data era wrote, and the value still reads back through either half.
+        expect("codecs.globalPosCompositeNative", globalPos, DataSyncCodec.GLOBAL_POS_CODEC.decode(nativeOps,
+                DataSyncCodec.GLOBAL_POS_CODEC.encode(nativeOps, globalPos)));
+        expect("codecs.globalPosDataHalfRoundTrip", globalPos,
+                DataSyncCodec.GLOBAL_POS_CODEC.decode(nativeOps, DataSyncCodec.GLOBAL_POS_CODEC.encode(nativeOps, globalPos)));
+        // A value at its default is stored as the absent marker on the native carrier too.
+        expect("codecs.optionalDefaultIsAbsent", Type.NULL,
+                nativeOps.getTypeId(DataSyncCodec.get(Vec3i.class).optional(vec).encode(nativeOps, vec)));
 
         // ---- FastUtil primitive collections: hand-written, so nothing boxes ----
         expect("codecs.intList", DataSyncCodec.get(IntList.class) == DataSyncCodec.INT_LIST_CODEC, true);
@@ -193,27 +211,65 @@ public final class TestBlockEntityTests {
         IntSet intSet = new IntOpenHashSet(new int[]{2, 7, 9});
         LongList longList = new LongArrayList(new long[]{1L, -2L, 1L << 40});
         LongSet longSet = new LongOpenHashSet(new long[]{-5L, 6L});
-        expect("codecs.intListDataRoundTrip", intList,
-                DataSyncCodec.INT_LIST_CODEC.dataReader.decode(DataSyncCodec.INT_LIST_CODEC.dataWriter.encode(intList), 0));
-        expect("codecs.intListStreamRoundTrip", intList, streamRoundTrip(ByteStreamCodec.INT_LIST_CODEC, intList));
-        expect("codecs.intSetDataRoundTrip", intSet,
-                DataSyncCodec.INT_SET_CODEC.dataReader.decode(DataSyncCodec.INT_SET_CODEC.dataWriter.encode(intSet), 0));
-        expect("codecs.intSetStreamRoundTrip", intSet, streamRoundTrip(ByteStreamCodec.INT_SET_CODEC, intSet));
-        expect("codecs.longListDataRoundTrip", longList,
-                DataSyncCodec.LONG_LIST_CODEC.dataReader.decode(DataSyncCodec.LONG_LIST_CODEC.dataWriter.encode(longList), 0));
-        expect("codecs.longListStreamRoundTrip", longList, streamRoundTrip(ByteStreamCodec.LONG_LIST_CODEC, longList));
-        expect("codecs.longSetDataRoundTrip", longSet,
-                DataSyncCodec.LONG_SET_CODEC.dataReader.decode(DataSyncCodec.LONG_SET_CODEC.dataWriter.encode(longSet), 0));
-        expect("codecs.longSetStreamRoundTrip", longSet, streamRoundTrip(ByteStreamCodec.LONG_SET_CODEC, longSet));
+        expect("codecs.intListDiskRoundTrip", intList,
+                DataSyncCodec.INT_LIST_CODEC.decode(nativeOps, DataSyncCodec.INT_LIST_CODEC.encode(nativeOps, intList)));
+        expect("codecs.intListStreamRoundTrip", intList, streamRoundTrip(ByteBufCodecs.INT_LIST, intList));
+        expect("codecs.intSetDiskRoundTrip", intSet,
+                DataSyncCodec.INT_SET_CODEC.decode(nativeOps, DataSyncCodec.INT_SET_CODEC.encode(nativeOps, intSet)));
+        expect("codecs.intSetStreamRoundTrip", intSet, streamRoundTrip(ByteBufCodecs.INT_SET, intSet));
+        expect("codecs.longListDiskRoundTrip", longList,
+                DataSyncCodec.LONG_LIST_CODEC.decode(nativeOps, DataSyncCodec.LONG_LIST_CODEC.encode(nativeOps, longList)));
+        expect("codecs.longListStreamRoundTrip", longList, streamRoundTrip(ByteBufCodecs.LONG_LIST, longList));
+        expect("codecs.longSetDiskRoundTrip", longSet,
+                DataSyncCodec.LONG_SET_CODEC.decode(nativeOps, DataSyncCodec.LONG_SET_CODEC.encode(nativeOps, longSet)));
+        expect("codecs.longSetStreamRoundTrip", longSet, streamRoundTrip(ByteBufCodecs.LONG_SET, longSet));
         // An empty collection round-trips as an empty collection, not as an absent value.
         expect("codecs.intListEmptyRoundTrip", new IntArrayList(),
-                DataSyncCodec.INT_LIST_CODEC.dataReader.decode(DataSyncCodec.INT_LIST_CODEC.dataWriter.encode(new IntArrayList()), 0));
+                DataSyncCodec.INT_LIST_CODEC.decode(nativeOps, DataSyncCodec.INT_LIST_CODEC.encode(nativeOps, new IntArrayList())));
         // The disk payload is the primitive array of the matching array codec, so it stays compact…
-        expect("codecs.intListDataIsIntArray", Data.INT_ARRAY, DataSyncCodec.INT_LIST_CODEC.dataWriter.encode(intList).getId());
-        expect("codecs.longSetDataIsLongArray", Data.LONG_ARRAY, DataSyncCodec.LONG_SET_CODEC.dataWriter.encode(longSet).getId());
+        // the stored form is the primitive array of the matching array codec, so it stays compact
+        expect("codecs.intListStoredAsIntArray", Type.INT_ARRAY, nativeOps.getTypeId(DataSyncCodec.INT_LIST_CODEC.encode(nativeOps, intList)));
+        expect("codecs.longSetStoredAsLongArray", Type.LONG_ARRAY, nativeOps.getTypeId(DataSyncCodec.LONG_SET_CODEC.encode(nativeOps, longSet)));
         // …and the wire form is a VarInt size plus primitives: ints are VarInts, longs are raw.
-        expect("codecs.intListWireSize", 4, streamSize(ByteStreamCodec.INT_LIST_CODEC, new IntArrayList(new int[]{3, 1, 4})));
-        expect("codecs.longListWireSize", 17, streamSize(ByteStreamCodec.LONG_LIST_CODEC, new LongArrayList(new long[]{5L, 6L})));
+        expect("codecs.intListWireSize", 4, streamSize(ByteBufCodecs.INT_LIST, new IntArrayList(new int[]{3, 1, 4})));
+        expect("codecs.longListWireSize", 17, streamSize(ByteBufCodecs.LONG_LIST, new LongArrayList(new long[]{5L, 6L})));
+
+        // ---- object arrays: an empty slot is a null-valued element, an absent array an empty array ----
+        // A slot the writer left empty must decode back to a null slot: the element codec is never
+        // handed a value it was not written for. This is the shape {@code TestBlockEntity.directions}
+        // stores and the one a save from before the migration holds.
+        var stringArrayCodec = DataSyncCodec.get(String[].class);
+        var stringSlots = new String[]{"a", null, "c"};
+        expect("codecs.objectArrayNullSlotRoundTrip", Arrays.equals(stringSlots,
+                stringArrayCodec.decode(nativeOps, stringArrayCodec.encode(nativeOps, stringSlots))));
+        // An empty array is an empty list, not the absent marker, so it round-trips as an empty array.
+        var emptyArrayPayload = stringArrayCodec.encode(nativeOps, new String[0]);
+        expect("codecs.objectArrayEmptyIsList", nativeOps.isList(emptyArrayPayload));
+        expect("codecs.objectArrayEmptyRoundTrip", stringArrayCodec.decode(nativeOps, emptyArrayPayload).length == 0);
+        // A payload that is absent (or is not a list at all) is a zero-length array, the answer the
+        // retired array codec gave — never a failure while an old save is being read.
+        expect("codecs.objectArrayNullPayload", stringArrayCodec.decode(nativeOps, nativeOps.createNull()).length == 0);
+        // The nested shape: rows of an enum array with empty slots. A {@code Direction[][]} field is
+        // an ArrayAccess over the {@code Direction[]} codec, so the outer payload is a list of row
+        // payloads and each row payload is decoded by that element codec in turn.
+        var rowCodec = DataSyncCodec.get(Direction[].class);
+        var rows = new ArrayList<Object>();
+        for (int row = 0; row < 3; row++) {
+            var rowValues = new Direction[3];
+            rowValues[row] = Direction.values()[row];
+            rows.add(rowCodec.encode(nativeOps, rowValues));
+        }
+        var outerPayload = nativeOps.createList(rows);
+        var savedRows = nativeOps.getList(outerPayload);
+        expect("codecs.nestedArrayRows", savedRows.size() == 3);
+        for (int row = 0; row < 3; row++) {
+            var expected = new Direction[3];
+            expected[row] = Direction.values()[row];
+            // the inside of the row decode: a null-valued slot is a null slot, not a value the enum
+            // codec is asked to read
+            var decodedRow = rowCodec.decode(nativeOps, savedRows.get(row));
+            expect("codecs.nestedArrayRow" + row, Arrays.equals(expected, decodedRow));
+        }
     }
 
     /**
@@ -258,13 +314,14 @@ public final class TestBlockEntityTests {
         expect("policy.primitiveResolves", DataSyncCodec.get(int.class) != null, true);
         expect("policy.primitiveContains", DataSyncCodec.contains(int.class), true);
         expect("policy.primitiveIsWrapperCodec", DataSyncCodec.get(int.class) == DataSyncCodec.get(Integer.class), true);
-        expect("policy.primitiveRoundTrip", 7, DataSyncCodec.get(int.class).decode(DataSyncCodec.get(int.class).encode(7), 0));
+        var ops = JavaValueOps.INSTANCE;
+        expect("policy.primitiveRoundTrip", 7, DataSyncCodec.get(int.class).decode(ops, DataSyncCodec.get(int.class).encode(ops, 7)));
         expect("policy.voidPrimitiveNull", DataSyncCodec.get(void.class) == null, true);
         // The two halves resolve through the same registry and hand back their own codec.
-        expect("policy.halfDataCodec", DataCodec.get(String.class) == DataCodec.STRING_CODEC, true);
-        expect("policy.halfStreamCodec", ByteStreamCodec.get(String.class) == ByteStreamCodec.STRING_CODEC, true);
-        expect("policy.halfPrimitive", DataCodec.get(int.class) == DataCodec.INT_CODEC, true);
-        expect("policy.halfMissingNull", DataCodec.get(TestBlockEntity.A.class) == null, true);
+        expect("policy.halfValueCodec", DataSyncCodec.get(String.class).toValueCodec() == ValueCodec.STRING, true);
+        expect("policy.halfStreamCodec", ByteBufCodecs.get(String.class) == ByteBufCodecs.STRING_UTF8, true);
+        expect("policy.halfPrimitive", DataSyncCodec.get(int.class).toValueCodec() == ValueCodec.INT, true);
+        expect("policy.halfMissingNull", DataSyncCodec.get(TestBlockEntity.A.class) == null, true);
         // Enums and object arrays report a codec even without registration (generated on demand).
         expect("policy.generatedEnum", DataSyncCodec.contains(Direction.class), true);
         expect("policy.generatedArray", DataSyncCodec.contains(String[].class), true);
@@ -283,29 +340,32 @@ public final class TestBlockEntityTests {
     /**
      * Disk persistence for {@code @SaveToDisk}.
      *
-     * <p><b>Usage:</b> {@code manager.writeToData()} returns a {@link StringMapData} keyed by field name
-     * (or {@code @SaveToDisk(key = ...)}) and {@code readFromData(data, version)} restores it;
-     * {@code writeAllToData()/readAllFromData()} additionally carry fields that are only
-     * {@code @AddToManager}. Values equal to their configured default, and values skipped by a
-     * {@code skipWhen} predicate, never appear in the map.</p>
+     * <p><b>Usage:</b> {@code manager.writeToValue(ops)} returns a carrier string map keyed by field
+     * name (or {@code @SaveToDisk(key = ...)}) and {@code readFromValue(data, ops)} restores it;
+     * {@code writeAllToValue(ops)/readAllFromValue(data, ops)} additionally carry fields that are only
+     * {@code @AddToManager}; {@link com.gto.datasynclib.datastream.codec.JavaValueOps#toBytes(Object)}
+     * turns the map into the bytes a save file holds. Values equal to their configured default, and
+     * values skipped by a {@code skipWhen} predicate, never appear in the map.</p>
      */
     private void diskRoundTrip() {
+        var ops = JavaValueOps.INSTANCE;
         TestBlockEntity src = mutate(newEntity());
-        Data saved = src.getFieldDataManager().writeToData();
-        expect("disk.notEmpty", saved instanceof StringMapData, true);
+        Object saved = src.getFieldDataManager().writeToValue(ops);
+        expect("disk.notEmpty", ops.isStringMap(saved), true);
 
         TestBlockEntity dst = newEntity();
-        dst.getFieldDataManager().readFromData(saved, FieldDataHolderBlockEntity.VERSION);
+        dst.getFieldDataManager().readFromValue(saved, JavaValueOps.create(FieldDataHolderBlockEntity.VERSION));
         expectSaved("disk", src, dst);
 
-        // writeAllToData/readAllFromData additionally carry managed-but-not-@SaveToDisk fields.
-        Data all = src.getFieldDataManager().writeAllToData();
+        // writeAllToValue/readAllFromValue additionally carry managed-but-not-@SaveToDisk fields.
+        Object all = src.getFieldDataManager().writeAllToValue(ops);
         TestBlockEntity dstAll = newEntity();
-        dstAll.getFieldDataManager().readAllFromData(all, FieldDataHolderBlockEntity.VERSION);
+        dstAll.getFieldDataManager().readAllFromValue(all, JavaValueOps.create(FieldDataHolderBlockEntity.VERSION));
         expectSaved("diskAll", src, dstAll);
 
         // A field skipped by its skipWhen predicate or equal to its default must not appear in the map.
-        if (saved instanceof StringMapData map) {
+        if (ops.isStringMap(saved)) {
+            var map = ops.getStringMap(saved);
             expect("disk.defaultSkipped", map.containsKey("withDefault"), false);
             expect("disk.skipWhenSkipped", map.containsKey("skipped"), false);
             expect("disk.handlerPresent", map.containsKey("handler"), true);
@@ -342,8 +402,9 @@ public final class TestBlockEntityTests {
         other.skipped = -1; // skipMe returns true → still skipped
         CompoundTag otherTag = other.saveToTag();
         if (otherTag.get("field_save") instanceof ByteArrayTag array) {
-            Data data = Data.readData(array.getAsByteArray());
-            if (data instanceof StringMapData map) {
+            Object data = JavaValueOps.INSTANCE.fromBytes(array.getAsByteArray());
+            if (JavaValueOps.INSTANCE.isStringMap(data)) {
+                var map = JavaValueOps.INSTANCE.getStringMap(data);
                 expect("nbt.nonDefaultWritten", map.containsKey("withDefault"), true);
                 expect("nbt.negativeSkipWhenSkipped", map.containsKey("skipped"), false);
             } else {
@@ -549,7 +610,7 @@ public final class TestBlockEntityTests {
         // Unknown names are rejected loudly.
         expect("dirty.unknownNameThrows", throwsRuntime(() -> manager.markFieldsForSync("nope")), true);
         expect("dirty.unknownFieldDataThrows",
-                throwsRuntime(() -> manager.writeFieldToData("nope")), true);
+                throwsRuntime(() -> manager.writeFieldToValue("nope", JavaValueOps.INSTANCE)), true);
     }
 
     /**
@@ -565,9 +626,10 @@ public final class TestBlockEntityTests {
         be.skipped = -5; // skipMe returns true → skipped
         be.withDefault = 7;  // equals the @SaveToDisk default → skipped
 
-        Data data = be.getFieldDataManager().writeToData();
-        boolean skipped = !(data instanceof StringMapData map)
-                || (!map.containsKey("skipped") && !map.containsKey("withDefault"));
+        var ops = JavaValueOps.INSTANCE;
+        Object data = be.getFieldDataManager().writeToValue(ops);
+        boolean skipped = !ops.isStringMap(data)
+                || (!ops.getStringMap(data).containsKey("skipped") && !ops.getStringMap(data).containsKey("withDefault"));
         expect("skipPredicates.skipped", skipped, true);
 
         // The skip-predicate method itself also has to be reachable for the annotation to resolve.
@@ -578,33 +640,34 @@ public final class TestBlockEntityTests {
     /**
      * Single-field read/write helpers, useful for partial saves or external storage.
      *
-     * <p><b>Usage:</b> {@code writeFieldToData(name)} with {@code readFieldFromData(data, version, name)}
-     * for one field, and {@code writeFieldsToData(names...)} with
-     * {@code readFieldsFromData(data, version, names...)} for a subset. Unknown names throw
+     * <p><b>Usage:</b> {@code writeFieldToValue(name, ops)} with {@code readFieldFromValue(data, ops, name)}
+     * for one field, and {@code writeFieldsToValue(ops, names...)} with
+     * {@code readFieldsFromValue(data, ops, names...)} for a subset. Unknown names throw
      * {@link IllegalArgumentException}.</p>
      */
     private void singleFieldApi() {
+        var ops = JavaValueOps.INSTANCE;
         TestBlockEntity src = newEntity();
         src.i = 777;
         src.aabb = new AABB(9, 9, 9, 10, 10, 10);
 
-        Data i = src.getFieldDataManager().writeFieldToData("i");
-        expect("single.iNotNone", i.isNone(), false);
-        Data aabb = src.getFieldDataManager().writeToData();
+        Object i = src.getFieldDataManager().writeFieldToValue("i", ops);
+        expect("single.iNotNone", i == DataField.NOT_PERSISTED, false);
+        Object aabb = src.getFieldDataManager().writeToValue(ops);
 
         TestBlockEntity dst = newEntity();
-        dst.getFieldDataManager().readFieldFromData(i, FieldDataHolderBlockEntity.VERSION, "i");
+        dst.getFieldDataManager().readFieldFromValue(i, ops, "i");
         expect("single.iRestored", dst.i, 777);
 
-        Data both = src.getFieldDataManager().writeFieldsToData("i", "aabb");
-        expect("single.multiWritten", both instanceof StringMapData, true);
+        Object both = src.getFieldDataManager().writeFieldsToValue(ops, "i", "aabb");
+        expect("single.multiWritten", ops.isStringMap(both), true);
 
         TestBlockEntity dst2 = newEntity();
-        dst2.getFieldDataManager().readFieldsFromData(both, FieldDataHolderBlockEntity.VERSION, "i", "aabb");
+        dst2.getFieldDataManager().readFieldsFromValue(both, ops, "i", "aabb");
         expect("single.multiI", dst2.i, 777);
         expect("single.multiAabb", dst2.aabb, src.aabb);
         expect("single.unknownReadThrows", throwsRuntime(() ->
-                dst2.getFieldDataManager().readFieldFromData(i, 0, "nope")), true);
+                dst2.getFieldDataManager().readFieldFromValue(i, ops, "nope")), true);
     }
 
     /**
@@ -626,9 +689,9 @@ public final class TestBlockEntityTests {
         src.tagData.putInt("converted", 21);
 
         // Child manager: persisted and synced as one field.
-        Data data = src.getFieldDataManager().writeToData();
+        Object data = src.getFieldDataManager().writeToValue(JavaValueOps.INSTANCE);
         TestBlockEntity dst = newEntity();
-        dst.getFieldDataManager().readFromData(data, FieldDataHolderBlockEntity.VERSION);
+        dst.getFieldDataManager().readFromValue(data, JavaValueOps.create(FieldDataHolderBlockEntity.VERSION));
         expect("child.ticks", dst.module.ticks, 900);
         expect("child.name", dst.module.name, "child");
         expect("child.values", dst.module.values, List.of(3, 4));
@@ -672,7 +735,7 @@ public final class TestBlockEntityTests {
         // A registry registers its own codecs globally once frozen.
         record Tag2(String name, int value) {
         }
-        var registry = new Registry<String, Tag2>("test:be_tag", DataCodec.STRING_CODEC, t -> t.name, Tag2.class);
+        var registry = new Registry<String, Tag2>("test:be_tag", ValueCodec.STRING, t -> t.name, Tag2.class);
         registry.unfreeze();
         registry.register("one", new Tag2("one", 1));
         registry.register("two", new Tag2("two", 2));
@@ -684,7 +747,7 @@ public final class TestBlockEntityTests {
         var global = DataSyncCodec.get(Tag2.class);
         expect("registry.globalCodec", global != null, true);
         if (global != null) {
-            expect("registry.globalRoundTrip", global.dataReader.decode(global.dataWriter.encode(new Tag2("two", 2)), 0).value(), 2);
+            expect("registry.globalRoundTrip", global.decode(JavaValueOps.INSTANCE, global.encode(JavaValueOps.INSTANCE, new Tag2("two", 2))).value(), 2);
         }
 
         // Strategy levels: only the count differs → ALL sees a change, ITEM does not.

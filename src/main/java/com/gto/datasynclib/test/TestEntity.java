@@ -1,12 +1,12 @@
 package com.gto.datasynclib.test;
 
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.annotations.AdditionalHolder;
 import com.gto.datasynclib.annotations.RemoteCall;
 import com.gto.datasynclib.annotations.SaveToDisk;
 import com.gto.datasynclib.annotations.SyncToClient;
-import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.network.DataSyncNetwork;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.Entity;
@@ -22,7 +22,7 @@ import net.minecraft.world.level.Level;
  * <p>It wires:
  * <ul>
  *   <li><strong>Disk persistence</strong> — {@link #readAdditionalSaveData}/{@link #addAdditionalSaveData}
- *       forward to {@link FieldDataManager#readFromData}/{@link FieldDataManager#writeToData()}.</li>
+ *       forward to {@link FieldDataManager#readAllFromValue}/{@link FieldDataManager#writeAllToValue}.</li>
  *   <li><strong>Network sync</strong> — {@link #tick()} calls
  *       {@link DataSyncNetwork#syncEntityToClient(Entity, boolean)} on the server.</li>
  *   <li><strong>Nested sub-manager</strong> — a {@code @AdditionalHolder(childManager = true)} field
@@ -110,15 +110,15 @@ public class TestEntity extends Entity implements IFieldDataHolder {
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
         tag.putInt(DATA_VERSION_KEY, DATA_VERSION);
-        tag.putByteArray(DATA_KEY, getFieldDataManager().writeToData().writeToBytes());
+        tag.putByteArray(DATA_KEY, JavaValueOps.INSTANCE.toBytes(getFieldDataManager().writeToValue(JavaValueOps.INSTANCE)));
     }
 
     @Override
     public void readAdditionalSaveData(CompoundTag tag) {
         if (tag.contains(DATA_KEY)) {
-            getFieldDataManager().readFromData(
-                    Data.readData(tag.getByteArray(DATA_KEY)),
-                    tag.getInt(DATA_VERSION_KEY));
+            getFieldDataManager().readFromValue(
+                    JavaValueOps.INSTANCE.fromBytes(tag.getByteArray(DATA_KEY)),
+                    JavaValueOps.create(tag.getInt(DATA_VERSION_KEY)));
         }
     }
 }

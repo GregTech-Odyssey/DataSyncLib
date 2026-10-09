@@ -2,11 +2,10 @@ package com.gto.datasynclib.forge;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.ListData;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
-import com.gto.datasynclib.util.DataCodecs;
+import com.gto.datasynclib.util.ValueCodecs;
 import io.netty.buffer.ByteBufInputStream;
 import io.netty.buffer.ByteBufOutputStream;
 import net.minecraft.nbt.EndTag;
@@ -42,8 +41,8 @@ import java.util.BitSet;
  * update still ends up with the complete array.</p>
  *
  * <h3>Persistence format</h3>
- * <p>A {@link ListData} with one entry per slot (null slots become {@code NullData.INSTANCE}); the
- * list is suppressed ({@link NullData#NONE}) when every slot is null and {@code saveEmpty} is off,
+ * <p>A carrier list with one entry per slot (null slots become the carrier's null value); the
+ * list is suppressed ({@code NOT_PERSISTED}) when every slot is null and {@code saveEmpty} is off,
  * matching the other array accesses.</p>
  *
  * <h3>Change detection</h3>
@@ -60,6 +59,9 @@ import java.util.BitSet;
  * ({@code @SyncToClient(autoDetect = false)} plus {@code markFieldsForSync}), which still results in
  * a full payload because the framework cannot know which slot moved.</p>
  */
+
+import java.util.ArrayList;
+
 public final class TagSerializableArrayAccess extends AbstractFieldAccess<INBTSerializable[]> {
 
     /**
@@ -155,33 +157,34 @@ public final class TagSerializableArrayAccess extends AbstractFieldAccess<INBTSe
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, INBTSerializable @NotNull [] instance) {
-        var list = new ListData();
+    protected @NotNull Object doWriteValue(@NotNull Object source, INBTSerializable @NotNull [] instance, @NotNull ValueOps ops) {
+        var list = new ArrayList<Object>(instance.length);
         for (var element : instance) {
             var nbt = element == null ? null : element.serializeNBT();
-            if (nbt == null) {
-                list.addNull();
-            } else {
-                list.add(DataCodecs.TAG_CODEC.encode(nbt));
-            }
+            list.add(nbt == null ? ops.createNull() : ValueCodecs.TAG.encode(ops, nbt));
         }
-        if (definition.saveEmpty) return list;
-        for (var data : list) {
-            if (data != NullData.INSTANCE) return list;
+        if (definition.saveEmpty) return ops.createList(list);
+        for (var element : list) {
+            // the slots hold carrier values, so an absent one is the null value, never a Java null
+            if (!ops.isNull(element)) return ops.createList(list);
         }
-        return NullData.NONE;
+        return NOT_PERSISTED;
     }
 
     @Override
-    protected void doReadData(INBTSerializable @NotNull [] instance, @NotNull Data data, int dataVersion) {
-        var list = data.getList();
+    protected void doReadValue(INBTSerializable @NotNull [] instance, @NotNull Object data, @NotNull ValueOps ops) {
+        // an empty container was stored as the null value, which is a missing payload, not a failure
+        if (!ops.isList(data)) return;
+        var list = ops.getList(data);
         var length = Math.min(list.size(), instance.length);
         for (int i = 0; i < length; i++) {
-            var d = list.get(i);
-            if (d == NullData.INSTANCE) continue;
-            var element = instance[i];
-            if (element == null) continue;
-            element.deserializeNBT(DataCodecs.TAG_CODEC.decode(d, dataVersion));
+            var element = list.get(i);
+            if (ops.isNull(element)) continue;
+            var serializable = instance[i];
+            if (serializable == null) continue;
+            // the same codec the write side used: {link ValueCodecs#TAG} reads both this build's
+            // payload and the plain per-element tag an older one stored
+            serializable.deserializeNBT(ValueCodecs.TAG.decode(ops, element));
         }
     }
 }

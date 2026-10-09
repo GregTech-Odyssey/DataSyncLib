@@ -3,9 +3,8 @@ package com.gto.datasynclib.field.access.array;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.ListData;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import it.unimi.dsi.fastutil.Hash;
 import net.minecraft.network.FriendlyByteBuf;
@@ -46,6 +45,9 @@ import java.util.Arrays;
  *
  * <p>Null elements are encoded with a boolean prefix.</p>
  */
+
+import java.util.ArrayList;
+
 public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
 
     private final DataSyncCodec<T> elementCodec;
@@ -100,34 +102,31 @@ public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, T @NotNull [] instance) {
+    protected @NotNull Object doWriteValue(@NotNull Object source, T @NotNull [] instance, @NotNull ValueOps ops) {
         if (definition.hasDefaultValue() && Arrays.equals(instance, definition.getDefaultValue(source)))
-            return NullData.NONE;
-        var list = new ListData();
+            return NOT_PERSISTED;
+        var list = new ArrayList<Object>(instance.length);
         for (T element : instance) {
-            if (element != null) {
-                list.add(elementCodec.dataWriter.encode(element));
-            } else {
-                list.addNull();
-            }
+            list.add(ops.isNull(element) ? ops.createNull() : elementCodec.encode(ops, element));
         }
-        if (definition.saveEmpty) return list;
-        for (var data : list) {
-            if (data != NullData.INSTANCE) return list;
+        if (definition.saveEmpty) return ops.createList(list);
+        for (var element : list) {
+            // the slots hold carrier values, so an absent one is the null value, never a Java null
+            if (!ops.isNull(element)) return ops.createList(list);
         }
-        return NullData.NONE;
+        return NOT_PERSISTED;
     }
 
     @Override
-    protected void doReadData(T @NotNull [] instance, @NotNull Data data, int dataVersion) {
-        var list = data.getList();
+    protected void doReadValue(T @NotNull [] instance, @NotNull Object data, @NotNull ValueOps ops) {
+        var list = ops.getList(data);
         var length = Math.min(list.size(), instance.length);
         for (int i = 0; i < length; i++) {
             var element = list.get(i);
-            if (element != NullData.INSTANCE) {
-                instance[i] = elementCodec.dataReader.decode(element, dataVersion);
-            } else {
+            if (ops.isNull(element)) {
                 instance[i] = null;
+            } else {
+                instance[i] = elementCodec.decode(ops, element);
             }
         }
     }

@@ -1,9 +1,9 @@
 package com.gto.datasynclib.listener;
 
 import com.gto.datasynclib.IDataSerializable;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.IntData;
 import com.gto.datasynclib.util.holder.IntHolder;
 import lombok.Setter;
 import lombok.experimental.Accessors;
@@ -77,12 +77,12 @@ public final class IntNotifiableHolder extends IntHolder implements IDataSeriali
     }
 
     @Override
-    public Data writeData() {
-        return IntData.valueOf(value);
+    public @NotNull Object writeValue(@NotNull ValueOps ops) {
+        return value;
     }
 
     @Override
-    public void readData(@NotNull Data data, int dataVersion) {
-        value = data.getInt();
+    public void readValue(@NotNull Object data, @NotNull ValueOps ops) {
+        value = ops.getInt(data);
     }
 }

@@ -40,7 +40,7 @@ public @interface Access {
      * to be serialized/deserialized as a whole.
      *
      * <p>This also enables a legacy data version ({@code dataVersion == -1}) migration path
-     * in {@link com.gto.datasynclib.field.access.AbstractFieldAccess#readFromData}.</p>
+     * in {@link com.gto.datasynclib.field.access.AbstractFieldAccess#readFromValue}.</p>
      *
      * @return {@code true} if the instance itself should be persisted and restored,
      * {@code false} (default) if the instance always exists and only its

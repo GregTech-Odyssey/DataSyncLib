@@ -3,7 +3,8 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
@@ -56,12 +57,12 @@ public final class SerializableAccess extends AbstractFieldAccess<IDataSerializa
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull IDataSerializable instance) {
-        return instance.writeData();
+    protected @NotNull Object doWriteValue(@NotNull Object source, @NotNull IDataSerializable instance, @NotNull ValueOps ops) {
+        return instance.writeValue(ops);
     }
 
     @Override
-    protected void doReadData(@NotNull IDataSerializable instance, @NotNull Data data, int dataVersion) {
-        instance.readData(data, dataVersion);
+    protected void doReadValue(@NotNull IDataSerializable instance, @NotNull Object data, @NotNull ValueOps ops) {
+        instance.readValue(data, ops);
     }
 }

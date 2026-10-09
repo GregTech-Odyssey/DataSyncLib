@@ -2,9 +2,8 @@ package com.gto.datasynclib.field.access.array;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.IntArrayData;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import net.minecraft.network.FriendlyByteBuf;
 import org.apache.commons.lang3.ArrayUtils;
@@ -25,7 +24,7 @@ import java.util.Arrays;
  * Each element is written/read in order, overwriting the existing array contents in-place.</p>
  *
  * <h3>Persistence format:</h3>
- * <p>Writes as {@link com.gto.datasynclib.datastream.data.IntArrayData}. Skips writing
+ * <p>Writes as the carrier's {@code INT_ARRAY} value. Skips writing
  * if the array matches the configured default value. On read, uses
  * {@link System#arraycopy} to copy up to {@code min(dataLength, arrayLength)} elements,
  * safely handling length mismatches from data migration.</p>
@@ -66,16 +65,15 @@ public final class IntArrayAccess extends AbstractFieldAccess<int[]> {
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, int @NotNull [] instance) {
+    protected @NotNull Object doWriteValue(@NotNull Object source, int @NotNull [] instance, @NotNull ValueOps ops) {
         if (definition.hasDefaultValue() && Arrays.equals(instance, definition.getDefaultValue(source)))
-            return NullData.NONE;
-        return IntArrayData.valueOf(instance);
+            return NOT_PERSISTED;
+        return ops.createIntArray(instance);
     }
 
     @Override
-    protected void doReadData(int @NotNull [] instance, @NotNull Data data, int dataVersion) {
-        var list = data.getIntArray();
-        var length = Math.min(list.length, instance.length);
-        System.arraycopy(list, 0, instance, 0, length);
+    protected void doReadValue(int @NotNull [] instance, @NotNull Object data, @NotNull ValueOps ops) {
+        var array = ops.getIntArray(data);
+        System.arraycopy(array, 0, instance, 0, Math.min(array.length, instance.length));
     }
 }

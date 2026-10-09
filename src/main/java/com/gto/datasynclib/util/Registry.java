@@ -1,7 +1,8 @@
 package com.gto.datasynclib.util;
 
 import com.gto.datasynclib.DataSyncCodec;
-import com.gto.datasynclib.datastream.codec.DataCodec;
+import com.gto.datasynclib.datastream.codec.ValueCodec;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.datastream.codec.StreamCodec;
 import com.gto.datasynclib.util.holder.IntObjectHolder;
 import com.mojang.serialization.Codec;
@@ -32,8 +33,8 @@ import java.util.function.Function;
  * <h3>Serialization:</h3>
  * <ul>
  *   <li>{@link #streamCodec()} — encodes/decodes by integer ID (compact, for network)</li>
- *   <li>{@link #dataCodec()} — encodes/decodes by key (self-describing, for disk persistence).
- *       The key {@link DataCodec} is provided at construction time and the resulting
+ *   <li>{@link #valueCodec()} — encodes/decodes by key (self-describing, for disk persistence).
+ *       The key {@link ValueCodec} is provided at construction time and the resulting
  *       value codec is computed once and cached.</li>
  *   <li>{@link #codec(com.mojang.serialization.Codec)} — Mojang DFU codec via key xmap</li>
  * </ul>
@@ -56,7 +57,18 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
     protected final LinkedHashMap<K, V> keyValues = new LinkedHashMap<>();
     protected final IdMap<V, K> valueKeys = new IdMap<>();
     protected final ReferenceArrayList<V> idValues = new ReferenceArrayList<>();
-    protected final StreamCodec<FriendlyByteBuf, V> streamCodec = StreamCodec.of((buf, obj) -> buf.writeVarInt(valueKeys.get(obj).priority), buf -> idValues.get(buf.readVarInt()));
+    protected final StreamCodec<FriendlyByteBuf, V> streamCodec = new StreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf buf, V obj) {
+            buf.writeVarInt(valueKeys.get(obj).priority);
+        }
+
+        @Override
+        public V decode(FriendlyByteBuf buf) {
+            return idValues.get(buf.readVarInt());
+        }
+    };
 
     @Getter
     protected volatile boolean frozen = true;
@@ -69,17 +81,18 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
     protected final Function<? super V, ? extends K> keyGetter;
 
     /**
-     * Cached {@link DataCodec} for this registry's <em>values</em>, encoding by key via
-     * {@link #keyGetter}. Built once at construction time and reused by {@link #dataCodec()}.
+     * Cached {@link ValueCodec} for this registry's <em>values</em>, encoding by key via
+     * {@link #keyGetter}. Built once at construction time and reused by {@link #valueCodec()}: a
+     * value is stored as its registry key, which is self-describing and survives a game update.
      */
-    protected final DataCodec<V> dataCodec;
+    protected final ValueCodec<V> valueCodec;
 
     protected final DataSyncCodec<V> combinedCodec;
 
     /**
      * The concrete runtime class of this registry's values ({@code V}), when known.
      * When non-{@code null} and {@link #freeze()} completes, this registry's
-     * {@link #streamCodec()} + {@link #dataCodec()} are <em>automatically registered</em>
+     * {@link #streamCodec()} + {@link #valueCodec()} are <em>automatically registered</em>
      * into the global {@link DataSyncCodec} under this type, so any field of type
      * {@code V} can be serialized without manual codec registration.
      */
@@ -88,26 +101,39 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
 
     /**
      * Builds the global {@link DataSyncCodec} bridging this registry's
-     * {@link #streamCodec()} and {@link #dataCodec()}.
+     * {@link #streamCodec()} and {@link #valueCodec()}.
      */
     public final void registerToGlobalCodecs() {
         if (valueType == null) return;
-        DataSyncCodec.register(valueType, streamCodec(), dataCodec());
+        DataSyncCodec.register(valueType, streamCodec(), valueCodec());
     }
 
-    public Registry(String name, DataCodec<K> keyCodec, Function<? super V, ? extends K> keyGetter) {
+    public Registry(String name, ValueCodec<K> keyCodec, Function<? super V, ? extends K> keyGetter) {
         this(name, keyCodec, keyGetter, null);
     }
 
-    public Registry(String name, DataCodec<K> keyCodec, @Nullable Function<? super V, ? extends K> keyGetter, @Nullable Class<V> valueType) {
+    public Registry(String name, ValueCodec<K> keyCodec, @Nullable Function<? super V, ? extends K> keyGetter, @Nullable Class<V> valueType) {
         this.name = Objects.requireNonNull(name, "name");
         this.keyGetter = keyGetter == null ? this::getKeyByMap : keyGetter;
         Objects.requireNonNull(keyCodec, "keyCodec");
         this.valueType = valueType;
-        this.dataCodec = DataCodec.of(
-                obj -> keyCodec.encode(this.keyGetter.apply(obj)),
-                (data, dataVersion) -> keyValues.get(keyCodec.decode(data, dataVersion)));
-        this.combinedCodec = DataSyncCodec.of(streamCodec, dataCodec);
+        // a leaf codec on the path of every persisted registry field, so it is written directly:
+        // ValueCodec.of would put a second, interface-dispatched call behind each encode/decode
+        // the field, not the constructor parameter: only the field carries the null -> map fallback
+        var resolvedKeyGetter = this.keyGetter;
+        this.valueCodec = new ValueCodec<>() {
+
+            @Override
+            public Object encode(ValueOps ops, V value) {
+                return keyCodec.encode(ops, resolvedKeyGetter.apply(value));
+            }
+
+            @Override
+            public V decode(ValueOps ops, Object data) {
+                return keyValues.get(keyCodec.decode(ops, data));
+            }
+        };
+        this.combinedCodec = DataSyncCodec.of(streamCodec, this.valueCodec);
     }
 
     @SuppressWarnings("BooleanMethodIsAlwaysInverted")
@@ -129,7 +155,7 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
             throw new IllegalStateException("Registry %s cannot be set to frozen state in current context!".formatted(name));
         frozen = true;
         build();
-        // Auto-register this registry's stream + data codecs into the global DataSyncCodec
+        // Auto-register this registry's stream and disk codecs into the global DataSyncCodec
         // when the value runtime type is known, so fields of type V serialize via this registry.
         if (valueType != null) registerToGlobalCodecs();
     }
@@ -303,14 +329,14 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
     }
 
     /**
-     * Returns the cached {@link DataCodec} built at construction time, encoding/decoding by key
+     * Returns the cached {@link ValueCodec} built at construction time, encoding/decoding by key
      * via {@link #keyGetter}. Values are encoded as their registry key (self-describing, for disk
      * persistence); decoding looks the value back up by key from {@link #keyValues}.
      *
-     * @return the cached value-level {@link DataCodec}
+     * @return the cached value-level {@link ValueCodec}
      */
-    public final DataCodec<V> dataCodec() {
-        return dataCodec;
+    public final ValueCodec<V> valueCodec() {
+        return valueCodec;
     }
 
     /**
@@ -323,8 +349,8 @@ public class Registry<K extends Comparable<K>, V> implements Iterable<V> {
 
     /**
      * @return the combined (stream + data) codec, created once at construction time; equals
-     * {@link DataSyncCodec#of(StreamCodec, DataCodec)} of {@link #streamCodec()} and
-     * {@link #dataCodec()}
+     * {@link DataSyncCodec#of(StreamCodec, ValueCodec)} of {@link #streamCodec()} and
+     * {@link #valueCodec()}
      */
     public final DataSyncCodec<V> combinedCodec() {
         return combinedCodec;

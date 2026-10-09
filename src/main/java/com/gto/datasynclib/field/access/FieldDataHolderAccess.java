@@ -3,7 +3,8 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
@@ -62,12 +63,12 @@ public final class FieldDataHolderAccess extends AbstractFieldAccess<IFieldDataH
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull IFieldDataHolder instance) {
-        return instance.getFieldDataManager().writeToData();
+    protected @NotNull Object doWriteValue(@NotNull Object source, @NotNull IFieldDataHolder instance, @NotNull ValueOps ops) {
+        return instance.getFieldDataManager().writeToValue(ops);
     }
 
     @Override
-    protected void doReadData(@NotNull IFieldDataHolder instance, @NotNull Data data, int dataVersion) {
-        instance.getFieldDataManager().readFromData(data, dataVersion);
+    protected void doReadValue(@NotNull IFieldDataHolder instance, @NotNull Object data, @NotNull ValueOps ops) {
+        instance.getFieldDataManager().readFromValue(data, ops);
     }
 }

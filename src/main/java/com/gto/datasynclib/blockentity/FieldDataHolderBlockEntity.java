@@ -1,10 +1,11 @@
 package com.gto.datasynclib.blockentity;
 
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LazyFieldDataManager;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.ByteArrayTag;
 import net.minecraft.nbt.CompoundTag;
@@ -51,7 +52,7 @@ import org.jetbrains.annotations.NotNull;
  * <h3>Data version ({@link #VERSION}):</h3>
  * <p>Whatever {@link #VERSION} holds when the chunk is saved is written to the NBT key
  * {@code "field_data_dataVersion"} and handed back to
- * {@link FieldDataManager#readFromData(com.gto.datasynclib.datastream.data.Data, int)} on
+ * {@link FieldDataManager#readFromValue(Object, ValueOps)} on
  * load, where it can drive migration. Raise it when the meaning or layout of persisted
  * fields changes.</p>
  *
@@ -118,7 +119,7 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
      *       {@link LogicalSide#CLIENT}) and {@code "field_save"} is ignored entirely —
      *       including {@code "field_data_dataVersion"}</li>
      *   <li>Otherwise, if {@code "field_save"} byte array is present, the data is
-     *       treated as a full disk load (via {@link FieldDataManager#readFromData}
+     *       treated as a full disk load (via {@link FieldDataManager#readAllFromValue(Object, ValueOps)}
      *       with the version from {@code "field_data_dataVersion"})</li>
      * </ol>
      *
@@ -131,7 +132,8 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
             getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, byteArrayTag.getAsByteArray());
         } else {
             if (tag.get("field_save") instanceof ByteArrayTag byteArrayTag) {
-                getFieldDataManager().readFromData(Data.readData(byteArrayTag.getAsByteArray()), tag.getInt("field_data_dataVersion"));
+                getFieldDataManager().readFromValue(JavaValueOps.INSTANCE.fromBytes(byteArrayTag.getAsByteArray()),
+                        JavaValueOps.create(tag.getInt("field_data_dataVersion")));
             }
         }
     }
@@ -141,10 +143,10 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
      *
      * <p>Writes the current {@link #VERSION} under {@code "field_data_dataVersion"}
      * and all {@code @SaveToDisk} fields as a byte array under {@code "field_save"}
-     * (via {@link FieldDataManager#writeToData()}).</p>
+     * (via {@link FieldDataManager#writeToValue(ValueOps)}).</p>
      *
      * <p>Only fields annotated with {@code @SaveToDisk} are included. Use
-     * {@link FieldDataManager#writeAllToData()} if you need all managed fields.</p>
+     * {@link FieldDataManager#writeAllToValue(ValueOps)} ()} if you need all managed fields.</p>
      *
      * @param tag the NBT compound tag to save into
      */
@@ -152,7 +154,7 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
     protected void saveAdditional(@NotNull CompoundTag tag) {
         super.saveAdditional(tag);
         tag.putInt("field_data_dataVersion", VERSION);
-        tag.putByteArray("field_save", getFieldDataManager().writeToData().writeToBytes());
+        tag.putByteArray("field_save", JavaValueOps.INSTANCE.toBytes(getFieldDataManager().writeToValue(JavaValueOps.INSTANCE)));
     }
 
 

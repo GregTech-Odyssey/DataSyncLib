@@ -2,10 +2,10 @@ package com.gto.datasynclib.forge;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
-import com.gto.datasynclib.util.DataCodecs;
+import com.gto.datasynclib.util.ValueCodecs;
 import io.netty.buffer.ByteBufInputStream;
 import io.netty.buffer.ByteBufOutputStream;
 import net.minecraft.nbt.EndTag;
@@ -30,8 +30,8 @@ import java.io.IOException;
  * loaded with {@link NbtAccounter#UNLIMITED}.</p>
  *
  * <h3>Persistence format</h3>
- * <p>The tag goes through {@link DataCodecs#TAG_CODEC}; a null tag is written as
- * {@link NullData#INSTANCE} and read back as a no-op.</p>
+ * <p>The tag goes through {@link ValueCodecs#TAG}; a null tag is written as
+ * the carrier's null value and read back as a no-op.</p>
  *
  * <h3>Change detection</h3>
  * <p>A single cached hash of the serialized tag ({@link Tag#hashCode()} of a tag is deep, i.e. a
@@ -90,19 +90,18 @@ public final class TagSerializableAccess extends AbstractFieldAccess<INBTSeriali
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull INBTSerializable instance) {
+    protected @NotNull Object doWriteValue(@NotNull Object source, @NotNull INBTSerializable instance, @NotNull ValueOps ops) {
         var nbt = instance.serializeNBT();
         if (nbt == null) {
-            return NullData.INSTANCE;
+            return ops.createNull();
         } else {
-            return DataCodecs.TAG_CODEC.encode(nbt);
+            return ValueCodecs.TAG.encode(ops, nbt);
         }
     }
 
     @Override
-    protected void doReadData(@NotNull INBTSerializable instance, @NotNull Data data, int dataVersion) {
-        if (data.isNull()) return;
-        var nbt = DataCodecs.TAG_CODEC.decode(data, dataVersion);
-        instance.deserializeNBT(nbt);
+    protected void doReadValue(@NotNull INBTSerializable instance, @NotNull Object data, @NotNull ValueOps ops) {
+        if (ops.isNull(data)) return;
+        instance.deserializeNBT(ValueCodecs.TAG.decode(ops, data));
     }
 }

@@ -1,10 +1,10 @@
 package com.gto.datasynclib;
 
 import com.gto.datasynclib.annotations.*;
-import com.gto.datasynclib.datastream.codec.ByteStreamCodec;
-import com.gto.datasynclib.datastream.codec.DataCodec;
+import com.gto.datasynclib.datastream.codec.ByteBufCodecs;
+import com.gto.datasynclib.datastream.codec.ValueOps;
+import com.gto.datasynclib.datastream.codec.ValueCodec;
 import com.gto.datasynclib.datastream.codec.StreamCodec;
-import com.gto.datasynclib.datastream.data.Data;
 import com.gto.datasynclib.util.ReflectUtil;
 import it.unimi.dsi.fastutil.Hash;
 import lombok.Getter;
@@ -48,9 +48,13 @@ final class FieldAnnotationMetadata {
     private final Method syncToServerSkipWhen;
     private final Hash.Strategy strategy;
     private final StreamCodec streamCodec;
-    private final DataCodec dataCodec;
-    private final Method writeToData;
-    private final Method readFromData;
+    /**
+     * The {@code @Codec(saveCodec = "...")} static field, seen as a value codec — the persistence
+     * half of a codec declared on the field. {@code null} when the field declares none.
+     */
+    private final ValueCodec valueCodec;
+    private final Method writeToValue;
+    private final Method readFromValue;
     private final Method writeToBuffer;
     private final Method readFromBuffer;
     private final boolean scheduleClientUpdate;
@@ -89,7 +93,7 @@ final class FieldAnnotationMetadata {
         // Load listener: resolved with the field's exact declared type (same rule as `skipWhen`),
         // i.e. a non-static method on the declaring class taking the field type as its only
         // parameter. Stored as a Method here and turned into a MethodHandle by
-        // DataFieldDefinition; the readFromData implementations invoke it after a disk load.
+        // DataFieldDefinition; the readFromValue implementations invoke it after a disk load.
         if (saveToDisk != null && !saveToDisk.listener().isEmpty()) {
             var method = ReflectUtil.getAccessibleMethod(clazz, saveToDisk.listener(), type);
             method.setAccessible(true);
@@ -153,24 +157,27 @@ final class FieldAnnotationMetadata {
 
         var codec = field.getAnnotation(Codec.class);
         if (codec == null) {
-            this.dataCodec = null;
+            this.valueCodec = null;
             this.streamCodec = null;
-            this.writeToData = null;
-            this.readFromData = null;
+            this.writeToValue = null;
+            this.readFromValue = null;
             this.writeToBuffer = null;
             this.readFromBuffer = null;
         } else {
             if (codec.saveCodec().isEmpty()) {
-                if (!codec.writeToData().isEmpty()) {
-                    var m = ReflectUtil.getAccessibleMethod(clazz, codec.writeToData(), type);
+                if (!codec.writeToValue().isEmpty()) {
+                    // the hooks take no source argument: the declaring instance is the handle's
+                    // receiver, exactly as the retired Data-era shape worked. The carrier is the
+                    // ValueOps interface the annotation documents; JavaValueOps is one carrier
+                    var m = ReflectUtil.getAccessibleMethod(clazz, codec.writeToValue(), ValueOps.class, type);
                     m.setAccessible(true);
-                    this.writeToData = m;
-                    m = ReflectUtil.getAccessibleMethod(clazz, codec.readFromData(), Data.class, int.class);
+                    this.writeToValue = m;
+                    m = ReflectUtil.getAccessibleMethod(clazz, codec.readFromValue(), ValueOps.class, Object.class);
                     m.setAccessible(true);
-                    this.readFromData = m;
+                    this.readFromValue = m;
                 } else {
-                    this.writeToData = null;
-                    this.readFromData = null;
+                    this.writeToValue = null;
+                    this.readFromValue = null;
                 }
                 if (!codec.writeToBuffer().isEmpty()) {
                     var m = ReflectUtil.getAccessibleMethod(clazz, codec.writeToBuffer(), FriendlyByteBuf.class, type);
@@ -183,22 +190,23 @@ final class FieldAnnotationMetadata {
                     this.writeToBuffer = null;
                     this.readFromBuffer = null;
                 }
-                this.dataCodec = null;
+                this.valueCodec = null;
                 this.streamCodec = null;
             } else {
                 try {
                     var f = clazz.getDeclaredField(codec.saveCodec());
                     f.setAccessible(true);
-                    this.dataCodec = (DataCodec) f.get(null);
+                    this.valueCodec = (ValueCodec) f.get(null);
                     if (!codec.syncCodec().isEmpty()) {
                         f = clazz.getDeclaredField(codec.syncCodec());
                         f.setAccessible(true);
                         this.streamCodec = (StreamCodec) f.get(null);
                     } else {
-                        this.streamCodec = ByteStreamCodec.of(dataCodec);
+                        // the network half is then the same id+payload bytes, inline
+                        this.streamCodec = ByteBufCodecs.fromValueCodec(valueCodec);
                     }
-                    this.writeToData = null;
-                    this.readFromData = null;
+                    this.writeToValue = null;
+                    this.readFromValue = null;
                     this.writeToBuffer = null;
                     this.readFromBuffer = null;
                 } catch (NoSuchFieldException | IllegalAccessException e) {
@@ -221,6 +229,6 @@ final class FieldAnnotationMetadata {
     }
 
     boolean hasCustomCodec() {
-        return dataCodec != null || streamCodec != null || writeToData != null || writeToBuffer != null;
+        return valueCodec != null || streamCodec != null || writeToValue != null || writeToBuffer != null;
     }
 }

@@ -54,7 +54,7 @@ import java.util.Comparator;
  * object's flattened holder tree ({@link RemoteRouting}, {@code 0} being that object itself) and the
  * method's index in the target class's wire table — followed by the arguments, written with the
  * parameters' <strong>{@link StreamCodec}</strong> halves, exactly like the sync path writes its
- * fields. A call therefore carries no {@code Data} objects, no per-value type tag (the persistence
+ * fields. A call therefore carries no intermediate value objects, no per-value type tag (the persistence
  * format's cost) and no name string, only the arguments themselves; a reference argument is preceded by
  * a present/absent boolean so {@code null} needs no tag either. The prefix leads the payload so the
  * receiving side can pick the target without touching the arguments, and the whole payload is decoded

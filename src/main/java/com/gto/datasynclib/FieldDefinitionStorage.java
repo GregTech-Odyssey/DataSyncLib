@@ -16,7 +16,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.function.*;
 
@@ -296,7 +296,7 @@ public final class FieldDefinitionStorage {
     }
 
     final Reference2ReferenceOpenHashMap<Class<?>, List<DataFieldDefinition<?>>> typeDefinitions = new Reference2ReferenceOpenHashMap<>();
-    final LinkedHashMap<String, DataFieldDefinition<?>> definitionMap;
+    final HashMap<String, DataFieldDefinition<?>> definitionMap;
     final DataFieldDefinition<?>[] allDefinitions;
     final DataFieldDefinition<?>[] saveDefinitions;
     final DataFieldDefinition<?>[] syncToClientDefinitions;
@@ -304,7 +304,7 @@ public final class FieldDefinitionStorage {
 
     private FieldDefinitionStorage(ArrayList<DataFieldDefinition<?>> fields) {
         fields.sort(DataFieldDefinition.COMPARATOR);
-        definitionMap = new LinkedHashMap<>(fields.size());
+        definitionMap = new HashMap<>(fields.size());
         var saveList = new ArrayList<DataFieldDefinition<?>>();
         var syncToClientList = new ArrayList<DataFieldDefinition<?>>();
         var syncToServerList = new ArrayList<DataFieldDefinition<?>>();
@@ -339,7 +339,7 @@ public final class FieldDefinitionStorage {
     }
 
     private FieldDefinitionStorage() {
-        definitionMap = new LinkedHashMap<>(0);
+        definitionMap = new HashMap<>(0);
         allDefinitions = new DataFieldDefinition[0];
         saveDefinitions = new DataFieldDefinition[0];
         syncToClientDefinitions = new DataFieldDefinition[0];

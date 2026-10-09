@@ -2,9 +2,8 @@ package com.gto.datasynclib.field.access.array;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.IntArrayData;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import net.minecraft.network.FriendlyByteBuf;
 import org.apache.commons.lang3.ArrayUtils;
@@ -67,16 +66,15 @@ public final class FloatArrayAccess extends AbstractFieldAccess<float[]> {
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, float @NotNull [] instance) {
+    protected @NotNull Object doWriteValue(@NotNull Object source, float @NotNull [] instance, @NotNull ValueOps ops) {
         if (definition.hasDefaultValue() && Arrays.equals(instance, definition.getDefaultValue(source)))
-            return NullData.NONE;
-        return Data.valueOf(instance);
+            return NOT_PERSISTED;
+        return ops.createFloatArray(instance);
     }
 
     @Override
-    protected void doReadData(float @NotNull [] instance, @NotNull Data data, int dataVersion) {
-        var list = data.getFloatArray();
-        var length = Math.min(list.length, instance.length);
-        System.arraycopy(list, 0, instance, 0, length);
+    protected void doReadValue(float @NotNull [] instance, @NotNull Object data, @NotNull ValueOps ops) {
+        var array = ops.getFloatArray(data);
+        System.arraycopy(array, 0, instance, 0, Math.min(array.length, instance.length));
     }
 }

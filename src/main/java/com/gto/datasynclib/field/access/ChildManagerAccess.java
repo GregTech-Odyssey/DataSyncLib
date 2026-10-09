@@ -4,8 +4,8 @@ import com.gto.datasynclib.ChildFieldDataHolder;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -121,16 +121,16 @@ public final class ChildManagerAccess<T> extends AbstractFieldAccess<T> {
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull T instance) {
+    protected @NotNull Object doWriteValue(@NotNull Object source, @NotNull T instance, @NotNull ValueOps ops) {
         var holder = asHolder(instance);
-        if (holder == null) return NullData.INSTANCE;
-        return holder.getFieldDataManager().writeToData();
+        if (holder == null) return ops.createNull();
+        return holder.getFieldDataManager().writeToValue(ops);
     }
 
     @Override
-    protected void doReadData(@NotNull T instance, @NotNull Data data, int dataVersion) {
+    protected void doReadValue(@NotNull T instance, @NotNull Object data, @NotNull ValueOps ops) {
         var holder = asHolder(instance);
         if (holder == null) return;
-        holder.getFieldDataManager().readFromData(data, dataVersion);
+        holder.getFieldDataManager().readFromValue(data, ops);
     }
 }

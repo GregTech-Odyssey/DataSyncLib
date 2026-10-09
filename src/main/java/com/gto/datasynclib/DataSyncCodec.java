@@ -1,11 +1,10 @@
 package com.gto.datasynclib;
 
 import com.gto.datasynclib.datastream.codec.*;
-import com.gto.datasynclib.datastream.data.*;
-import com.gto.datasynclib.util.DataCodecs;
 import com.gto.datasynclib.util.EnumUtil;
 import com.gto.datasynclib.util.HashUtil;
-import com.gto.datasynclib.util.StreamCodecs;
+import com.gto.datasynclib.util.StreamCodecExtends;
+import com.gto.datasynclib.util.ValueCodecs;
 import com.mojang.serialization.Codec;
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.ints.IntSet;
@@ -45,17 +44,21 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Array;
+import java.util.ArrayList;
 import java.math.BigInteger;
 import java.util.HashMap;
 import java.util.UUID;
 
 /**
- * Unified codec registry that pairs network stream codecs with persistent data codecs.
+ * Unified codec registry that pairs network stream codecs with persistent value codecs.
  *
- * <p>Each {@code DataSyncCodec} combines four functional components:
+ * <p>Each {@code DataSyncCodec} combines three functional components:
  * <ul>
  *   <li>{@link #streamWriter} / {@link #streamReader} — for live network synchronization via {@link FriendlyByteBuf}</li>
- *   <li>{@link #dataWriter} / {@link #dataReader} — for persistent storage via {@link com.gto.datasynclib.datastream.data.Data Data} objects</li>
+ *   <li>{@link #valueWriter} / {@link #valueReader} — for persistent storage on the native carrier, which
+ *       {@link com.gto.datasynclib.datastream.codec.JavaValueOps#toBytes(Object)} turns into the id+payload
+ *       bytes a save file holds</li>
+ *
  * </ul>
  *
  * <p>The registry supports both direct type-to-codec mappings ({@link #CODECS}) and
@@ -64,7 +67,7 @@ import java.util.UUID;
  * {@link #ENUM_CACHE} and {@link #ARRAY_CACHE}.
  *
  * <p>Pre-registered codecs cover Java primitives and their arrays, String, UUID, BigInteger,
- * the {@code Data}/{@code StringMapData} types themselves, the FastUtil {@code IntList}/{@code IntSet}/
+ * the FastUtil {@code IntList}/{@code IntSet}/
  * {@code LongList}/{@code LongSet} collections, and Minecraft types: Item, Block,
  * Fluid, EntityType, BlockEntityType, MobEffect, Enchantment, SoundEvent, Attribute,
  * ParticleType, MenuType, RecipeType, ItemStack, FluidStack, ResourceLocation, Vec2, Vec3,
@@ -73,14 +76,19 @@ import java.util.UUID;
  * primitive keys ({@code int.class} and friends), which {@link #init()} adds during mod
  * construction.</p>
  *
+ * <p>Every disk half is a {@link ValueCodec} — {@link ValueCodecs} holds the constants, and they write
+ * exactly the bytes the retired Data type system wrote, so a save from before the migration still
+ * reads.</p>
+ *
  * <p>Types whose payload is a handful of primitives (Vec3i, SectionPos, AABB) use hand-written
  * codec pairs instead of {@link CombinedCodec#composite} to avoid boxing; the FastUtil primitive
  * collections are hand-written for the same reason — a {@code collection(...)} codec would box every
  * element. See that method for the trade-off.</p>
  *
  * <p>Downstream mods add their own types with the static {@code register(...)} family —
- * {@link #register(Class, StreamCodec, DataCodec)} for a plain runtime type,
- * {@link #register(Class, StreamCodec, DataCodec, Class[])} for a parameterized one, and
+ * {@link #register(Class, StreamCodec, ValueCodec)} for a plain runtime type,
+ * {@link #register(Class, ValueCodec)} for one whose network form is the same bytes,
+ * {@link #register(Class, StreamCodec, ValueCodec)} for a plain runtime type and
  * {@link #register(Class, Registry)} for registry entries. Register during mod construction:
  * the field-definition layer caches the resolved factory per field type, so a registration that
  * arrives after that type was first scanned can be shadowed, and the tables are only
@@ -105,18 +113,35 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
                 var constants = t.getEnumConstants();
                 var len = constants.length;
                 var isFixed = EnumUtil.isFixed((Class<? extends Enum<?>>) t);
-                return new DataSyncCodec<>((buf, obj) -> buf.writeVarInt(obj.ordinal()),
-                        buf -> (Enum<?>) constants[buf.readVarInt()],
-                        obj -> {
-                            if (isFixed) return IntData.valueOf(obj.ordinal());
-                            return StringData.valueOf(EnumUtil.getSerializedName(obj));
-                        },
-                        (data, dataVersion) -> {
-                            if (data instanceof IntData(int value)) {
-                                if (value < len) return (Enum<?>) constants[value];
-                                return null;
+                return of(new StreamCodec<>() {
+
+                              @Override
+                              public void encode(FriendlyByteBuf buf, Enum<?> obj) {
+                                  buf.writeVarInt(obj.ordinal());
+                              }
+
+                              @Override
+                              public Enum<?> decode(FriendlyByteBuf buf) {
+                                  return (Enum<?>) constants[buf.readVarInt()];
+                              }
+                          },
+                        new ValueCodec<Enum<?>>() {
+
+                            @Override
+                            public Object encode(ValueOps ops, Enum<?> value) {
+                                // a fixed enum is stored by ordinal, the others by name, so an update
+                                // that reorders the constants only breaks the fixed ones
+                                return isFixed ? ops.createInt(value.ordinal()) : ops.createString(EnumUtil.getSerializedName(value));
                             }
-                            return EnumUtil.getSerializedEnum((Class) t, data.getString());
+
+                            @Override
+                            public Enum<?> decode(ValueOps ops, Object data) {
+                                if (ops.isInt(data)) {
+                                    var value = ops.getInt(data);
+                                    return value < len ? (Enum<?>) constants[value] : null;
+                                }
+                                return EnumUtil.getSerializedEnum((Class) t, ops.getString(data));
+                            }
                         });
             }
             throw new RuntimeException("No codec registered for type " + t);
@@ -126,6 +151,13 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     /**
      * Auto-generated codecs for object (non-primitive) arrays. A {@link ClassValue} for the same
      * reason as {@link #ENUM_CACHE}.
+     *
+     * <p>The stored payload is a list of the element payloads, with an empty (absent) slot kept as
+     * the carrier's null value. On the way back a payload that is not a list — the null value an
+     * older writer left for an empty array, or a slot no version ever wrote — decodes to a
+     * zero-length array and a null-valued element decodes to a {@code null} slot, so an array with
+     * empty slots reads back as it was written. The element codec is therefore never handed a value
+     * it was not written for.</p>
      */
     private static final ClassValue<DataSyncCodec<?>> ARRAY_CACHE = new ClassValue<>() {
         @Override
@@ -138,50 +170,66 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
                 // an explicit type witness would pick the varargs get(Class, Class...) overload and
                 // silently return null.
                 DataSyncCodec<Object> codec = (DataSyncCodec<Object>) DataSyncCodec.get(type);
-                return new DataSyncCodec<>(
-                        (buf, obj) -> {
-                            buf.writeVarInt(obj.length);
-                            var encoder = codec.streamWriter;
-                            for (var element : obj) {
-                                if (element == null) {
-                                    buf.writeBoolean(false);
-                                } else {
-                                    buf.writeBoolean(true);
-                                    encoder.encode(buf, element);
+                return of(new StreamCodec<>() {
+
+                              @Override
+                              public void encode(FriendlyByteBuf buf, Object[] obj) {
+                                  buf.writeVarInt(obj.length);
+                                  var encoder = codec.streamWriter;
+                                  for (var element : obj) {
+                                      if (element == null) {
+                                          buf.writeBoolean(false);
+                                      } else {
+                                          buf.writeBoolean(true);
+                                          encoder.encode(buf, element);
+                                      }
+                                  }
+                              }
+
+                              @Override
+                              public Object[] decode(FriendlyByteBuf buf) {
+                                  var decoder = codec.streamReader;
+                                  var length = buf.readVarInt();
+                                  var array = (Object[]) Array.newInstance(type, length);
+                                  for (int i = 0; i < length; i++) {
+                                      if (buf.readBoolean()) array[i] = decoder.decode(buf);
+                                  }
+                                  return array;
+                              }
+                          },
+                        new ValueCodec<Object[]>() {
+
+                            @Override
+                            public Object encode(ValueOps ops, Object[] value) {
+                                // an empty array is an empty list, never the null value: that is the
+                                // shape the retired type system stored, and it keeps a zero-length
+                                // array round-tripping instead of collapsing into "absent"
+                                var list = new ArrayList<Object>(value.length);
+                                for (var element : value) {
+                                    list.add(ops.isNull(element) ? ops.createNull() : codec.encode(ops, element));
                                 }
+                                return ops.createList(list);
                             }
-                        },
-                        buf -> {
-                            var decoder = codec.streamReader;
-                            var length = buf.readVarInt();
-                            var array = (Object[]) Array.newInstance(type, length);
-                            for (int i = 0; i < length; i++) {
-                                if (buf.readBoolean()) array[i] = decoder.decode(buf);
-                            }
-                            return array;
-                        },
-                        obj -> {
-                            if (obj.length == 0) return NullData.INSTANCE;
-                            var encoder = codec.dataWriter;
-                            var list = new ListData();
-                            for (Object element : obj) {
-                                if (element != null) {
-                                    list.add(encoder.encode(element));
-                                } else {
-                                    list.addNull();
+
+                            @Override
+                            public Object[] decode(ValueOps ops, Object data) {
+                                // a stored value that is absent (or is not a list at all — a payload
+                                // written before the migration can hold either) is a zero-length
+                                // array, the same answer the retired array codec gave, so no old
+                                // save can fail here
+                                if (!ops.isList(data)) return (Object[]) Array.newInstance(type, 0);
+                                var list = ops.getList(data);
+                                var size = list.size();
+                                var array = (Object[]) Array.newInstance(type, size);
+                                for (int i = 0; i < size; i++) {
+                                    var element = list.get(i);
+                                    // a slot the writer left empty decodes back to a null slot rather
+                                    // than being handed to the element codec, which was never written
+                                    // for a value that is not there
+                                    array[i] = ops.isNull(element) ? null : codec.decode(ops, element);
                                 }
+                                return array;
                             }
-                            return list;
-                        },
-                        (data, dataVersion) -> {
-                            var decoder = codec.dataReader;
-                            var list = data.getList();
-                            var size = list.size();
-                            var array = (Object[]) Array.newInstance(type, size);
-                            for (int i = 0; i < size; i++) {
-                                array[i] = decoder.decode(list.get(i), dataVersion);
-                            }
-                            return array;
                         });
             }
             throw new RuntimeException("No codec registered for type " + t);
@@ -197,26 +245,37 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
      */
     public final StreamDecoder<? super FriendlyByteBuf, ? extends T> streamReader;
     /**
-     * Encoder for persistent storage via {@link com.gto.datasynclib.datastream.data.Data Data} objects.
+     * Encoder for persistent storage, on the native carrier: what this writes is what
+     * {@link ValueOps#writeValue(Object, ByteBuf)} stores as the field's id and payload.
      */
-    public final DataEncoder<? super T> dataWriter;
+    public final ValueEncoder<? super T> valueWriter;
     /**
-     * Decoder for persistent storage via {@link com.gto.datasynclib.datastream.data.Data Data} objects.
+     * Decoder for persistent storage, on the native carrier.
      */
-    public final DataDecoder<? extends T> dataReader;
+    public final ValueDecoder<? extends T> valueReader;
+    /**
+     * The disk codec this was built from, so {@link #toValueCodec()} can hand it back untouched;
+     * {@code null} when the disk half is the pair of writers above.
+     */
+    @Nullable
+    private final ValueCodec<T> valueCodec;
 
-    private DataSyncCodec(StreamEncoder<? super FriendlyByteBuf, ? super T> streamWriter, StreamDecoder<? super FriendlyByteBuf, ? extends T> streamReader, DataEncoder<? super T> dataWriter, DataDecoder<? extends T> dataReader) {
+    private DataSyncCodec(StreamEncoder<? super FriendlyByteBuf, ? super T> streamWriter,
+                          StreamDecoder<? super FriendlyByteBuf, ? extends T> streamReader,
+                          ValueEncoder<? super T> valueWriter,
+                          ValueDecoder<? extends T> valueReader,
+                          @Nullable ValueCodec<T> valueCodec) {
         this.streamWriter = streamWriter;
         this.streamReader = streamReader;
-        this.dataWriter = dataWriter;
-        this.dataReader = dataReader;
+        this.valueWriter = valueWriter;
+        this.valueReader = valueReader;
+        this.valueCodec = valueCodec;
     }
 
     @Override
-    @SuppressWarnings("unchecked")
-    public DataCodec<T> toDataCodec() {
-        // dataWriter == dataReader means the same DataCodec was supplied (with matching type); return it directly.
-        return dataWriter == dataReader ? (DataCodec<T>) dataWriter : this;
+    public ValueCodec<T> toValueCodec() {
+        // a ValueCodec that was supplied is the disk half itself, so hand it back rather than this
+        return valueCodec != null ? valueCodec : this;
     }
 
     @Override
@@ -247,73 +306,48 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
         return streamReader.decode(buf);
     }
 
-    // ===== DataCodec implementation =====
+    // ===== ValueCodec implementation — the persistence half =====
 
     @Override
-    public @NotNull Data encode(T obj) {
-        return dataWriter.encode(obj);
+    public Object encode(ValueOps ops, T obj) {
+        return valueWriter.encode(ops, obj);
     }
 
     @Override
-    public T decode(@NotNull Data data, int dataVersion) {
-        return dataReader.decode(data, dataVersion);
+    public T decode(ValueOps ops, Object data) {
+        return valueReader.decode(ops, data);
     }
 
-    /**
-     * Creates a codec from <strong>separate</strong> stream and data encoder/decoder components.
-     *
-     * <p>This is the most flexible factory — use it when the network and persistence
-     * formats differ (e.g., registry entries use integer IDs on the wire but string keys
-     * on disk). Each component is independent: the stream writer/reader work with
-     * {@link FriendlyByteBuf}, and the data writer/reader work with {@link com.gto.datasynclib.datastream.data.Data Data}.</p>
-     *
-     * @param streamWriter encodes to network buffer
-     * @param streamReader decodes from network buffer
-     * @param dataWriter   encodes to persistent Data
-     * @param dataReader   decodes from persistent Data
-     */
-    public static <T> DataSyncCodec<T> of(StreamEncoder<? super FriendlyByteBuf, ? super T> streamWriter, StreamDecoder<? super FriendlyByteBuf, ? extends T> streamReader, DataEncoder<? super T> dataWriter, DataDecoder<? extends T> dataReader) {
-        return new DataSyncCodec<>(streamWriter, streamReader, dataWriter, dataReader);
-    }
 
     /**
-     * Creates a codec from separate stream and data codecs (each implementing both
-     * encode and decode for its respective medium).
-     *
-     * <p>Use when you have distinct optimized codecs for network and persistence.
-     * If both paths use the same codec, use {@link #of(StreamCodec)} or
-     * {@link #of(DataCodec)} instead.</p>
+     * Creates a codec from a network codec and a disk codec — the pair every combined codec is built
+     * on: {@link #streamWriter}/{@link #streamReader} for the wire, {@link #valueWriter}/{@link #valueReader}
+     * for the id+payload bytes a save file holds.
      *
      * @param streamCodec bidirectional network serializer
-     * @param dataCodec   bidirectional persistence serializer
+     * @param valueCodec  bidirectional persistence serializer
      */
-    public static <T> DataSyncCodec<T> of(StreamCodec<? super FriendlyByteBuf, T> streamCodec, DataCodec<T> dataCodec) {
-        return new DataSyncCodec<>(streamCodec, streamCodec, dataCodec, dataCodec);
+    public static <T> DataSyncCodec<T> of(StreamCodec<? super FriendlyByteBuf, T> streamCodec, ValueCodec<T> valueCodec) {
+        return new DataSyncCodec<>(streamCodec, streamCodec, valueCodec, valueCodec, valueCodec);
     }
 
     /**
-     * Creates a codec from a network stream codec, <strong>automatically deriving</strong>
-     * the data codec by serializing to/from byte arrays via {@link com.gto.datasynclib.datastream.data.Data#writeData Data.writeData}
-     * / {@link com.gto.datasynclib.datastream.data.Data#readData Data.readData}.
+     * Creates a codec from a native disk codec, deriving the stream codec by writing its id+payload
+     * bytes inline ({@link ByteBufCodecs#fromValueCodec}).
+     */
+    public static <T> DataSyncCodec<T> of(ValueCodec<T> valueCodec) {
+        return of(ByteBufCodecs.fromValueCodec(valueCodec), valueCodec);
+    }
+
+    /**
+     * Creates a codec from a network stream codec, <strong>automatically deriving</strong> the disk
+     * codec by storing the stream bytes as a byte-array value.
      *
-     * <p>Use when you have a working network codec and want a quick persistence path
-     * without writing a separate Data codec. The data format will be a byte array.</p>
+     * <p>Use when you have a working network codec and want a quick persistence path without writing a
+     * separate disk codec: the stored form is one {@code BYTE_ARRAY} value holding the wire bytes.</p>
      */
     public static <T> DataSyncCodec<T> of(StreamCodec<? super FriendlyByteBuf, T> streamCodec) {
-        return of(streamCodec, DataCodec.of(streamCodec));
-    }
-
-    /**
-     * Creates a codec from a data codec, <strong>automatically deriving</strong>
-     * the stream codec by serializing to/from bytes via
-     * {@link com.gto.datasynclib.datastream.data.Data#writeData Data.writeData} /
-     * {@link com.gto.datasynclib.datastream.data.Data#readData Data.readData}.
-     *
-     * <p>Use when you have a working persistence codec and want a quick network path.
-     * The network format will be a length-prefixed byte array of the Data encoding.</p>
-     */
-    public static <T> DataSyncCodec<T> of(DataCodec<T> dataCodec) {
-        return of(ByteStreamCodec.of(dataCodec), dataCodec);
+        return of(streamCodec, ValueCodecs.fromStreamCodec(streamCodec));
     }
 
     public static <T extends Enum<T>> DataSyncCodec<T> ofEnum(Class<T> enumClass) {
@@ -422,21 +456,17 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     }
 
     /**
-     * Registers a codec for the specified type with separate encoder/decoder components.
+     * Registers a codec from a network codec and a disk codec — the registration form of
+     * {@link #of(StreamCodec, ValueCodec)}.
      *
-     * <p>This is the most general registration method. Use when the network and persistence
-     * formats differ. For simpler cases, see the convenience overloads.</p>
-     *
-     * @param type         the class to register for (exact match, not assignable-from)
-     * @param streamWriter encoder for network buffers
-     * @param streamReader decoder for network buffers
-     * @param dataWriter   encoder for persistent Data objects
-     * @param dataReader   decoder for persistent Data objects
-     * @param <T>          the type
+     * @param type        the class to register for (exact match, not assignable-from)
+     * @param streamCodec encoder/decoder for network buffers
+     * @param valueCodec  encoder/decoder for the id+payload bytes a save file holds
+     * @param <T>         the type
      * @return the registered codec (also returned by future {@link #get(Class)} calls)
      */
-    public static <T> DataSyncCodec<T> register(Class<T> type, StreamEncoder<? super FriendlyByteBuf, T> streamWriter, StreamDecoder<? super FriendlyByteBuf, T> streamReader, DataEncoder<T> dataWriter, DataDecoder<T> dataReader) {
-        var codec = new DataSyncCodec<>(streamWriter, streamReader, dataWriter, dataReader);
+    public static <T> DataSyncCodec<T> register(Class<T> type, StreamCodec<? super FriendlyByteBuf, T> streamCodec, ValueCodec<T> valueCodec) {
+        var codec = of(streamCodec, valueCodec);
         synchronized (CODECS) {
             CODECS.put(type, codec);
         }
@@ -444,31 +474,28 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     }
 
     /**
-     * Registers a codec from a stream codec and a data codec.
+     * Registers a codec from a disk codec, deriving the stream codec automatically
+     * ({@link #of(ValueCodec)}).
      */
-    public static <T> DataSyncCodec<T> register(Class<T> type, StreamCodec<? super FriendlyByteBuf, T> streamCodec, DataCodec<T> dataCodec) {
-        return register(type, streamCodec, streamCodec, dataCodec, dataCodec);
+    public static <T> DataSyncCodec<T> register(Class<T> type, ValueCodec<T> valueCodec) {
+        return register(type, ByteBufCodecs.fromValueCodec(valueCodec), valueCodec);
     }
 
     /**
-     * Registers a codec from a data codec, deriving the stream codec automatically.
-     */
-    public static <T> DataSyncCodec<T> register(Class<T> type, DataCodec<T> codec) {
-        return register(type, ByteStreamCodec.of(codec), codec);
-    }
-
-    /**
-     * Registers a codec from a stream codec and a Mojang {@link Codec}, deriving the data codec automatically.
+     * Registers a codec from a stream codec and a Mojang {@link Codec}, deriving the disk half
+     * automatically ({@link ValueCodecs#fromCodec(Codec)}).
      */
     public static <T> DataSyncCodec<T> register(Class<T> type, StreamCodec<? super FriendlyByteBuf, T> streamCodec, Codec<T> codec) {
-        return register(type, streamCodec, DataCodec.of(codec));
+        return register(type, streamCodec, ValueCodecs.fromCodec(codec));
     }
 
     /**
-     * Registers a codec for a Minecraft registry type.
+     * Registers a codec for a Minecraft registry type: the wire form is the registry id
+     * ({@link StreamCodecExtends#of(Registry)}) and the stored form the registry key
+     * ({@link ValueCodecs#of(Registry)}).
      */
     public static <T> DataSyncCodec<T> register(Class<T> type, Registry<T> registry) {
-        return register(type, StreamCodecs.of(registry), DataCodecs.of(registry));
+        return register(type, StreamCodecExtends.of(registry), ValueCodecs.of(registry));
     }
 
     /**
@@ -479,76 +506,60 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
      * very {@link Class} instances that appear in the field declaration.</p>
      *
      * @param type         the raw class type
-     * @param streamWriter encoder for network buffers
-     * @param streamReader decoder for network buffers
-     * @param dataWriter   encoder for persistent Data objects
-     * @param dataReader   decoder for persistent Data objects
+     * @param streamCodec  encoder/decoder for network buffers
+     * @param valueCodec   encoder/decoder for the id+payload bytes a save file holds
      * @param genericTypes the generic type parameters, in declaration order
      * @param <T>          the type
      * @return the registered codec
      */
-    public static <T> DataSyncCodec<T> register(Class<?> type, StreamEncoder<? super FriendlyByteBuf, T> streamWriter, StreamDecoder<? super FriendlyByteBuf, T> streamReader, DataEncoder<T> dataWriter, DataDecoder<T> dataReader, Class<?>... genericTypes) {
-        var codec = new DataSyncCodec<>(streamWriter, streamReader, dataWriter, dataReader);
+    public static <T> DataSyncCodec<T> register(Class<?> type, StreamCodec<? super FriendlyByteBuf, T> streamCodec, ValueCodec<T> valueCodec, Class<?>... genericTypes) {
+        var codec = of(streamCodec, valueCodec);
         synchronized (GENERIC_CODECS) {
             GENERIC_CODECS.computeIfAbsent(type, k -> new HashMap<>()).put(HashUtil.arrayIdentityWrapper(genericTypes), codec);
         }
         return codec;
     }
-
-    /**
-     * Convenience overload of {@link #register(Class, StreamEncoder, StreamDecoder, DataEncoder, DataDecoder, Class[])} using one codec per path.
-     */
-    public static <T> DataSyncCodec<T> register(Class<T> type, StreamCodec<? super FriendlyByteBuf, T> streamCodec, DataCodec<T> dataCodec, Class<?>... genericTypes) {
-        return register(type, streamCodec, streamCodec, dataCodec, dataCodec, genericTypes);
-    }
-
     // ===== Pre-registered codec constants =====
 
-    /**
-     * Codec for the Data type system itself (passthrough).
-     */
-    public static final DataSyncCodec<Data> DATA_CODEC = register(Data.class, Data.BYTE_STREAM_CODEC, Data.DATA_CODEC);
-
-    public static final DataSyncCodec<StringMapData> MAP_DATA_CODEC = register(StringMapData.class, StringMapData.BYTE_STREAM_CODEC, StringMapData.DATA_CODEC);
 
     // ---- primitive arrays ----
-    public static final DataSyncCodec<boolean[]> BOOLEANS_CODEC = register(boolean[].class, ByteStreamCodec.BOOLEANS_CODEC, DataCodec.BOOLEANS_CODEC);
-    public static final DataSyncCodec<byte[]> BYTES_CODEC = register(byte[].class, ByteStreamCodec.BYTES_CODEC, DataCodec.BYTES_CODEC);
-    public static final DataSyncCodec<int[]> INTS_CODEC = register(int[].class, ByteStreamCodec.INTS_CODEC, DataCodec.INTS_CODEC);
-    public static final DataSyncCodec<long[]> LONGS_CODEC = register(long[].class, ByteStreamCodec.LONGS_CODEC, DataCodec.LONGS_CODEC);
-    public static final DataSyncCodec<float[]> FLOATS_CODEC = register(float[].class, ByteStreamCodec.FLOATS_CODEC, DataCodec.FLOATS_CODEC);
-    public static final DataSyncCodec<double[]> DOUBLES_CODEC = register(double[].class, ByteStreamCodec.DOUBLES_CODEC, DataCodec.DOUBLES_CODEC);
-    public static final DataSyncCodec<short[]> SHORTS_CODEC = register(short[].class, ByteStreamCodec.SHORTS_CODEC, DataCodec.SHORTS_CODEC);
-    public static final DataSyncCodec<char[]> CHARS_CODEC = register(char[].class, ByteStreamCodec.CHARS_CODEC, DataCodec.CHARS_CODEC);
+    public static final DataSyncCodec<boolean[]> BOOLEANS_CODEC = register(boolean[].class, ByteBufCodecs.BOOLEAN_ARRAY, ValueCodec.BOOLEAN_ARRAY);
+    public static final DataSyncCodec<byte[]> BYTES_CODEC = register(byte[].class, ByteBufCodecs.BYTE_ARRAY, ValueCodec.BYTE_ARRAY);
+    public static final DataSyncCodec<int[]> INTS_CODEC = register(int[].class, ByteBufCodecs.VAR_INT_ARRAY, ValueCodec.INT_ARRAY);
+    public static final DataSyncCodec<long[]> LONGS_CODEC = register(long[].class, ByteBufCodecs.LONG_ARRAY, ValueCodec.LONG_ARRAY);
+    public static final DataSyncCodec<float[]> FLOATS_CODEC = register(float[].class, ByteBufCodecs.FLOAT_ARRAY, ValueCodec.FLOAT_ARRAY);
+    public static final DataSyncCodec<double[]> DOUBLES_CODEC = register(double[].class, ByteBufCodecs.DOUBLE_ARRAY, ValueCodec.DOUBLE_ARRAY);
+    public static final DataSyncCodec<short[]> SHORTS_CODEC = register(short[].class, ByteBufCodecs.SHORT_ARRAY, ValueCodec.SHORT_ARRAY);
+    public static final DataSyncCodec<char[]> CHARS_CODEC = register(char[].class, ByteBufCodecs.CHAR_ARRAY, ValueCodec.CHAR_ARRAY);
 
     // ---- FastUtil primitive collections (hand-written pairs: the primitives never box) ----
-    public static final DataSyncCodec<IntList> INT_LIST_CODEC = register(IntList.class, ByteStreamCodec.INT_LIST_CODEC, DataCodec.INT_LIST_CODEC);
-    public static final DataSyncCodec<IntSet> INT_SET_CODEC = register(IntSet.class, ByteStreamCodec.INT_SET_CODEC, DataCodec.INT_SET_CODEC);
-    public static final DataSyncCodec<LongList> LONG_LIST_CODEC = register(LongList.class, ByteStreamCodec.LONG_LIST_CODEC, DataCodec.LONG_LIST_CODEC);
-    public static final DataSyncCodec<LongSet> LONG_SET_CODEC = register(LongSet.class, ByteStreamCodec.LONG_SET_CODEC, DataCodec.LONG_SET_CODEC);
+    public static final DataSyncCodec<IntList> INT_LIST_CODEC = register(IntList.class, ByteBufCodecs.INT_LIST, ValueCodec.INT_LIST);
+    public static final DataSyncCodec<IntSet> INT_SET_CODEC = register(IntSet.class, ByteBufCodecs.INT_SET, ValueCodec.INT_SET);
+    public static final DataSyncCodec<LongList> LONG_LIST_CODEC = register(LongList.class, ByteBufCodecs.LONG_LIST, ValueCodec.LONG_LIST);
+    public static final DataSyncCodec<LongSet> LONG_SET_CODEC = register(LongSet.class, ByteBufCodecs.LONG_SET, ValueCodec.LONG_SET);
 
     // ---- boxed primitives, String, UUID, BigInteger ----
-    public static final DataSyncCodec<Boolean> BOOLEAN_CODEC = register(Boolean.class, ByteStreamCodec.BOOLEAN_CODEC, DataCodec.BOOLEAN_CODEC);
+    public static final DataSyncCodec<Boolean> BOOLEAN_CODEC = register(Boolean.class, ByteBufCodecs.BOOL, ValueCodec.BOOLEAN);
 
-    public static final DataSyncCodec<Byte> BYTE_CODEC = register(Byte.class, ByteStreamCodec.BYTE_CODEC, DataCodec.BYTE_CODEC);
+    public static final DataSyncCodec<Byte> BYTE_CODEC = register(Byte.class, ByteBufCodecs.BYTE, ValueCodec.BYTE);
 
-    public static final DataSyncCodec<Short> SHORT_CODEC = register(Short.class, ByteStreamCodec.SHORT_CODEC, DataCodec.SHORT_CODEC);
+    public static final DataSyncCodec<Short> SHORT_CODEC = register(Short.class, ByteBufCodecs.SHORT, ValueCodec.SHORT);
 
-    public static final DataSyncCodec<Integer> INT_CODEC = register(Integer.class, ByteStreamCodec.INT_CODEC, DataCodec.INT_CODEC);
+    public static final DataSyncCodec<Integer> INT_CODEC = register(Integer.class, ByteBufCodecs.VAR_INT, ValueCodec.INT);
 
-    public static final DataSyncCodec<Long> LONG_CODEC = register(Long.class, ByteStreamCodec.LONG_CODEC, DataCodec.LONG_CODEC);
+    public static final DataSyncCodec<Long> LONG_CODEC = register(Long.class, ByteBufCodecs.LONG, ValueCodec.LONG);
 
-    public static final DataSyncCodec<Float> FLOAT_CODEC = register(Float.class, ByteStreamCodec.FLOAT_CODEC, DataCodec.FLOAT_CODEC);
+    public static final DataSyncCodec<Float> FLOAT_CODEC = register(Float.class, ByteBufCodecs.FLOAT, ValueCodec.FLOAT);
 
-    public static final DataSyncCodec<Double> DOUBLE_CODEC = register(Double.class, ByteStreamCodec.DOUBLE_CODEC, DataCodec.DOUBLE_CODEC);
+    public static final DataSyncCodec<Double> DOUBLE_CODEC = register(Double.class, ByteBufCodecs.DOUBLE, ValueCodec.DOUBLE);
 
-    public static final DataSyncCodec<Character> CHAR_CODEC = register(Character.class, ByteStreamCodec.CHAR_CODEC, DataCodec.CHAR_CODEC);
+    public static final DataSyncCodec<Character> CHAR_CODEC = register(Character.class, ByteBufCodecs.CHAR, ValueCodec.CHAR);
 
-    public static final DataSyncCodec<String> STRING_CODEC = register(String.class, ByteStreamCodec.STRING_CODEC, DataCodec.STRING_CODEC);
+    public static final DataSyncCodec<String> STRING_CODEC = register(String.class, ByteBufCodecs.STRING_UTF8, ValueCodec.STRING);
 
-    public static final DataSyncCodec<UUID> UUID_CODEC = register(UUID.class, ByteStreamCodec.UUID_CODEC, DataCodec.UUID_CODEC);
+    public static final DataSyncCodec<UUID> UUID_CODEC = register(UUID.class, ByteBufCodecs.UUID, ValueCodec.UUID);
 
-    public static final DataSyncCodec<BigInteger> BIG_INTEGER_CODEC = register(BigInteger.class, ByteStreamCodec.BIG_INTEGER_CODEC, DataCodec.BIG_INTEGER_CODEC);
+    public static final DataSyncCodec<BigInteger> BIG_INTEGER_CODEC = register(BigInteger.class, ByteBufCodecs.BIG_INTEGER, ValueCodec.BIG_INTEGER);
 
     // ---- Minecraft registry entries (registry id on the wire, key on disk) ----
     public static final DataSyncCodec<Item> ITEM_CODEC = register(Item.class, BuiltInRegistries.ITEM);
@@ -565,31 +576,31 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     public static final DataSyncCodec<RecipeType<?>> RECIPE_TYPE_CODEC = register((Class<RecipeType<?>>) (Class<?>) RecipeType.class, BuiltInRegistries.RECIPE_TYPE);
 
     // ---- Minecraft value types ----
-    public static final DataSyncCodec<ResourceLocation> RESOURCE_LOCATION_CODEC = register(ResourceLocation.class, StreamCodecs.RESOURCE_LOCATION_CODEC, DataCodecs.RESOURCE_LOCATION_CODEC);
+    public static final DataSyncCodec<ResourceLocation> RESOURCE_LOCATION_CODEC = register(ResourceLocation.class, StreamCodecExtends.RESOURCE_LOCATION_CODEC, ValueCodecs.RESOURCE_LOCATION);
 
-    public static final DataSyncCodec<Vec2> VEC2_CODEC = register(Vec2.class, StreamCodecs.VEC2_CODEC, DataCodecs.VEC2_CODEC);
-    public static final DataSyncCodec<Vec3> VEC3_CODEC = register(Vec3.class, StreamCodecs.VEC3_CODEC, DataCodecs.VEC3_CODEC);
-    public static final DataSyncCodec<BlockPos> BLOCK_POS_CODEC = register(BlockPos.class, StreamCodecs.BLOCK_POS_CODEC, DataCodecs.BLOCK_POS_CODEC);
-    public static final DataSyncCodec<ChunkPos> CHUNK_POS_CODEC = register(ChunkPos.class, StreamCodecs.CHUNK_POS_CODEC, DataCodecs.CHUNK_POS_CODEC);
+    public static final DataSyncCodec<Vec2> VEC2_CODEC = register(Vec2.class, StreamCodecExtends.VEC2_CODEC, ValueCodecs.VEC2);
+    public static final DataSyncCodec<Vec3> VEC3_CODEC = register(Vec3.class, StreamCodecExtends.VEC3_CODEC, ValueCodecs.VEC3);
+    public static final DataSyncCodec<BlockPos> BLOCK_POS_CODEC = register(BlockPos.class, StreamCodecExtends.BLOCK_POS_CODEC, ValueCodecs.BLOCK_POS);
+    public static final DataSyncCodec<ChunkPos> CHUNK_POS_CODEC = register(ChunkPos.class, StreamCodecExtends.CHUNK_POS_CODEC, ValueCodecs.CHUNK_POS);
 
     /**
-     * Integer triple — hand-written pair (three VarInts on the wire, one {@code IntArrayData} on
+     * Integer triple — hand-written pair (three VarInts on the wire, one {@code int[]} on
      * disk), so no boxing happens on either path. {@link BlockPos} has its own (more compact)
      * codec and still wins by exact match.
      */
-    public static final DataSyncCodec<Vec3i> VEC3I_CODEC = register(Vec3i.class, StreamCodecs.VEC3I_CODEC, DataCodecs.VEC3I_CODEC);
+    public static final DataSyncCodec<Vec3i> VEC3I_CODEC = register(Vec3i.class, StreamCodecExtends.VEC3I_CODEC, ValueCodecs.VEC3I);
 
     /**
      * Section (16³ chunk section) position — hand-written pair carrying the packed long.
      */
-    public static final DataSyncCodec<SectionPos> SECTION_POS_CODEC = register(SectionPos.class, StreamCodecs.SECTION_POS_CODEC, DataCodecs.SECTION_POS_CODEC);
+    public static final DataSyncCodec<SectionPos> SECTION_POS_CODEC = register(SectionPos.class, StreamCodecExtends.SECTION_POS_CODEC, ValueCodecs.SECTION_POS);
 
     /**
      * Axis-aligned box — hand-written pair of six raw doubles rather than a
      * {@link CombinedCodec#composite} of {@code double} components, which would box every
      * coordinate on each encode/decode.
      */
-    public static final DataSyncCodec<AABB> AABB_CODEC = register(AABB.class, StreamCodecs.AABB_CODEC, DataCodecs.AABB_CODEC);
+    public static final DataSyncCodec<AABB> AABB_CODEC = register(AABB.class, StreamCodecExtends.AABB_CODEC, ValueCodecs.AABB);
 
     /**
      * Dimension + block position; the dimension is carried as its {@link ResourceLocation}.
@@ -600,17 +611,17 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
             (location, pos) -> GlobalPos.of(ResourceKey.create(Registries.DIMENSION, location), pos)));
 
     // ---- NBT ----
-    public static final DataSyncCodec<Tag> TAG_CODEC = register(Tag.class, StreamCodecs.TAG_CODEC, DataCodecs.TAG_CODEC);
-    public static final DataSyncCodec<CompoundTag> COMPOUND_TAG_CODEC = register(CompoundTag.class, StreamCodecs.COMPOUND_TAG_CODEC, DataCodecs.COMPOUND_TAG_CODEC);
-    public static final DataSyncCodec<ListTag> LIST_TAG_CODEC = register(ListTag.class, StreamCodecs.LIST_TAG_CODEC, DataCodecs.LIST_TAG_CODEC);
+    public static final DataSyncCodec<Tag> TAG_CODEC = register(Tag.class, StreamCodecExtends.TAG_CODEC, ValueCodecs.TAG);
+    public static final DataSyncCodec<CompoundTag> COMPOUND_TAG_CODEC = register(CompoundTag.class, StreamCodecExtends.COMPOUND_TAG_CODEC, ValueCodecs.COMPOUND_TAG);
+    public static final DataSyncCodec<ListTag> LIST_TAG_CODEC = register(ListTag.class, StreamCodecExtends.LIST_TAG_CODEC, ValueCodecs.LIST_TAG);
 
     // ---- stacks and components ----
-    public static final DataSyncCodec<ItemStack> ITEM_STACK_CODEC = register(ItemStack.class, StreamCodecs.ITEM_STACK_CODEC, DataCodecs.ITEM_STACK_CODEC);
-    public static final DataSyncCodec<FluidStack> FLUID_STACK_CODEC = register(FluidStack.class, StreamCodecs.FLUID_STACK_CODEC, DataCodecs.FLUID_STACK_CODEC);
+    public static final DataSyncCodec<ItemStack> ITEM_STACK_CODEC = register(ItemStack.class, StreamCodecExtends.ITEM_STACK_CODEC, ValueCodecs.ITEM_STACK);
+    public static final DataSyncCodec<FluidStack> FLUID_STACK_CODEC = register(FluidStack.class, StreamCodecExtends.FLUID_STACK_CODEC, ValueCodecs.FLUID_STACK);
 
-    public static final DataSyncCodec<Component> COMPONENT_CODEC = register(Component.class, StreamCodecs.COMPONENT_CODEC, DataCodecs.COMPONENT_CODEC);
+    public static final DataSyncCodec<Component> COMPONENT_CODEC = register(Component.class, StreamCodecExtends.COMPONENT_CODEC, ValueCodecs.COMPONENT);
 
-    public static final DataSyncCodec<BlockState> BLOCK_STATE_CODEC = register(BlockState.class, ByteStreamCodec.of(BlockState.CODEC), BlockState.CODEC);
+    public static final DataSyncCodec<BlockState> BLOCK_STATE_CODEC = register(BlockState.class, ByteBufCodecs.fromCodec(BlockState.CODEC), ValueCodecs.fromCodec(BlockState.CODEC));
 
     /**
      * Registers a codec that was composed from other codec constants (see

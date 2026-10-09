@@ -16,7 +16,7 @@ import java.lang.reflect.Method;
  * {@link FriendlyByteBuf} without any per-instance state.
  *
  * <p>The stream codecs are used on purpose: a call travels over the network, so arguments are written
- * straight into the buffer the way the sync path writes its fields — no {@code Data} objects and no
+ * straight into the buffer the way the sync path writes its fields — no intermediate value objects and no
  * per-value type tag, which is what the persistence format pays for. A reference parameter is
  * preceded by a present/absent boolean, so {@code null} needs no type tag either; a primitive
  * parameter has no marker and rejects {@code null}.</p>

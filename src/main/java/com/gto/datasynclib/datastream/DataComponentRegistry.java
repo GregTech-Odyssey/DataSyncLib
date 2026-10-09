@@ -2,15 +2,17 @@ package com.gto.datasynclib.datastream;
 
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.datastream.codec.CombinedCodec;
-import com.gto.datasynclib.datastream.codec.DataCodec;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.datastream.codec.StreamCodec;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.StringMapData;
+import com.gto.datasynclib.datastream.codec.ValueCodec;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.util.Registry;
 import com.mojang.serialization.Codec;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -20,7 +22,8 @@ import java.util.function.Consumer;
  * <p>Implements three codec interfaces simultaneously:
  * <ul>
  *   <li>{@link StreamCodec}{@code <FriendlyByteBuf, DataComponentMap>} — for network sync via {@link FriendlyByteBuf}</li>
- *   <li>{@link DataCodec}{@code <DataComponentMap>} — for disk persistence via {@link com.gto.datasynclib.datastream.data.StringMapData}</li>
+ *   <li>{@link com.gto.datasynclib.datastream.codec.ValueCodec}{@code <DataComponentMap>} — for disk
+ *       persistence as one carrier string map</li>
  *   <li>{@link Codec}{@code <DataComponentMap>} — for Mojang's DFU codec integration (delegates to {@link Data#CODEC})</li>
  * </ul>
  *
@@ -36,7 +39,7 @@ public final class DataComponentRegistry extends Registry<String, DataComponentK
     public DataComponentRegistry(String name) {
         // Values (DataComponentKey) carry their String key as a public final 'name' field,
         // so read it directly instead of doing a reverse map lookup.
-        super(name + "_data_component", DataCodec.STRING_CODEC, key -> key.name);
+        super(name + "_data_component", ValueCodec.STRING, key -> key.name);
     }
 
     public <T> DataComponentKey<T> register(String name, DataSyncCodec<T> codec) {
@@ -84,25 +87,30 @@ public final class DataComponentRegistry extends Registry<String, DataComponentK
         });
     }
 
+    // ===== ValueCodec implementation =====
+    // A component map is a string map, so the native half is the same map with native values: each
+    // entry goes through its key's own codec. The Data pair above stays as the transitional view the
+    // component layer still calls.
+
     @Override
-    public DataComponentMap decode(@NotNull Data d, int dataVersion) {
-        var data = d.getStringMap();
+    public Object encode(ValueOps ops, DataComponentMap obj) {
+        Map<String, Object> data = new HashMap<>(obj.size());
+        obj.fastForEach((k, v) -> {
+            if (k.codec != null) data.put(k.name, k.codec.encode(ops, v));
+        });
+        return ops.createStringMap(data);
+    }
+
+    @Override
+    public DataComponentMap decode(ValueOps ops, Object d) {
+        var data = ops.getStringMap(d);
         var map = new DataComponentMap(data.size());
         data.forEach((k, v) -> {
             var key = get(k);
             if (key == null || key.codec == null) return;
-            var value = key.codec.dataReader.decode(v, dataVersion);
+            var value = key.codec.decode(ops, v);
             if (value != null) map.put(key, value);
         });
         return map;
-    }
-
-    @Override
-    public @NotNull Data encode(DataComponentMap obj) {
-        var data = new StringMapData();
-        obj.fastForEach((k, v) -> {
-            if (k.codec != null) data.put(k.name, k.codec.dataWriter.encode(v));
-        });
-        return data;
     }
 }

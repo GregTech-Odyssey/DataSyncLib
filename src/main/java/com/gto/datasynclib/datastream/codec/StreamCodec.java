@@ -1,7 +1,10 @@
 package com.gto.datasynclib.datastream.codec;
 
 import com.gto.datasynclib.DataSyncCodec;
+import com.gto.datasynclib.util.StreamCodecExtends;
 import com.mojang.datafixers.util.*;
+import io.netty.buffer.ByteBuf;
+import net.minecraft.network.FriendlyByteBuf;
 
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -11,30 +14,33 @@ import java.util.function.Function;
  * an independent parameter — the shape of 1.21's {@code net.minecraft.network.codec.StreamCodec}.
  *
  * <p>{@code B} carries no bound and this interface never names a buffer: it only composes codecs
- * ({@link #of}, {@link #unit}, {@link #convert}, {@link #composite}, {@link #dispatch},
- * {@link #recursive}), so a codec written for one buffer works wherever a broader one is expected —
- * which is what {@link #composite}'s {@code ? super B} component parameters are for. A
- * {@code StreamCodec<ByteBuf, Integer>} is a perfectly good component of a
- * {@code StreamCodec<FriendlyByteBuf, MyType>}.</p>
+ * ({@link #of}, {@link #ofMember}, {@link #unit}, {@link #convert}, {@link #composite},
+ * {@link #dispatch}, {@link #recursive}), re-types the buffer ({@link #mapStream}, {@link #cast}) and
+ * runs the buffer-side {@link CodecOperation}s through {@link #apply}, so a codec written for one
+ * buffer works wherever a broader one is expected — which is what {@link #composite}'s
+ * {@code ? super B} component parameters are for. A {@code StreamCodec<ByteBuf, Integer>} is a
+ * perfectly good component of a {@code StreamCodec<FriendlyByteBuf, MyType>}.</p>
  *
- * <p>Everything that <em>does</em> name a buffer lives in {@link ByteStreamCodec}: the built-in
+ * <p>Everything that <em>does</em> name a buffer lives in {@link ByteBufCodecs}: the built-in
  * constants (the numeric family is {@code StreamCodec<ByteBuf, …>}, the least a buffer can be while
  * still carrying a VarInt, while Minecraft-flavoured payloads need {@link FriendlyByteBuf}) and the
  * container builders, which write a length or a presence flag. The Minecraft value types live in
- * {@link com.gto.datasynclib.util.StreamCodecs}. There is no per-interface registry: runtime type
- * lookup goes through {@link com.gto.datasynclib.DataSyncCodec#get(Class)}, the single table for both
- * paths — {@link ByteStreamCodec#get(Class)} hands back this path's own half of the result.</p>
+ * {@link StreamCodecExtends} — the Minecraft-type extension of
+ * {@link ByteBufCodecs}, which therefore inherits every constant here. There is no per-interface
+ * registry: runtime type lookup goes through
+ * {@link com.gto.datasynclib.DataSyncCodec#get(Class)}, the single table for both
+ * paths — {@link ByteBufCodecs#get(Class)} hands back this path's own half of the result.</p>
  *
  * <h3>Performance: the helper paths box</h3>
  * <p>{@link #convert} is generic over both its types, so a primitive travels as its wrapper; the same
- * is true of {@link ByteStreamCodec}'s container builders. For a type that is a few primitives and is
+ * is true of {@link ByteBufCodecs}'s container builders. For a type that is a few primitives and is
  * synchronized often, prefer a hand-written pair
- * ({@link com.gto.datasynclib.util.StreamCodecs#VEC3I_CODEC} shows the shape) — primitive
+ * ({@link StreamCodecExtends#VEC3I_CODEC} shows the shape) — primitive
  * <em>arrays</em> and the FastUtil primitive collections already have primitive-backed codecs
- * ({@link ByteStreamCodec#INTS_CODEC} and friends), and those helpers are for containers whose
+ * ({@link ByteBufCodecs#VAR_INT_ARRAY} and friends), and those helpers are for containers whose
  * elements are objects anyway.</p>
  *
- * <p>The persistence bridges ({@link DataCodec#of(StreamCodec)}, {@link DataSyncCodec#of(StreamCodec)})
+ * <p>The persistence bridges ({@link DataSyncCodec#of(StreamCodec)}, {@link DataSyncCodec#of(ValueCodec)})
  * exist as static factories only, because they allocate a buffer of their own.</p>
  *
  * @param <B> the buffer this codec reads from and writes to — anything; the built-ins use
@@ -52,6 +58,40 @@ public interface StreamCodec<B, T> extends StreamDecoder<B, T>, StreamEncoder<B,
             @Override
             public void encode(B buf, T obj) {
                 encoder.encode(buf, obj);
+            }
+
+            @Override
+            public T decode(B buf) {
+                return decoder.decode(buf);
+            }
+        };
+    }
+
+    /**
+     * {@link #of(StreamEncoder, StreamDecoder)} with the encoder in the <strong>value-first</strong>
+     * form ({@link StreamMemberEncoder}), which lets a member method of the value itself stand in for
+     * the write half:
+     *
+     * <pre>{@code
+     * record Point(int x, int y) {
+     *     void write(FriendlyByteBuf buf) { ... }
+     *     static Point read(FriendlyByteBuf buf) { ... }
+     * }
+     *
+     * StreamCodec<FriendlyByteBuf, Point> CODEC = StreamCodec.ofMember(Point::write, Point::read);
+     * }</pre>
+     *
+     * <p>The decoder needs no such form: {@link StreamDecoder#decode} already takes only the buffer,
+     * so a method reference binds to it directly. Both halves must name the same buffer type, since
+     * the encoder is written against {@code B} rather than against {@link StreamEncoder}'s usual
+     * {@code ? super B}.</p>
+     */
+    static <B, T> StreamCodec<B, T> ofMember(StreamMemberEncoder<B, ? super T> encoder, StreamDecoder<B, ? extends T> decoder) {
+        return new StreamCodec<>() {
+
+            @Override
+            public void encode(B buf, T obj) {
+                encoder.encode(obj, buf);
             }
 
             @Override
@@ -104,6 +144,91 @@ public interface StreamCodec<B, T> extends StreamDecoder<B, T>, StreamEncoder<B,
      */
     default <V> StreamCodec<B, V> convert(Function<? super V, ? extends T> encodeConverter, Function<? super T, ? extends V> decodeConverter) {
         return convert(this, encodeConverter, decodeConverter);
+    }
+
+    /**
+     * Runs a {@link CodecOperation} on this codec — the entry point to the 1.21 operations that
+     * cannot be a plain builder of their own because they need the element codec <em>and</em> their
+     * own argument:
+     *
+     * <pre>{@code
+     * StreamCodec<FriendlyByteBuf, List<String>> LIST_CODEC =
+     *         ByteBufCodecs.STRING_UTF8.apply(ByteBufCodecs.list());
+     * }</pre>
+     *
+     * @param operation the transformation to apply to this codec
+     * @param <O>       the value type the produced codec handles
+     */
+    default <O> StreamCodec<B, O> apply(CodecOperation<B, T, O> operation) {
+        return operation.apply(this);
+    }
+
+    /**
+     * Re-types this codec onto a narrower buffer, by mapping the buffer that arrives into the one this
+     * codec reads and writes — the shape of 1.21's {@code mapStream}.
+     *
+     * <p>It is for the places where the buffer type has to be named exactly (a field, a dispatch map,
+     * a method that only accepts the narrow type) even though the codec itself never looks at more
+     * than the buffer methods it uses: {@code CODEC.mapStream(b -> b)} states that a
+     * {@code StreamCodec<ByteBuf, …>} is fine to use as a
+     * {@code StreamCodec<FriendlyByteBuf, …>}.</p>
+     *
+     * @param function maps the incoming buffer to the one this codec reads and writes
+     * @param <O>      the buffer type the produced codec accepts
+     */
+    default <O extends ByteBuf> StreamCodec<O, T> mapStream(Function<O, ? extends B> function) {
+        var codec = this;
+        return new StreamCodec<>() {
+
+            @Override
+            public void encode(O buf, T obj) {
+                codec.encode(function.apply(buf), obj);
+            }
+
+            @Override
+            public T decode(O buf) {
+                return codec.decode(function.apply(buf));
+            }
+        };
+    }
+
+    /**
+     * Re-types this codec's buffer to a subtype without touching the payload — 1.21's {@code cast}.
+     *
+     * <p>This is an unchecked cast, and it is safe exactly as long as the codec never needs the buffer
+     * to be more than the {@code B} it was written against; a codec that really does depend on the
+     * narrower type would only fail at the call site that matches it. Prefer
+     * {@link #mapStream(Function)} when the buffer really does have to be converted.</p>
+     *
+     * @param <S> the buffer type the produced codec accepts
+     */
+    @SuppressWarnings("unchecked")
+    default <S extends B> StreamCodec<S, T> cast() {
+        return (StreamCodec<S, T>) this;
+    }
+
+    /**
+     * Dispatches on this codec's own value: the discriminator is written with this codec, and
+     * {@code codecGetter} picks the codec of the payload from it — the instance form of
+     * {@link #dispatch(StreamCodec, Function, Function)} for the common 1.21 shape where the
+     * receiver <em>is</em> the discriminator codec:
+     *
+     * <pre>{@code
+     * StreamCodec<FriendlyByteBuf, Shape> SHAPE =
+     *         ByteBufCodecs.VAR_INT.dispatch(Shape::kind, kind -> codecs.get(kind));
+     * }</pre>
+     *
+     * <p>The payload codecs must accept this codec's buffer at least — the receiver's {@code B} is
+     * what {@code ? super B} is measured against — so a discriminator codec written for the broad
+     * {@link ByteBuf} needs {@link #cast()} (or {@link #mapStream}) before it can dispatch to codecs
+     * pinned to {@code FriendlyByteBuf}.</p>
+     *
+     * @param type        extracts the discriminator from a value
+     * @param codecGetter selects the payload codec for a discriminator value
+     * @param <U>         the base type the produced codec handles
+     */
+    default <U> StreamCodec<B, U> dispatch(Function<? super U, ? extends T> type, Function<? super T, ? extends StreamCodec<? super B, ? extends U>> codecGetter) {
+        return dispatch(this, type, codecGetter);
     }
 
     /**
@@ -436,7 +561,7 @@ public interface StreamCodec<B, T> extends StreamDecoder<B, T>, StreamEncoder<B,
      *
      * StreamCodec<B, Node> NODE_CODEC = StreamCodec.recursive(self ->
      *     StreamCodec.composite(
-     *         ByteStreamCodec.STRING_CODEC, Node::value,
+     *         ByteBufCodecs.STRING_UTF8, Node::value,
      *         self, Node::left,
      *         self, Node::right,
      *         Node::new
@@ -1010,5 +1135,29 @@ public interface StreamCodec<B, T> extends StreamDecoder<B, T>, StreamEncoder<B,
         };
     }
 
+    /**
+     * A deferred codec transformation: given the codec of an "inner" value, produce the codec of the
+     * container around it — the shape of 1.21's {@code StreamCodec.CodecOperation}.
+     *
+     * <p>It exists so a builder that needs the element codec <em>as well as</em> its own argument can
+     * still be read fluently on the codec it wraps, without the library declaring an instance method
+     * per container type: {@code STRING_UTF8.apply(ByteBufCodecs.list())} is the
+     * {@code List<String>} codec, {@code STRING_UTF8.apply(ByteBufCodecs.list(8))} is the bounded one,
+     * and {@code STRING_UTF8.apply(ByteBufCodecs.array(String[]::new))} is the {@code String[]} one.
+     * Reach it through {@link StreamCodec#apply(CodecOperation)}; the operations themselves live in
+     * {@link ByteBufCodecs}, next to the codecs they wrap.</p>
+     *
+     * @param <B> the buffer both the incoming and the produced codec read and write
+     * @param <S> the value type the incoming codec handles — the element, in every operation here
+     * @param <T> the value type the produced codec handles — the container
+     */
+    @FunctionalInterface
+    interface CodecOperation<B, S, T> {
+
+        /**
+         * Wraps {@code codec} into the codec for the surrounding type.
+         */
+        StreamCodec<B, T> apply(StreamCodec<B, S> codec);
+    }
 
 }

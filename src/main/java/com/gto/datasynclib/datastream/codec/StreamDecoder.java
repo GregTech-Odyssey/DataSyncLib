@@ -10,7 +10,7 @@ import java.util.function.Function;
  * converts what a buffer produced. Container sizes come from the stream, so malformed input can request
  * a large allocation — validate a size before allocating when the input is not trusted.</p>
  *
- * <p>Everything that touches a real buffer lives in {@link ByteStreamDecoder}: the container helpers
+ * <p>Everything that touches a real buffer lives in {@link ByteBufCodecs}: the container helpers
  * read a {@code VarInt} size, and {@code StreamCodec.of} builds the codec itself.</p>
  *
  * @param <B> the buffer this decoder reads from

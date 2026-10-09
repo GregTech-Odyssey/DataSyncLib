@@ -1,6 +1,7 @@
 package com.gto.datasynclib;
 
-import com.gto.datasynclib.datastream.data.Data;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.util.ReflectUtil;
 import it.unimi.dsi.fastutil.Hash;
 import net.minecraft.network.FriendlyByteBuf;
@@ -22,7 +23,7 @@ import java.util.function.Function;
  * <p>Provides typed getters/setters for all primitive types plus Object, change-detection
  * strategies, the skip-sync/save predicates ({@code skipWhen} on {@code @SaveToDisk} and
  * {@code @SyncTo*}), and encoding/decoding via both network buffers
- * ({@link FriendlyByteBuf}) and persistent {@link Data} objects.</p>
+ * ({@link FriendlyByteBuf}) and persistent carrier values.</p>
  *
  * @param <T> the declared type of the underlying field
  */
@@ -149,8 +150,8 @@ public final class DataFieldDefinition<T> {
     private final boolean autoSyncToServer;
 
     private final DataSyncCodec<T> codec;
-    private final MethodHandle writeToData;
-    private final MethodHandle readFromData;
+    private final MethodHandle writeToValue;
+    private final MethodHandle readFromValue;
     private final MethodHandle writeToBuffer;
     private final MethodHandle readFromBuffer;
     private final VarHandle handle;
@@ -183,7 +184,7 @@ public final class DataFieldDefinition<T> {
         this.instanceAsValue = instanceAsValue;
         this.conversionGet = conversionGet;
         this.conversionSet = conversionSet;
-        this.codec = (isFinal || !instanceAsValue) ? null : fieldAnnotations.dataCodec() != null ? DataSyncCodec.of(fieldAnnotations.streamCodec(), fieldAnnotations.dataCodec()) : (DataSyncCodec<T>) DataSyncCodec.get(type);
+        this.codec = (isFinal || !instanceAsValue) ? null : fieldAnnotations.valueCodec() != null ? DataSyncCodec.of(fieldAnnotations.streamCodec(), fieldAnnotations.valueCodec()) : (DataSyncCodec<T>) DataSyncCodec.get(type);
         this.genericType = genericType;
         this.genericCodecs = new DataSyncCodec[genericType.length];
         this.isFinal = isFinal;
@@ -196,8 +197,8 @@ public final class DataFieldDefinition<T> {
 
         this.handle = ReflectUtil.createVarHandle(lookup, field);
 
-        this.writeToData = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.writeToData(), Data.class);
-        this.readFromData = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.readFromData());
+        this.writeToValue = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.writeToValue(), Object.class);
+        this.readFromValue = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.readFromValue());
         this.writeToBuffer = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.writeToBuffer());
         this.readFromBuffer = ReflectUtil.createAdaptedMethodHandle(lookup, fieldAnnotations.readFromBuffer());
 
@@ -620,7 +621,7 @@ public final class DataFieldDefinition<T> {
      * }
      * }</pre>
      *
-     * <p>Called by the {@code readFromData} implementations only — the network sync path
+     * <p>Called by the {@code readFromValue} implementations only — the network sync path
      * ({@code readFromBuffer}) deliberately leaves it untouched.</p>
      *
      * @return the load-listener handle, or {@code null} if the field declares none
@@ -638,27 +639,40 @@ public final class DataFieldDefinition<T> {
         return side.isServer() ? autoSyncToClient : autoSyncToServer;
     }
 
-    public Data encode(Object source, T obj) {
-        if (writeToData != null) {
+    /**
+     * The persistence form of {@code obj} on the native carrier — what a field's
+     * {@link DataField#writeToValue(Object, ValueOps)} stores for a container's own value.
+     *
+     * <p>A field that declares a custom {@code @Codec(writeToValue = "...")} hook runs it; otherwise
+     * the field's codec writes the value itself.</p>
+     */
+    public Object encode(Object source, T obj, ValueOps ops) {
+        if (writeToValue != null) {
             try {
-                return (Data) writeToData.invokeExact(source, obj);
+                // the handle's parameters are widened to Object, so the argument has to be an Object
+                // too: invokeExact is exact about the static types of the arguments it is handed
+                return writeToValue.invokeExact(source, (Object) ops, obj);
             } catch (Throwable e) {
                 throw new RuntimeException(e);
             }
         } else {
-            return codec.dataWriter.encode(obj);
+            return codec.encode(ops, obj);
         }
     }
 
-    public T decode(Object source, Data data, int dataVersion) {
-        if (readFromData != null) {
+    /**
+     * The inverse of {@link #encode(Object, Object, ValueOps)}: a carrier value back into the
+     * field's type. {@link ValueOps#dataVersion()} carries the version of the data being read.
+     */
+    public T decode(Object source, Object data, ValueOps ops) {
+        if (readFromValue != null) {
             try {
-                return (T) readFromData.invokeExact(source, (Object) data, dataVersion);
+                return (T) readFromValue.invokeExact(source, (Object) ops, data);
             } catch (Throwable e) {
                 throw new RuntimeException(e);
             }
         } else {
-            return codec.dataReader.decode(data, dataVersion);
+            return codec.decode(ops, data);
         }
     }
 

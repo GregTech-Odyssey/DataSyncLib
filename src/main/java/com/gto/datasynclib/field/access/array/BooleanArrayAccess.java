@@ -2,9 +2,8 @@ package com.gto.datasynclib.field.access.array;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.codec.DataCodec;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import net.minecraft.network.FriendlyByteBuf;
 import org.apache.commons.lang3.ArrayUtils;
@@ -27,7 +26,7 @@ import java.util.Arrays;
  * the existing array contents in-place.</p>
  *
  * <h3>Persistence format:</h3>
- * <p>Writes as a {@link DataCodec#BOOLEANS_CODEC boolean array}. Skips writing if the array
+ * <p>Writes as the carrier''s {@code BOOLEAN_ARRAY} value. Skips writing if the array
  * matches the configured default value. On read, copies up to
  * {@code min(dataLength, arrayLength)} elements, so length mismatches from data migration
  * are handled safely.</p>
@@ -68,16 +67,15 @@ public final class BooleanArrayAccess extends AbstractFieldAccess<boolean[]> {
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, boolean @NotNull [] instance) {
+    protected @NotNull Object doWriteValue(@NotNull Object source, boolean @NotNull [] instance, @NotNull ValueOps ops) {
         if (definition.hasDefaultValue() && Arrays.equals(instance, definition.getDefaultValue(source)))
-            return NullData.NONE;
-        return DataCodec.BOOLEANS_CODEC.encode(instance);
+            return NOT_PERSISTED;
+        return ops.createBooleanArray(instance);
     }
 
     @Override
-    protected void doReadData(boolean @NotNull [] instance, @NotNull Data data, int dataVersion) {
-        var list = DataCodec.BOOLEANS_CODEC.decode(data, dataVersion);
-        var length = Math.min(list.length, instance.length);
-        System.arraycopy(list, 0, instance, 0, length);
+    protected void doReadValue(boolean @NotNull [] instance, @NotNull Object data, @NotNull ValueOps ops) {
+        var array = ops.getBooleanArray(data);
+        System.arraycopy(array, 0, instance, 0, Math.min(array.length, instance.length));
     }
 }

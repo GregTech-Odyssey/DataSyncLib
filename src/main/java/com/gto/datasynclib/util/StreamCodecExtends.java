@@ -1,7 +1,7 @@
 package com.gto.datasynclib.util;
 
+import com.gto.datasynclib.datastream.codec.ByteBufCodecs;
 import com.gto.datasynclib.datastream.codec.StreamCodec;
-import lombok.experimental.UtilityClass;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Registry;
 import net.minecraft.core.SectionPos;
@@ -20,38 +20,73 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.fluids.FluidStack;
 
 /**
- * Pre-registered {@link StreamCodec} instances for Minecraft types: ResourceLocation,
- * BlockPos, ChunkPos, Vec3i, SectionPos, Vec2, Vec3, AABB, Tag, CompoundTag, ListTag, ItemStack,
- * FluidStack and Component, plus {@link #of(net.minecraft.core.Registry)} for registry entries
- * (encoded as a VarInt id). The matching persist-side halves live in
- * {@link com.gto.datasynclib.util.DataCodecs}; both are registered in
- * {@link com.gto.datasynclib.DataSyncCodec} rather than in a per-interface table.
+ * The <strong>extension half</strong> of {@link ByteBufCodecs}: the pre-registered {@link StreamCodec}
+ * instances for Minecraft types — ResourceLocation, BlockPos, ChunkPos, Vec3i, SectionPos, Vec2, Vec3,
+ * AABB, Tag, CompoundTag, ListTag, ItemStack, FluidStack and Component — plus
+ * {@link #of(net.minecraft.core.Registry)} for registry entries (encoded as a VarInt id).
+ *
+ * <p>1.21 keeps the Minecraft value types in {@code ByteBufCodecs} itself, next to the primitives;
+ * this library declares them in an <em>extension</em> of it instead, so that the 1.21-shaped core
+ * stays free of Minecraft types without costing a second import: the constants of
+ * {@link ByteBufCodecs} ({@code STRING_UTF8}, {@code VAR_INT}, {@code INT_LIST}, …) are inherited, so
+ * {@code StreamCodecExtends.STRING_UTF8} resolves here too. Only <em>fields</em> are inherited, though — a
+ * static interface method is not (JLS 9.4.1) — so the builders are still reached through
+ * {@code ByteBufCodecs.list()}, {@code ByteBufCodecs.optional(…)} and friends.</p>
+ *
+ * <p>The matching persist-side halves live in {@link com.gto.datasynclib.util.ValueCodecs}; both are
+ * registered in {@link com.gto.datasynclib.DataSyncCodec} rather than in a per-interface table.</p>
  *
  * <p>These are hand-written on purpose: they read and write primitives straight on the buffer
  * instead of going through the boxed components of {@link com.gto.datasynclib.datastream.codec.CombinedCodec#composite}.
  * See that method's documentation for the trade-off.</p>
  */
-@UtilityClass
-public class StreamCodecs {
+public interface StreamCodecExtends extends ByteBufCodecs {
 
-    public final StreamCodec<FriendlyByteBuf, ResourceLocation> RESOURCE_LOCATION_CODEC = StreamCodec.of((stream, obj) -> {
-        stream.writeUtf(obj.getNamespace());
-        stream.writeUtf(obj.getPath());
-    }, stream -> ResourceLocation.fromNamespaceAndPath(stream.readUtf(), stream.readUtf()));
+    StreamCodec<FriendlyByteBuf, ResourceLocation> RESOURCE_LOCATION_CODEC = new StreamCodec<>() {
 
-    public static final StreamCodec<FriendlyByteBuf, BlockPos> BLOCK_POS_CODEC = StreamCodec.of((stream, obj) -> {
-        stream.writeLong(obj.asLong());
-    }, stream -> BlockPos.of(stream.readLong()));
+        @Override
+        public void encode(FriendlyByteBuf stream, ResourceLocation obj) {
+            stream.writeUtf(obj.getNamespace());
+            stream.writeUtf(obj.getPath());
+        }
 
-    public static final StreamCodec<FriendlyByteBuf, ChunkPos> CHUNK_POS_CODEC = StreamCodec.of((stream, obj) -> {
-        stream.writeLong(obj.toLong());
-    }, stream -> new ChunkPos(stream.readLong()));
+        @Override
+        public ResourceLocation decode(FriendlyByteBuf stream) {
+            return ResourceLocation.fromNamespaceAndPath(stream.readUtf(), stream.readUtf());
+        }
+    };
+
+    StreamCodec<FriendlyByteBuf, BlockPos> BLOCK_POS_CODEC = new StreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf stream, BlockPos obj) {
+            stream.writeLong(obj.asLong());
+        }
+
+        @Override
+        public BlockPos decode(FriendlyByteBuf stream) {
+            return BlockPos.of(stream.readLong());
+        }
+    };
+
+    StreamCodec<FriendlyByteBuf, ChunkPos> CHUNK_POS_CODEC = new StreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf stream, ChunkPos obj) {
+            stream.writeLong(obj.toLong());
+        }
+
+        @Override
+        public ChunkPos decode(FriendlyByteBuf stream) {
+            return new ChunkPos(stream.readLong());
+        }
+    };
 
     /**
      * Integer triple, three VarInts. {@link BlockPos} keeps its own packed-long codec, and an
      * exact registration always wins over this one.
      */
-    public static final StreamCodec<FriendlyByteBuf, Vec3i> VEC3I_CODEC = new StreamCodec<>() {
+    StreamCodec<FriendlyByteBuf, Vec3i> VEC3I_CODEC = new StreamCodec<>() {
 
         @Override
         public void encode(FriendlyByteBuf stream, Vec3i obj) {
@@ -69,7 +104,7 @@ public class StreamCodecs {
     /**
      * Section (16³) position, as its packed long.
      */
-    public static final StreamCodec<FriendlyByteBuf, SectionPos> SECTION_POS_CODEC = new StreamCodec<>() {
+    StreamCodec<FriendlyByteBuf, SectionPos> SECTION_POS_CODEC = new StreamCodec<>() {
 
         @Override
         public void encode(FriendlyByteBuf stream, SectionPos obj) {
@@ -85,7 +120,7 @@ public class StreamCodecs {
     /**
      * Six raw doubles: minX, minY, minZ, maxX, maxY, maxZ.
      */
-    public static final StreamCodec<FriendlyByteBuf, AABB> AABB_CODEC = new StreamCodec<>() {
+    StreamCodec<FriendlyByteBuf, AABB> AABB_CODEC = new StreamCodec<>() {
 
         @Override
         public void encode(FriendlyByteBuf stream, AABB obj) {
@@ -105,7 +140,7 @@ public class StreamCodecs {
     };
 
 
-    public static final StreamCodec<FriendlyByteBuf, Vec2> VEC2_CODEC = new StreamCodec<>() {
+    StreamCodec<FriendlyByteBuf, Vec2> VEC2_CODEC = new StreamCodec<>() {
 
         @Override
         public void encode(FriendlyByteBuf stream, Vec2 obj) {
@@ -119,7 +154,7 @@ public class StreamCodecs {
         }
     };
 
-    public static final StreamCodec<FriendlyByteBuf, Vec3> VEC3_CODEC = new StreamCodec<>() {
+    StreamCodec<FriendlyByteBuf, Vec3> VEC3_CODEC = new StreamCodec<>() {
 
         @Override
         public void encode(FriendlyByteBuf stream, Vec3 obj) {
@@ -135,7 +170,7 @@ public class StreamCodecs {
     };
 
 
-    public static final StreamCodec<FriendlyByteBuf, Tag> TAG_CODEC = new StreamCodec<>() {
+    StreamCodec<FriendlyByteBuf, Tag> TAG_CODEC = new StreamCodec<>() {
 
         @Override
         public void encode(FriendlyByteBuf stream, Tag obj) {
@@ -149,7 +184,7 @@ public class StreamCodecs {
         }
     };
 
-    public static final StreamCodec<FriendlyByteBuf, CompoundTag> COMPOUND_TAG_CODEC = new StreamCodec<>() {
+    StreamCodec<FriendlyByteBuf, CompoundTag> COMPOUND_TAG_CODEC = new StreamCodec<>() {
 
         @Override
         public void encode(FriendlyByteBuf stream, CompoundTag obj) {
@@ -162,7 +197,7 @@ public class StreamCodecs {
         }
     };
 
-    public static final StreamCodec<FriendlyByteBuf, ListTag> LIST_TAG_CODEC = new StreamCodec<>() {
+    StreamCodec<FriendlyByteBuf, ListTag> LIST_TAG_CODEC = new StreamCodec<>() {
 
         @Override
         public void encode(FriendlyByteBuf stream, ListTag obj) {
@@ -175,7 +210,7 @@ public class StreamCodecs {
         }
     };
 
-    public static final StreamCodec<FriendlyByteBuf, ItemStack> ITEM_STACK_CODEC = new StreamCodec<>() {
+    StreamCodec<FriendlyByteBuf, ItemStack> ITEM_STACK_CODEC = new StreamCodec<>() {
 
         @Override
         public void encode(FriendlyByteBuf stream, ItemStack obj) {
@@ -188,7 +223,7 @@ public class StreamCodecs {
         }
     };
 
-    public static final StreamCodec<FriendlyByteBuf, FluidStack> FLUID_STACK_CODEC = new StreamCodec<>() {
+    StreamCodec<FriendlyByteBuf, FluidStack> FLUID_STACK_CODEC = new StreamCodec<>() {
 
         @Override
         public void encode(FriendlyByteBuf stream, FluidStack obj) {
@@ -201,7 +236,7 @@ public class StreamCodecs {
         }
     };
 
-    public static final StreamCodec<FriendlyByteBuf, Component> COMPONENT_CODEC = new StreamCodec<>() {
+    StreamCodec<FriendlyByteBuf, Component> COMPONENT_CODEC = new StreamCodec<>() {
 
         @Override
         public void encode(FriendlyByteBuf buf, Component obj) {
@@ -220,7 +255,18 @@ public class StreamCodecs {
      *
      * @param registry the registry the values belong to
      */
-    public static <T> StreamCodec<FriendlyByteBuf, T> of(Registry<T> registry) {
-        return StreamCodec.of((stream, obj) -> stream.writeVarInt(registry.getId(obj)), stream -> registry.byId(stream.readVarInt()));
+    static <T> StreamCodec<FriendlyByteBuf, T> of(Registry<T> registry) {
+        return new StreamCodec<>() {
+
+            @Override
+            public void encode(FriendlyByteBuf stream, T obj) {
+                stream.writeVarInt(registry.getId(obj));
+            }
+
+            @Override
+            public T decode(FriendlyByteBuf stream) {
+                return registry.byId(stream.readVarInt());
+            }
+        };
     }
 }

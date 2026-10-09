@@ -3,8 +3,8 @@ package com.gto.datasynclib.listener;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.util.holder.ObjHolder;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
@@ -87,20 +87,20 @@ public class ObjSerializableHolder<T> extends ObjHolder<T> implements IDataSeria
     }
 
     @Override
-    public Data writeData() {
+    public @NotNull Object writeValue(@NotNull ValueOps ops) {
         if (value == null) {
-            return NullData.INSTANCE;
+            return ops.createNull();
         } else {
-            return codec.dataWriter.encode(value);
+            return codec.encode(ops, value);
         }
     }
 
     @Override
-    public void readData(@NotNull Data data, int dataVersion) {
-        if (data == NullData.INSTANCE) {
+    public void readValue(@NotNull Object data, @NotNull ValueOps ops) {
+        if (ops.isNull(data)) {
             value = null;
         } else {
-            value = codec.dataReader.decode(data, dataVersion);
+            value = codec.decode(ops, data);
         }
     }
 }

@@ -3,10 +3,8 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.ListData;
-import com.gto.datasynclib.datastream.data.LongData;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import it.unimi.dsi.fastutil.objects.Object2LongMap;
 import it.unimi.dsi.fastutil.objects.Object2LongMaps;
 import net.minecraft.network.FriendlyByteBuf;
@@ -16,6 +14,9 @@ import org.jetbrains.annotations.NotNull;
  * Synchronizes a FastUtil Object2LongMap.
  * Has a key codec for object keys with raw long values.
  */
+
+import java.util.ArrayList;
+
 public class Object2LongMapAccess<K> extends AbstractFieldAccess<Object2LongMap> {
 
     private final DataSyncCodec<K> keyCodec;
@@ -61,23 +62,25 @@ public class Object2LongMapAccess<K> extends AbstractFieldAccess<Object2LongMap>
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull Object2LongMap instance) {
-        if (instance.isEmpty()) return NullData.INSTANCE;
-        var list = new ListData();
+    protected @NotNull Object doWriteValue(@NotNull Object source, @NotNull Object2LongMap instance, @NotNull ValueOps ops) {
+        if (instance.isEmpty()) return ops.createNull();
+        var list = new ArrayList<Object>(instance.size() * 2);
         Object2LongMaps.fastForEach(instance, e -> {
-            list.add(keyCodec.dataWriter.encode((K) e.getKey()));
-            list.add(LongData.valueOf(e.getLongValue()));
+            list.add(keyCodec.encode(ops, (K) e.getKey()));
+            list.add(e.getLongValue());
         });
-        return list;
+        return ops.createList(list);
     }
 
     @Override
-    protected void doReadData(@NotNull Object2LongMap instance, @NotNull Data data, int dataVersion) {
-        var list = data.getList();
+    protected void doReadValue(@NotNull Object2LongMap instance, @NotNull Object data, @NotNull ValueOps ops) {
+        // an empty container was stored as the null value, which is a missing payload, not a failure
+        if (!ops.isList(data)) return;
+        var list = ops.getList(data);
         var size = list.size();
         instance.clear();
         for (int i = 0; i < size; i++) {
-            instance.put(keyCodec.dataReader.decode(list.get(i++), dataVersion), list.get(i).getLong());
+            instance.put(keyCodec.decode(ops, list.get(i++)), ops.getLong(list.get(i)));
         }
     }
 }

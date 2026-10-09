@@ -2,9 +2,8 @@ package com.gto.datasynclib.field.access;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.LongArrayData;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import it.unimi.dsi.fastutil.longs.LongCollection;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
@@ -48,15 +47,16 @@ public final class LongCollectionAccess extends AbstractFieldAccess<LongCollecti
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, @NotNull LongCollection instance) {
-        if (instance.isEmpty()) return NullData.INSTANCE;
-        return new LongArrayData(instance.toLongArray());
+    protected @NotNull Object doWriteValue(@NotNull Object source, @NotNull LongCollection instance, @NotNull ValueOps ops) {
+        if (instance.isEmpty()) return ops.createNull();
+        return ops.createLongArray(instance.toLongArray());
     }
 
     @Override
-    protected void doReadData(@NotNull LongCollection instance, @NotNull Data data, int dataVersion) {
+    protected void doReadValue(@NotNull LongCollection instance, @NotNull Object data, @NotNull ValueOps ops) {
         instance.clear();
-        var array = data.getLongArray();
+        if (!ops.isLongArray(data)) return;
+        var array = ops.getLongArray(data);
         for (var element : array) {
             instance.add(element);
         }

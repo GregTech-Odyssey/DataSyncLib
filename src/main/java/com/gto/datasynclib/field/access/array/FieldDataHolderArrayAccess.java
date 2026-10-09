@@ -3,9 +3,8 @@ package com.gto.datasynclib.field.access.array;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.ListData;
-import com.gto.datasynclib.datastream.data.NullData;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import com.gto.datasynclib.util.HashUtil;
 import net.minecraft.network.FriendlyByteBuf;
@@ -16,6 +15,9 @@ import org.jetbrains.annotations.NotNull;
  * Uses identity-based hash for array change detection with per-element dirty flag propagation.
  * Overrides mustDetect() for mandatory detection.
  */
+
+import java.util.ArrayList;
+
 public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IFieldDataHolder[]> {
 
     private int hashCode;
@@ -74,32 +76,30 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
     }
 
     @Override
-    protected @NotNull Data doWriteData(@NotNull Object source, IFieldDataHolder @NotNull [] instance) {
-        var list = new ListData();
+    protected @NotNull Object doWriteValue(@NotNull Object source, IFieldDataHolder @NotNull [] instance, @NotNull ValueOps ops) {
+        var list = new ArrayList<Object>(instance.length);
         for (var element : instance) {
-            if (element != null) {
-                list.add(element.getFieldDataManager().writeToData());
-            } else {
-                list.addNull();
-            }
+            list.add(element == null ? ops.createNull() : element.getFieldDataManager().writeToValue(ops));
         }
-        if (definition.saveEmpty) return list;
-        for (var data : list) {
-            if (data != NullData.INSTANCE) return list;
+        if (definition.saveEmpty) return ops.createList(list);
+        for (var element : list) {
+            // the slots hold carrier values, so an absent one is the null value, never a Java null
+            if (!ops.isNull(element)) return ops.createList(list);
         }
-        return NullData.NONE;
+        return NOT_PERSISTED;
     }
 
     @Override
-    protected void doReadData(IFieldDataHolder @NotNull [] instance, @NotNull Data data, int dataVersion) {
-        var list = data.getList();
+    protected void doReadValue(IFieldDataHolder @NotNull [] instance, @NotNull Object data, @NotNull ValueOps ops) {
+        // an empty container was stored as the null value, which is a missing payload, not a failure
+        if (!ops.isList(data)) return;
+        var list = ops.getList(data);
         var length = Math.min(list.size(), instance.length);
         for (int i = 0; i < length; i++) {
-            var d = list.get(i);
-            if (d != NullData.INSTANCE) {
-                var element = instance[i];
-                if (element != null) element.getFieldDataManager().readFromData(d, dataVersion);
-            }
+            var element = list.get(i);
+            if (ops.isNull(element)) continue;
+            var holder = instance[i];
+            if (holder != null) holder.getFieldDataManager().readFromValue(element, ops);
         }
     }
 }

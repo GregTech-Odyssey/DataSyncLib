@@ -1,10 +1,9 @@
 package com.gto.datasynclib.field;
 
 import com.gto.datasynclib.DataFieldDefinition;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.data.Data;
-import com.gto.datasynclib.datastream.data.IntData;
-import com.gto.datasynclib.datastream.data.NullData;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
@@ -21,7 +20,7 @@ import org.jetbrains.annotations.NotNull;
  *
  * <h3>Persistence:</h3>
  * <p>Skips writing if the value matches the configured default (avoids storing redundant
- * data) or if the save skip predicate returns {@code true}. Otherwise writes as {@link com.gto.datasynclib.datastream.data.IntData}.</p>
+ * data) or if the save skip predicate returns {@code true}. Otherwise writes as the carrier's {@code INT} value.</p>
  *
  * <h3>Listener notification:</h3>
  * <p>On the receiving side, if a listener MethodHandle is configured, it is invoked with
@@ -70,17 +69,17 @@ public final class IntField extends AbstractField<Integer> {
     }
 
     @Override
-    public @NotNull Data writeToData(@NotNull Object source) {
+    public @NotNull Object writeToValue(@NotNull Object source, @NotNull ValueOps ops) {
         var definition = this.definition;
         var value = definition.getInt(source);
-        if (definition.skipSave(source, value)) return NullData.NONE;
-        if (definition.hasDefaultValue() && definition.getDefaultIntValue(source) == value) return NullData.NONE;
-        return IntData.valueOf(value);
+        if (definition.skipSave(source, value)) return NOT_PERSISTED;
+        if (definition.hasDefaultValue() && definition.getDefaultIntValue(source) == value) return NOT_PERSISTED;
+        return value;
     }
 
     @Override
-    public void readFromData(@NotNull Object source, @NotNull Data data, int dataVersion) {
-        var value = data.getInt();
+    public void readFromValue(@NotNull Object source, @NotNull Object data, @NotNull ValueOps ops) {
+        var value = ops.getInt(data);
         definition.setInt(source, value);
         // @SaveToDisk(listener = "...") — disk-load hook, fired after the value is applied (never on the sync path).
         var listener = definition.getSaveListener();
