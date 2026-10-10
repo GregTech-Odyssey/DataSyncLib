@@ -244,6 +244,40 @@ guessed. `JavaValueOps#init()` registers the built-in set for you during mod con
 > no new format, nothing to collide with. Reading a custom value (`ops.isCustom`, `ops.getCustom`) stays open
 > to everyone, since those are the library's own payloads coming back.
 
+### Advanced: Files and Their Version
+
+`FileUtil` reads and writes a payload through the half it needs — a `StreamDecoder`/`StreamEncoder`
+(network codecs), a `ValueDecoder`/`ValueEncoder` (carrier codecs) — and never copies the payload on its
+way to or from the file. A payload whose reading depends on the version it was written at puts that
+version **in the file itself**:
+
+```java
+FileUtil.writeVersioned(path, DATA_VERSION, codec, value);   // VarInt version at the head, then the payload
+var value = FileUtil.readVersioned(path, codec);             // the version comes back with the payload
+```
+
+* The writer takes an explicit `int` version; the reader does not, because it reads the version off the
+  head of the file.
+* A stream codec sees a `VersionedFriendlyByteBuf` (a `FriendlyByteBuf` that also carries the version) and
+  asks `buf.version()`; a carrier codec gets it in its `ValueOps`, from `ops.dataVersion()`.
+* The version is written as a VarInt and must be in `1 .. FileUtil.MAX_VERSION`. Version `0` is not a
+  version this library writes, so a file that predates versioning — whose payload begins where the version
+  would — is refused, which is what makes a plain fallback work:
+
+```java
+T value;
+try {
+    value = FileUtil.readVersioned(path, codec);
+} catch (RuntimeException e) {
+    value = FileUtil.read(path, legacyCodec);   // written before the file carried a version
+}
+```
+
+That is the intended way to migrate an existing file format: write versioned from now on, keep the old
+reader behind the catch, and delete the old codec once no file that needs it is left. Files whose bytes
+are not this library's own — shipped resources, human-readable exports, disposable caches — stay
+unversioned.
+
 ### Advanced: Generic Hierarchy Resolution
 
 `ReflectUtil` provides utilities to resolve full generic arguments along a field type's **superclass / interface / multi-level** hierarchy — useful when a generic ancestor fixes some parameters.

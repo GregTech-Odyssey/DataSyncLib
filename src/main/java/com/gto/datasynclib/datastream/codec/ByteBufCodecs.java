@@ -1,6 +1,7 @@
 package com.gto.datasynclib.datastream.codec;
 
 import com.gto.datasynclib.DataSyncCodec;
+import com.gto.datasynclib.util.VarInts;
 import com.gto.datasynclib.util.ByteBufCodecExtends;
 import com.mojang.datafixers.util.Either;
 import com.mojang.serialization.Codec;

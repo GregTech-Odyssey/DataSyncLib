@@ -223,6 +223,35 @@ ValueConverters.Converter.<Tagged>builder(ValueOps.Type.STRING, Tagged.class)
 
 > **`CustomTypes` 是库自己的注册表，不是给模组用的。** 它的 key 是裸 `int`，落在存档和网络都会携带的同一张全局表里：16 以下已经被占（NBT `0…2`、JSON `3…5`），没有任何区间留给别人，撞 id 是直接报错而不是合并，而且 id 一旦发出去就永远收不回来。payload 格式还要求对端也得认识——没有该类型的客户端会直接拒绝这个值而不是降级——所以在这里注册的格式会渗进整个游戏的线格式。模组自己的对象是**值**，应该走上面的 `ValueConverters`：不占 id、不新增格式、也不会和谁冲突。读取自定义值（`ops.isCustom`、`ops.getCustom`）对所有代码开放，因为那是库自己的 payload 在回来。
 
+### 高级用法：文件与文件版本号
+
+`FileUtil` 按需要的那一半读写载荷——`StreamDecoder`/`StreamEncoder`（网络编解码器）或
+`ValueDecoder`/`ValueEncoder`（载体编解码器），载荷在往返文件的过程中不会被复制。如果一个载荷的读取
+依赖它写入时的版本，就把版本**写进文件本身**：
+
+```java
+FileUtil.writeVersioned(path, DATA_VERSION, codec, value);   // 文件开头写 VarInt 版本号，随后是载荷
+var value = FileUtil.readVersioned(path, codec);             // 版本随载荷一起读回来
+```
+
+* 写入方显式传入 `int` 版本号；读取方不传，因为版本号是从文件开头读出来的。
+* 流编解码器拿到的是 `VersionedFriendlyByteBuf`（带版本号的 `FriendlyByteBuf`），用 `buf.version()`
+  取；载体编解码器从自己的 `ValueOps` 取，即 `ops.dataVersion()`。
+* 版本号以 VarInt 写入，取值必须在 `1 .. FileUtil.MAX_VERSION`。`0` 不是本库会写出的版本号，因此
+  **早于版本号机制**、载荷直接顶在文件开头的旧文件会被拒绝——这正是回退可行的原因：
+
+```java
+T value;
+try {
+    value = FileUtil.readVersioned(path, codec);
+} catch (RuntimeException e) {
+    value = FileUtil.read(path, legacyCodec);   // 文件带版本号之前写下的
+}
+```
+
+迁移一个已有文件格式就该这么做：从此写带版本号的，把旧读取放进 catch 里，等没有文件再需要它时删掉旧
+编解码器。不是本库自己字节的文件——随包资源、给人看的导出文本、可丢弃的缓存——不加版本号。
+
 ### 高级用法：泛型层级解析
 
 `ReflectUtil` 提供了沿泛型**父类/接口/多层继承**解析完整泛型实参的工具，适合需要从"实现了泛型接口/继承了泛型父类"的字段类型反推完整类型参数的场景。

@@ -1,4 +1,4 @@
-package com.gto.datasynclib.datastream.codec;
+package com.gto.datasynclib.util;
 
 import io.netty.buffer.ByteBuf;
 import lombok.experimental.UtilityClass;

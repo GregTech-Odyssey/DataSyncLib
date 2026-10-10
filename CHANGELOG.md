@@ -1,5 +1,19 @@
 # Changelog
 
+## 26.10.9
+
+### New Features
+- **Versioned files**: `VersionedFriendlyByteBuf` is a `FriendlyByteBuf` that also carries the version its
+  payload was written at, and `FileUtil.writeVersioned(path, version, encoder, value)` /
+  `FileUtil.readVersioned(path, decoder)` are the pair that produce and consume one — the writer puts the
+  version at the head of the file as a VarInt, the reader takes it off the head. A stream codec asks
+  `buf.version()`, a carrier codec reads `ops.dataVersion()`; the value-flavoured pair builds the
+  `ValueOps` at the file's version, so a payload that changed shape between versions reads the shape its
+  own version asks for. The version must be in `1 .. FileUtil.MAX_VERSION`: `0` is not a version the
+  library writes, so a file that predates versioning is refused rather than misread, and a plain
+  `try { readVersioned } catch (RuntimeException) { read }` is a working fallback that lets an old
+  hand-written codec be deleted once no file needs it.
+
 ## 26.10.5
 
 ### New Features

@@ -1,5 +1,6 @@
 package com.gto.datasynclib.datastream.codec;
 
+import com.gto.datasynclib.util.VarInts;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufOutputStream;
 import io.netty.buffer.Unpooled;

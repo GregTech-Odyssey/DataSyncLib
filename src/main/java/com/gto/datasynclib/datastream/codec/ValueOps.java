@@ -1,6 +1,7 @@
 package com.gto.datasynclib.datastream.codec;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
@@ -1378,7 +1379,7 @@ public interface ValueOps {
      * Data's, a byte array written by one carrier reads in the other.
      */
     default byte[] toBytes(Object value) {
-        var buf = Unpooled.buffer();
+        var buf = ByteBufAllocator.DEFAULT.buffer();
         try {
             writeValue(value, buf);
             var bytes = new byte[buf.readableBytes()];

@@ -1,5 +1,6 @@
 package com.gto.datasynclib.datastream.codec;
 
+import com.gto.datasynclib.util.VarInts;
 import com.gto.datasynclib.datastream.codec.ValueOps.Type;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
