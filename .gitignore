@@ -24,3 +24,5 @@ src/generated/resources/.cache/
 *.patch
 *.DS_Store
 
+# javac's error report when an @argfile cannot be read
+javac.*.args

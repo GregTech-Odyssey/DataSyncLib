@@ -1,7 +1,7 @@
 package com.gto.datasynclib.datastream.codec;
 
 import com.gto.datasynclib.DataSyncCodec;
-import com.gto.datasynclib.util.StreamCodecExtends;
+import com.gto.datasynclib.util.ByteBufCodecExtends;
 import com.mojang.datafixers.util.Either;
 import com.mojang.serialization.Codec;
 import io.netty.buffer.ByteBuf;
@@ -46,7 +46,7 @@ import java.util.function.ToIntFunction;
  * <ul>
  *   <li>the constants: the numeric family is {@code StreamCodec<ByteBuf, …>} — the least a buffer can
  *       be while still carrying a VarInt ({@link VarInts}) — while {@link #STRING_UTF8} and the
- *       Minecraft value types ({@link StreamCodecExtends}, the extension of this
+ *       Minecraft value types ({@link ByteBufCodecExtends}, the extension of this
  *       interface) need {@link FriendlyByteBuf}'s own API</li>
  *   <li>{@link #optional}, {@link #map}, {@link #collection}, {@link #list}, {@link #set},
  *       {@link #array} and {@link #either}, which write a size or a presence flag and therefore need

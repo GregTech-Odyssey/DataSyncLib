@@ -12,6 +12,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Arrays;
+import java.util.ArrayList;
 
 /**
  * Synchronizes a generic object array with element codec support.
@@ -45,9 +46,6 @@ import java.util.Arrays;
  *
  * <p>Null elements are encoded with a boolean prefix.</p>
  */
-
-import java.util.ArrayList;
-
 public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
 
     private final DataSyncCodec<T> elementCodec;
@@ -105,7 +103,8 @@ public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
     protected @NotNull Object doWriteValue(@NotNull Object source, T @NotNull [] instance, @NotNull ValueOps ops) {
         if (definition.hasDefaultValue() && Arrays.equals(instance, definition.getDefaultValue(source)))
             return NOT_PERSISTED;
-        var list = new ArrayList<Object>(instance.length);
+        if (instance.length == 0) return ops.createNull();
+        var list = new ArrayList<>(instance.length);
         for (T element : instance) {
             list.add(ops.isNull(element) ? ops.createNull() : elementCodec.encode(ops, element));
         }
@@ -119,6 +118,9 @@ public final class ArrayAccess<T> extends AbstractFieldAccess<T[]> {
 
     @Override
     protected void doReadValue(T @NotNull [] instance, @NotNull Object data, @NotNull ValueOps ops) {
+        // the absent marker written when every slot was empty: nothing to restore, so leave the
+        // in-place array as it is rather than asking the carrier for a list it does not hold
+        if (ops.isNull(data)) return;
         var list = ops.getList(data);
         var length = Math.min(list.size(), instance.length);
         for (int i = 0; i < length; i++) {

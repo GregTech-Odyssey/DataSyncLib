@@ -6,6 +6,7 @@ import com.gto.datasynclib.datastream.codec.ByteBufCodecs;
 import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.datastream.codec.ValueCodec;
 import com.gto.datasynclib.datastream.codec.ValueOps.Type;
+import com.gto.datasynclib.datastream.codec.ValueConverters;
 import com.gto.datasynclib.datastream.codec.StreamCodec;
 import com.gto.datasynclib.remote.RemoteInvoker;
 import com.gto.datasynclib.remote.RemoteNetwork;
@@ -39,11 +40,18 @@ import net.minecraft.world.phys.AABB;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.items.ItemStackHandler;
 
+import java.io.Serializable;
 import java.lang.reflect.Field;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Development-only test suite for {@link TestBlockEntity}, covering the public API surface of the
@@ -242,10 +250,14 @@ public final class TestBlockEntityTests {
         var stringSlots = new String[]{"a", null, "c"};
         expect("codecs.objectArrayNullSlotRoundTrip", Arrays.equals(stringSlots,
                 stringArrayCodec.decode(nativeOps, stringArrayCodec.encode(nativeOps, stringSlots))));
-        // An empty array is an empty list, not the absent marker, so it round-trips as an empty array.
+        // An empty array is the absent marker, the shape the retired registry-level array codec
+        // wrote, and it round-trips as an empty array. The generic {@code ValueCodec.array} helper
+        // writes an empty list instead, so both shapes have to read back as length 0.
         var emptyArrayPayload = stringArrayCodec.encode(nativeOps, new String[0]);
-        expect("codecs.objectArrayEmptyIsList", nativeOps.isList(emptyArrayPayload));
+        expect("codecs.objectArrayEmptyIsMarker", nativeOps.isNull(emptyArrayPayload));
         expect("codecs.objectArrayEmptyRoundTrip", stringArrayCodec.decode(nativeOps, emptyArrayPayload).length == 0);
+        expect("codecs.objectArrayEmptyListPayload",
+                stringArrayCodec.decode(nativeOps, nativeOps.createList(new ArrayList<>())).length == 0);
         // A payload that is absent (or is not a list at all) is a zero-length array, the answer the
         // retired array codec gave — never a failure while an old save is being read.
         expect("codecs.objectArrayNullPayload", stringArrayCodec.decode(nativeOps, nativeOps.createNull()).length == 0);
@@ -253,7 +265,7 @@ public final class TestBlockEntityTests {
         // an ArrayAccess over the {@code Direction[]} codec, so the outer payload is a list of row
         // payloads and each row payload is decoded by that element codec in turn.
         var rowCodec = DataSyncCodec.get(Direction[].class);
-        var rows = new ArrayList<Object>();
+        var rows = new ArrayList<>();
         for (int row = 0; row < 3; row++) {
             var rowValues = new Direction[3];
             rowValues[row] = Direction.values()[row];
@@ -270,6 +282,115 @@ public final class TestBlockEntityTests {
             var decodedRow = rowCodec.decode(nativeOps, savedRows.get(row));
             expect("codecs.nestedArrayRow" + row, Arrays.equals(expected, decodedRow));
         }
+
+        // ---- SELF converters: a registered class travels as the carrier value it converts to ----
+        // UUID is registered by JavaValueOps.init(), so it is stored as the long pair the type set
+        // already has: the id of the payload, no SELF wrapper and no flag byte in between.
+        var uuid = UUID.fromString("12345678-1234-5678-1234-567812345678");
+        var uuidBytes = nativeOps.toBytes(uuid);
+        expect("codecs.selfUuidTypeId", Type.LONG_ARRAY, nativeOps.getTypeId(uuid));
+        expect("codecs.selfUuidIsCarrier", uuidBytes.length == 18 && (uuidBytes[0] & 0xFF) == Type.LONG_ARRAY);
+        expect("codecs.selfUuidPayloadIsLongs", Arrays.equals(
+                new long[]{uuid.getMostSignificantBits(), uuid.getLeastSignificantBits()},
+                (long[]) nativeOps.fromBytes(uuidBytes)));
+        // what comes back is the payload, so the value itself is the converter's answer
+        expect("codecs.selfUuidGetSelf", uuid, nativeOps.getSelf(nativeOps.fromBytes(uuidBytes), UUID.class));
+        expect("codecs.selfUuidOpsMatchesWire", Arrays.equals(
+                (long[]) nativeOps.createUUID(uuid), (long[]) nativeOps.fromBytes(uuidBytes)));
+        // a class with no converter keeps Java serialization, framed by a length so a value stored
+        // after it stays readable
+        var serialized = nativeOps.toBytes(new SelfPlain("value"));
+        expect("codecs.selfSerializedTypeId", Type.SELF, nativeOps.getTypeId(new SelfPlain("value")));
+        expect("codecs.selfSerializedRoundTrip", "value", ((SelfPlain) nativeOps.fromBytes(serialized)).text);
+        expect("codecs.selfSerializedIsBigger", serialized.length > uuidBytes.length);
+        var nestedSelf = (List<?>) nativeOps.fromBytes(nativeOps.toBytes(List.of(new SelfPlain("deep"), "after")));
+        expect("codecs.selfNestedKeepsFollowingValue", "after", nestedSelf.get(1));
+        // getSelf's class argument: the value itself when it already is that type, null when absent
+        expect("codecs.selfGetSelfIdentity", uuid, nativeOps.getSelf(uuid, UUID.class));
+        expect("codecs.selfGetSelfNull", null, nativeOps.getSelf(nativeOps.createNull(), UUID.class));
+        // and the converter really is reachable from the registry on both sides
+        expect("codecs.selfRegisteredByClass", ValueConverters.converter(UUID.class) != null);
+        expect("codecs.selfRegisteredDerived", ValueConverters.converter(BigDecimal.class) != null
+                && ValueConverters.converter(Instant.class) != null
+                && ValueConverters.converter(LocalDateTime.class) != null);
+        // the derived types the library registers share one canonical payload with the ops method
+        var bigDecimal = new BigDecimal("123456789012345678901234567890.12345");
+        expect("codecs.selfBigDecimalRoundTrip", bigDecimal, nativeOps.getBigDecimal(nativeOps.createBigDecimal(bigDecimal)));
+        expect("codecs.selfBigDecimalScale", bigDecimal.scale(), nativeOps.getBigDecimal(nativeOps.createBigDecimal(bigDecimal)).scale());
+        expect("codecs.selfBigDecimalViaSelf", bigDecimal, nativeOps.getSelf(nativeOps.fromBytes(nativeOps.toBytes(bigDecimal)), BigDecimal.class));
+        expect("codecs.selfBigDecimalIsPayload", Type.BYTE_ARRAY, nativeOps.getTypeId(bigDecimal));
+        expect("codecs.selfBigIntegerIsPayload", Type.BYTE_ARRAY, nativeOps.getTypeId(BigInteger.valueOf(987654321)));
+        expect("codecs.selfBigIntegerViaSelf", BigInteger.valueOf(987654321),
+                nativeOps.getSelf(nativeOps.fromBytes(nativeOps.toBytes(BigInteger.valueOf(987654321))), BigInteger.class));
+        var instant = Instant.ofEpochSecond(1_700_000_000L, 123_456_789);
+        expect("codecs.selfUuidViaOpsMethod", uuid, nativeOps.getUUID(nativeOps.createUUID(uuid)));
+        // an array the type set has no id of its own for is a converter too, so a raw value is written
+        // as the primitive array the matching codec writes
+        var flags = new boolean[]{true, false, true};
+        expect("codecs.selfBooleanArrayTypeId", Type.BYTE_ARRAY, nativeOps.getTypeId(flags));
+        expect("codecs.selfBooleanArrayIsPayload", Arrays.equals(
+                (byte[]) nativeOps.createBooleanArray(flags), (byte[]) nativeOps.fromBytes(nativeOps.toBytes(flags))));
+        expect("codecs.selfBooleanArrayRoundTrip", Arrays.equals(flags,
+                nativeOps.getSelf(nativeOps.fromBytes(nativeOps.toBytes(flags)), boolean[].class)));
+        var doubles = new double[]{1.5, -0.0, Double.NaN};
+        expect("codecs.selfDoubleArrayTypeId", Type.LONG_ARRAY, nativeOps.getTypeId(doubles));
+        expect("codecs.selfDoubleArrayRoundTrip", Arrays.equals(doubles,
+                nativeOps.getSelf(nativeOps.fromBytes(nativeOps.toBytes(doubles)), double[].class)));
+        expect("codecs.selfArrayRegistered", ValueConverters.converter(boolean[].class) != null
+                && ValueConverters.converter(short[].class) != null
+                && ValueConverters.converter(char[].class) != null
+                && ValueConverters.converter(float[].class) != null
+                && ValueConverters.converter(double[].class) != null);
+        // every map is a STRING_MAP now: an object-keyed one included, as long as its keys are strings
+        var objectKeyed = new it.unimi.dsi.fastutil.objects.Reference2ObjectOpenHashMap<String, Object>();
+        objectKeyed.put("a", 1);
+        expect("codecs.mapObjectKeyedIsStringMap", Type.STRING_MAP, nativeOps.getTypeId(objectKeyed));
+        expect("codecs.mapObjectKeyedRoundTrip", 1,
+                ((Map<?, ?>) nativeOps.fromBytes(nativeOps.toBytes(objectKeyed))).get("a"));
+        var keyedByInt = new it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap<Object, Object>();
+        keyedByInt.put(7, "seven");
+        expect("codecs.mapNonStringKeyRefused", throwsRuntime(() -> nativeOps.toBytes(keyedByInt)));
+        // a converter declared for an interface covers its implementations through the predicate, and
+        // its read side builds that same type, so asking for the implementation is answered too
+        ValueConverters.Converter.builder(Type.STRING, Tagged.class)
+                .when(Tagged.class::isAssignableFrom)
+                .write((ops, tagged) -> ops.createString(tagged.tag()))
+                .read((ops, data) -> new TaggedImpl(ops.getString(data)))
+                .build();
+        var tagged = new TaggedImpl("tagged");
+        expect("codecs.selfPredicateTypeId", Type.STRING, nativeOps.getTypeId(tagged));
+        var taggedCarrier = nativeOps.fromBytes(nativeOps.toBytes(tagged));
+        expect("codecs.selfPredicateCoversSubclass", ValueConverters.converter(TaggedImpl.class) != null);
+        expect("codecs.selfPredicateCarrierIsPayload", "tagged", taggedCarrier);
+        expect("codecs.selfPredicateAsInterface", "tagged", nativeOps.getSelf(taggedCarrier, Tagged.class).tag());
+        expect("codecs.selfPredicateAsImplementation", "tagged", nativeOps.getSelf(taggedCarrier, TaggedImpl.class).tag());
+        // a type no converter can produce is reported rather than half-answered
+        expect("codecs.selfUnconvertibleTypeReported",
+                throwsRuntime(() -> nativeOps.getSelf(taggedCarrier, Runnable.class)));
+    }
+
+    /**
+     * The interface a predicate-based converter is declared for.
+     */
+    interface Tagged {
+        String tag();
+    }
+
+    /**
+     * An implementation the converter above was not declared for, only covered by its predicate.
+     */
+    record TaggedImpl(String value) implements Tagged, Serializable {
+
+        @Override
+        public String tag() {
+            return value;
+        }
+    }
+
+    /**
+     * A class with no converter: it stays on the Java-serialization path.
+     */
+    record SelfPlain(String text) implements Serializable {
     }
 
     /**

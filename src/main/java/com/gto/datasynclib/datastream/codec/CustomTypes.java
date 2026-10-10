@@ -2,6 +2,7 @@ package com.gto.datasynclib.datastream.codec;
 
 import io.netty.buffer.ByteBuf;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import lombok.experimental.UtilityClass;
 import org.jetbrains.annotations.Nullable;
 
@@ -43,12 +44,11 @@ public class CustomTypes {
      * A registered custom type: its wire id and the payload codec.
      *
      * @param id    the id written on the wire — unique across the registry, forever
-     * @param copy  copies a payload; {@link Function#identity()} when the type did not supply one
      * @param write writes a payload, without the id prefix
      * @param read  reads a payload, positioned right after the id
      * @param <T>   the payload type, which the carrier never inspects
      */
-    public record Type<T>(int id, Function<T, T> copy, BiConsumer<T, ByteBuf> write, Function<ByteBuf, T> read) {
+    public record Type<T>(int id, BiConsumer<T, ByteBuf> write, Function<ByteBuf, T> read) {
 
         /**
          * A builder for the type registered under {@code id}.
@@ -93,7 +93,6 @@ public class CustomTypes {
     public static final class Builder<T> {
 
         private final int id;
-        private Function<T, T> copy;
         private BiConsumer<T, ByteBuf> write;
         private Function<ByteBuf, T> read;
 
@@ -101,14 +100,6 @@ public class CustomTypes {
             this.id = id;
         }
 
-        /**
-         * Sets the payload copier, for carriers that have to duplicate a value. Without it the payload
-         * is copied by reference (identity).
-         */
-        public Builder<T> copy(Function<T, T> copy) {
-            this.copy = copy;
-            return this;
-        }
 
         /**
          * Sets the payload writer — the id is written by the carrier, not here.
@@ -130,7 +121,7 @@ public class CustomTypes {
          * Registers the type and returns it.
          */
         public Type<T> build() {
-            var type = new Type<>(id, copy == null ? Function.identity() : copy, write, read);
+            var type = new Type<>(id, write, read);
             register(type);
             return type;
         }

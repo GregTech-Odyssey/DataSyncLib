@@ -1,14 +1,9 @@
 package com.gto.datasynclib.util;
 
-import com.gto.datasynclib.datastream.codec.CustomTypes;
 import com.gto.datasynclib.datastream.codec.JavaOps;
-import com.gto.datasynclib.datastream.codec.JavaValueOps;
-import com.gto.datasynclib.datastream.codec.StreamCodec;
 import com.gto.datasynclib.datastream.codec.ValueCodec;
 import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.mojang.serialization.Codec;
-import io.netty.buffer.Unpooled;
-import net.minecraft.network.FriendlyByteBuf;
 import lombok.experimental.UtilityClass;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Registry;
@@ -25,13 +20,10 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.fluids.FluidStack;
-import org.jetbrains.annotations.Nullable;
-
-import java.util.function.Function;
 
 /**
  * The Minecraft-typed {@link ValueCodec} constants — the twin of the network half in
- * {@link StreamCodecExtends}, and the replacement for the retired Data codec table. The carrier's own types
+ * {@link ByteBufCodecExtends}, and the replacement for the retired Data codec table. The carrier's own types
  * (the primitives and their arrays, String, UUID, BigInteger, the FastUtil primitive collections)
  * live on {@link ValueCodec} itself, next to the codec they are: these are the types that need a
  * game class to be built, so they live here.
@@ -190,22 +182,11 @@ public class ValueCodecs {
 
     // ---- NBT: a registered custom payload holding the tag itself, no conversion at all ----
 
-    /**
-     * A {@link ListTag} as a custom payload. A payload written before the migration holds a
-     * converted tree instead, which the decode side still understands through
-     * {@link NbtUtil#convertToTag(Object)}.
-     */
-    public final ValueCodec<ListTag> LIST_TAG = customCodec(NbtUtil.LIST_TAG_TYPE, value -> (ListTag) NbtUtil.convertToTag(value));
+    public final ValueCodec<ListTag> LIST_TAG = ValueCodec.custom(NbtUtil.LIST_TAG_TYPE);
 
-    /**
-     * See {@link #LIST_TAG}.
-     */
-    public final ValueCodec<CompoundTag> COMPOUND_TAG = customCodec(NbtUtil.COMPOUND_TAG_TYPE, value -> (CompoundTag) NbtUtil.convertToTag(value));
+    public final ValueCodec<CompoundTag> COMPOUND_TAG = ValueCodec.custom(NbtUtil.COMPOUND_TAG_TYPE);
 
-    /**
-     * See {@link #LIST_TAG}.
-     */
-    public final ValueCodec<Tag> TAG = customCodec(NbtUtil.TAG_TYPE, NbtUtil::convertToTag);
+    public final ValueCodec<Tag> TAG = ValueCodec.custom(NbtUtil.TAG_TYPE);
 
     public final ValueCodec<ItemStack> ITEM_STACK = new ValueCodec<>() {
 
@@ -272,45 +253,13 @@ public class ValueCodecs {
         };
     }
 
-    /**
-     * A {@link StreamCodec} seen as a value codec: the wire bytes are stored as one
-     * {@code BYTE_ARRAY} value, which is what the retired {@code Data} bridge used to do. Use it
-     * for a quick persistence path; a type that is persisted often wants a codec of its own.
-     */
-    public <T> ValueCodec<T> fromStreamCodec(StreamCodec<? super FriendlyByteBuf, T> streamCodec) {
-        return new ValueCodec<>() {
-
-            @Override
-            public Object encode(ValueOps ops, T value) {
-                var buf = Unpooled.buffer();
-                try {
-                    streamCodec.encode(new FriendlyByteBuf(buf), value);
-                    var bytes = new byte[buf.readableBytes()];
-                    buf.getBytes(buf.readerIndex(), bytes);
-                    return ops.createByteArray(bytes);
-                } finally {
-                    buf.release();
-                }
-            }
-
-            @Override
-            public T decode(ValueOps ops, Object data) {
-                var buf = Unpooled.wrappedBuffer(ops.getByteArray(data));
-                try {
-                    return streamCodec.decode(new FriendlyByteBuf(buf));
-                } finally {
-                    buf.release();
-                }
-            }
-        };
-    }
 
     /**
      * A Mojang DFU {@link Codec} seen as a value codec: it runs on {@link JavaOps}, so the carrier of
      * a DFU codec is a carrier value. This replaces
      * the retired {@code DataCodec.of(Codec)}, and it reads the same values that bridge produced.
      */
-    public <T> ValueCodec<T> fromCodec(Codec<T> codec) {
+    public static <T> ValueCodec<T> fromCodec(Codec<T> codec) {
         return new ValueCodec<>() {
 
             @Override
@@ -325,62 +274,4 @@ public class ValueCodecs {
         };
     }
 
-    /**
-     * Reads one stored NBT tag from either side of the migration. Called when a payload is not this
-     * build's {@code CUSTOM}-wrapped tag:
-     * <ul>
-     *   <li>the retired plain tag encoding — a plain NBT type byte ({@code 1…12}) followed by
-     *       {@code name + payload};</li>
-     *   <li>otherwise the converted carrier tree an older build wrote, which
-     *       {@link NbtUtil#convertToTag(Object)} rebuilds.</li>
-     * </ul>
-     *
-     * <p>The two cannot be confused: the retired encoding starts with an NBT type id
-     * ({@code 1…12}), while a converted tree starts with one of the carrier's own container ids —
-     * {@code LIST} (13), {@code STRING_MAP} (14), {@code OBJECT_MAP} (16) and friends — or with the
-     * null id, all of which are outside that range.</p>
-     *
-     * @param ops  the carrier the value came from
-     * @param data the stored value, which is not this build's custom tag payload
-     */
-    @Nullable
-    private Tag readStoredTag(ValueOps ops, Object data) {
-        if (ops.isNull(data)) return null;
-        var id = ops.getTypeId(data);
-        if (id >= Tag.TAG_BYTE && id <= Tag.TAG_LONG_ARRAY) {
-            // the retired encoding: the tag's own bytes, name included, with no envelope
-            var bytes = ops.toBytes(data);
-            var payload = new byte[bytes.length - 1];
-            System.arraycopy(bytes, 1, payload, 0, payload.length);
-            return NbtUtil.readLegacy(id, payload);
-        }
-        return NbtUtil.convertToTag(data);
-    }
-
-    /**
-     * The shared body of the three NBT codecs: encode the tag as a custom payload of {@code type},
-     * and on decode take it back out — or, for a payload from before the migration, read the shape it
-     * was stored in with {@link #readStoredTag(ValueOps, Object)}.
-     */
-    @SuppressWarnings("unchecked")
-    private <T> ValueCodec<T> customCodec(CustomTypes.Type<T> type, Function<Object, T> fromTree) {
-        return new ValueCodec<>() {
-
-            @Override
-            public Object encode(ValueOps ops, T value) {
-                return ops.createCustom(type.id(), value);
-            }
-
-            @Override
-            public T decode(ValueOps ops, Object data) {
-                // one pattern match on the carrier value: isCustom + getCustomId + getCustom would ask
-                // the same question three times
-                if (data instanceof JavaValueOps.Custom(int typeId, Object value) && typeId == type.id()) {
-                    return (T) value;
-                }
-                var tag = readStoredTag(ops, data);
-                return tag == null ? fromTree.apply(data) : (T) tag;
-            }
-        };
-    }
 }

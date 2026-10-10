@@ -512,9 +512,12 @@ public class FieldDataManager {
 
     /**
      * Reads the named fields back from a carrier string map; an absent key leaves the field alone.
+     *
+     * <p>An absent payload — the null value {@link #writeToValue(ValueOps)} produces when nothing was
+     * stored — is a no-op rather than an error: there is nothing to read.</p>
      */
     public void readFieldsFromValue(@NotNull Object data, @NotNull ValueOps ops, String... fields) {
-        if (!ops.isStringMap(data)) return;
+        if (ops.isNull(data)) return;
         var map = ops.getStringMap(data);
         for (var field : fields) {
             var d = storage.definitionMap.get(field);
@@ -577,7 +580,8 @@ public class FieldDataManager {
     }
 
     private void readFromValue(Object data, ValueOps ops, DataField<?>[] fields) {
-        if (!ops.isStringMap(data)) return;
+        // an absent payload is "nothing was stored", not a malformed map
+        if (ops.isNull(data)) return;
         var map = ops.getStringMap(data);
         holder.readCustomSaveData(map, ops);
         for (var field : fields) {

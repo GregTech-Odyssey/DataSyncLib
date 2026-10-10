@@ -389,7 +389,7 @@ public final class DataSyncSelfTests {
      */
     static class GenericRefs {
         A<Integer> ints;                          // A<X> extends HashMap<String, X>  (2 args: String, Integer)
-        MyList<Object> myList;                    // MyList<T> implements List<String> (1 arg: String)
+        MyList<String> myList;                    // MyList<T> implements List<String> (1 arg: String)
         Box<String> box;                          // Box<U> extends BaseContainer<U,U> (2 args: String, String)
         Itr<Integer> itr;                         // Itr<T> implements Iterable<T> (1 arg: Integer)
     }

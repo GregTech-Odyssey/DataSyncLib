@@ -191,6 +191,42 @@ TAGS.freeze(); // ← auto: DataSyncCodec.get(ResearchTag.class) is now availabl
 
 After freezing, any field of the registered value type can be serialized via the global `DataSyncCodec.get(...)` without manual registration.
 
+### Advanced: SELF Converters for Custom Types
+
+A type the built-in set does not cover reaches the carrier as a `SELF` value, which by default is
+written with Java's serializer. Register a converter and it travels as an ordinary carrier value
+instead — smaller, readable in a save file, and stable when the class changes:
+
+```java
+ValueConverters.Converter.<UUID>builder(ValueOps.Type.LONG_ARRAY, UUID.class)
+        .write((ops, uuid) -> ops.createUUID(uuid))        // the payload, built through the ops
+        .read((ops, data) -> ops.getUUID(data))
+        .build();                                          // build() registers it
+```
+
+The `builder` id is the `ValueOps.Type` id of the payload the converter writes — not an id of the
+converter's own, and nothing is written on the wire for it: a converted value is stored exactly as its
+payload, so a UUID is a `LONG_ARRAY` whether a field codec wrote it or the value was opaque. Two
+converters whose payloads are the same type share the id, and a class can only be registered once.
+
+A converter that should stand for a whole family adds a predicate; predicates are consulted in
+registration order, so register the narrow ones first:
+
+```java
+ValueConverters.Converter.<Tagged>builder(ValueOps.Type.STRING, Tagged.class)
+        .when(Tagged.class::isAssignableFrom)              // every implementation
+        .write((ops, tagged) -> ops.createString(tagged.tag()))
+        .read((ops, data) -> Tagged.of(ops.getString(data)))
+        .build();
+```
+
+`ValueOps#getSelf(data, Type.class)` is the read side: a value that already is that type comes back
+as it is, a converted one is turned back by its converter, and anything else is reported instead of
+guessed. `JavaValueOps#init()` registers the built-in set for you during mod construction — `UUID`,
+`BigInteger`, `BigDecimal`, `Instant`, `Duration`, `LocalDate`, `LocalTime`, `LocalDateTime`, and the
+arrays the type set has no id of its own for (`boolean[]`, `short[]`, `char[]`, `float[]`, `double[]`)
+— each of which stores the payload the matching `ValueOps#createXxx` produces.
+
 ### Advanced: Generic Hierarchy Resolution
 
 `ReflectUtil` provides utilities to resolve full generic arguments along a field type's **superclass / interface / multi-level** hierarchy — useful when a generic ancestor fixes some parameters.

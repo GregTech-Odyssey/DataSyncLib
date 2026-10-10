@@ -1,5 +1,85 @@
 # Changelog
 
+## 26.10.5
+
+### New Features
+- **`ValueConverters` — a converter registry for `SELF` values**: a class the type set does not cover used to
+  be written with Java's own serializer, which is fragile across class changes and opaque in a save
+  file. Register a converter and it travels as an ordinary carrier value instead:
+
+  ```java
+  ValueConverters.Converter.<UUID>builder(ValueOps.Type.LONG_ARRAY, UUID.class)
+          .write((ops, uuid) -> ops.createUUID(uuid))
+          .read((ops, data) -> ops.getUUID(data))
+          .build();
+  ```
+
+  - The `builder` id is the `ValueOps.Type` id of the payload the converter writes — not an id of the
+    converter's own, and nothing is written for it: a converted value is stored exactly as its payload,
+    under the payload's own id, with no wrapper and no flag byte. A UUID is a `LONG_ARRAY` in a save
+    file whether a field codec wrote it or it was opaque. Two converters whose payloads are the same
+    type share the id; a class can only be registered once.
+  - The payload functions are handed the `ValueOps` doing the work and build the payload from its
+    primitives, so a converter is not tied to one carrier's shapes.
+  - `JavaValueOps.init()` registers the built-in set during mod construction — `UUID`, `BigInteger`,
+    `BigDecimal`, `Instant`, `Duration`, `LocalDate`, `LocalTime`, `LocalDateTime`, and the five arrays
+    the type set has no id of its own for — each of which stores the payload the matching
+    `ValueOps#createXxx` produces, so a type reaches the same bytes whichever way it is written. A
+    downstream mod registers its own from its constructor.
+  - Lookup is by class on both sides over one set of entries: a `ClassValue` (with a generation counter,
+    so a registration that arrives after a lookup is still seen) resolves a value's class on the way
+    out, and a `Reference2ReferenceOpenHashMap` resolves the class on the way back. A converter whose
+    job is a whole family adds a `Predicate<Class<?>>` with `when(...)`; predicates are consulted in
+    registration order, so a narrow one goes first.
+  - `ValueOps#getSelf(Object, Class)` is the read side with a target type: a value that already is
+    that type comes back as it is, a converted one is turned back by its converter, and anything else
+    reports the mismatch instead of guessing. `getSelf(Object)` stays the identity.
+  - `SELF` is now only Java serialization, and its bytes are written as a length-framed byte array: an
+    `ObjectInputStream` reads ahead into a block buffer, so handing it the shared stream would let it
+    swallow the values framed after this one. **Note:** a nested `SELF` value written by an earlier
+    build of this refactor is no longer readable; the pre-refactor type set had no `SELF` id at all.
+
+### Changes
+- `OBJECT_MAP` is gone. A map is a `STRING_MAP`, an `INT_MAP` or a `LONG_MAP` — the FastUtil
+  object-keyed maps included, so a map whose keys are not strings is refused when it is written
+  instead of being stored under an id of its own. The id `16` it held is retired: nothing may take it,
+  and a value an older build stored under it is not readable. `createValueMap`/`getValueMap`/
+  `isValueMap` go with it.
+- The arrays with no id of their own — `boolean[]`, `short[]`, `char[]`, `float[]`, `double[]` — are
+  converters like every other derived type rather than cases inside the carrier: `boolean[]` stores a
+  `BYTE_ARRAY`, `short[]`/`char[]`/`float[]` an `INT_ARRAY` and `double[]` a `LONG_ARRAY`, each through
+  the matching `createXxxArray`. They used to fall through to `SELF` and be Java-serialized, which is
+  not what those methods and the matching codecs write.
+- `ValueOps#createUUID` … `#getLocalDateTime` are the payload definitions again — plain compositions of
+  the carrier's own primitives (`createLongArray`, `createByteArray`, …) rather than calls into the
+  converter registry — and `ValueOpsConverters` is a thin adapter that stores what they produce.
+- An empty value is now stored as the absent marker consistently: the object-array codec, the eight
+  scalar-array codecs, the eight array accessors and the `list`/`collection`/`array`/`map` helpers all
+  write the null marker for an empty value, and every read side checks `ops.isNull(data)` before
+  asking the carrier for a list or an array. The retired registry-level array codec did the same, so
+  the bytes are unchanged for these cases.
+- `FieldDataManager#readFromValue` / `#readAllFromValue` / `#readFieldsFromValue` treat an absent
+  payload as "nothing was stored" again: a holder whose fields are all at their default writes the
+  null marker, and reading it back is a no-op rather than a `ClassCastException`.
+- `AbstractFieldAccess` / `SerializableArrayAccess`: the `dataVersion == -1` legacy layout path was
+  removed together with its documentation — this build does not read the Data-era `uid`/`payload`
+  nesting.
+
+### Fixes
+- `TagSerializableAccess` wrote a tag with one codec and read it with another, so every
+  `INBTSerializable` field lost its state and an old save failed outright.
+- `TagSerializableArrayAccess` and `ArrayAccess` read a payload without a null guard, so a field whose
+  slots were all empty threw on load.
+- `JavaValueOps#write` had no `Object2ObjectMap` case although `getTypeId` reports `OBJECT_MAP`, so
+  the map was written with string-map framing under that id.
+- `@Codec(writeToValue=…, readFromValue=…)` instance-method mode resolved and invoked the hooks with
+  the wrong signature; they now take `(ValueOps, T)` / `(ValueOps, Object)` on the declaring instance,
+  as the annotation documents.
+- `Registry` captured its constructor parameter instead of the resolved `keyGetter`, which disabled
+  the documented null → `getKeyByMap` fallback.
+
+---
+
 ## 26.9.4 (2026-09-19)
 
 ### Breaking Changes

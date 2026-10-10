@@ -5,8 +5,14 @@ import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 
+import java.math.BigDecimal;
 import java.math.BigInteger;
-
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -27,9 +33,11 @@ import java.util.UUID;
  * <h3>The type set and its ids</h3>
  * <p>{@link Type} is the value model, and its ids are the <strong>Data wire ids</strong> — the ids
  * the Data type system has always used, with {@code BOOLEAN = 1} kept as the reserved slot Data's own
- * table has for it (a boolean travels as a byte, so nothing produces that id). The four container maps are distinct types ({@code STRING_MAP}, {@code OBJECT_MAP},
- * {@code INT_MAP}, {@code LONG_MAP}) exactly as they are on the wire, and {@code SELF} is the
- * carrier's own escape hatch (see below).</p>
+ * table has for it (a boolean travels as a byte, so nothing produces that id). The three container
+ * maps are distinct types ({@code STRING_MAP}, {@code INT_MAP}, {@code LONG_MAP}) exactly as they are
+ * on the wire, and {@code SELF} is the carrier's own escape hatch (see below). The id
+ * {@code OBJECT_MAP} used to hold — a map keyed by carrier values — is retired: a map is a
+ * {@code STRING_MAP} and its keys have to be strings.</p>
  *
  * <p>On top of that type set sit the <em>derived</em> views - {@code boolean[]}, {@code short[]},
  * {@code char[]}, {@code float[]}, {@code double[]}, {@link java.util.UUID} and
@@ -43,12 +51,12 @@ import java.util.UUID;
  *   <tr><td>2…8</td><td>BYTE … DOUBLE</td><td>{@code Byte} … {@code Double}</td><td>the numeric records</td></tr>
  *   <tr><td>9…11</td><td>BYTE_ARRAY, INT_ARRAY, LONG_ARRAY</td><td>{@code byte[]}, {@code int[]}, {@code long[]}</td><td>the array Data</td></tr>
  *   <tr><td>12</td><td>STRING</td><td>{@code String}</td><td>{@code StringData}</td></tr>
- *   <tr><td>13</td><td>LIST</td><td>{@code List<Object>}</td><td>the old list type</td></tr>
+ *   <tr><td>13</td><td>LIST</td><td>{@code List<>}</td><td>the old list type</td></tr>
  *   <tr><td>14</td><td>STRING_MAP</td><td>{@code Map<String, Object>}</td><td>the old string map</td></tr>
  *   <tr><td>15</td><td>CUSTOM</td><td>a registered {@link CustomTypes.Type}</td><td>the old custom wrapper</td></tr>
- *   <tr><td>16</td><td>OBJECT_MAP</td><td>{@code Map<Object, Object>}</td><td>{@code DataMapData}</td></tr>
- *   <tr><td>17</td><td>INT_MAP</td><td>{@code Int2ObjectMap<Object>}</td><td>{@code IntMapData}</td></tr>
- *   <tr><td>18</td><td>LONG_MAP</td><td>{@code Long2ObjectMap<Object>}</td><td>{@code LongMapData}</td></tr>
+ *   <tr><td>16</td><td>retired</td><td>—</td><td>{@code DataMapData}, a map keyed by carrier values</td></tr>
+ *   <tr><td>17</td><td>INT_MAP</td><td>{@code Int2ObjectMap<>}</td><td>{@code IntMapData}</td></tr>
+ *   <tr><td>18</td><td>LONG_MAP</td><td>{@code Long2ObjectMap<>}</td><td>{@code LongMapData}</td></tr>
  *   <tr><td>19</td><td>SELF</td><td>the value itself</td><td>—</td></tr>
  * </table>
  *
@@ -83,10 +91,10 @@ import java.util.UUID;
  * <p>{@code SELF} is the carrier's own opaque value: an object the ops recognizes as a value but
  * cannot break into primitives — for the native implementation, anything that is not one of the
  * types above. {@link #createSelf(Object)} and {@link #getSelf(Object)} are the identity there, and
- * a SELF value has no wire form of its own; a codec that knows how to serialize it is what turns it
- * into something writable.</p>
- * <p>
- *            Data-backed one
+ * a SELF value has no wire form of its own: a codec that knows how to serialize it is what turns it
+ * into something writable. {@link ValueConverters} is the other way out — register a converter for the
+ * class and the ops writes an ordinary carrier value in its place, {@link #getSelf(Object, Class)}
+ * being the read side that asks for the value back as its own type.</p>
  */
 public interface ValueOps {
 
@@ -132,7 +140,8 @@ public interface ValueOps {
         byte LIST = 13;
         byte STRING_MAP = 14;
         byte CUSTOM = 15;
-        byte OBJECT_MAP = 16;
+        // 16 is retired: it held OBJECT_MAP, the map keyed by carrier values. Every map is a
+        // STRING_MAP now, so nothing may take the id back — a stored 16 is not readable.
         byte INT_MAP = 17;
         byte LONG_MAP = 18;
         byte SELF = 19;
@@ -170,11 +179,6 @@ public interface ValueOps {
 
     boolean isStringMap(Object data);
 
-    /**
-     * Whether {@code data} is a map keyed by carrier values — {@link Type#OBJECT_MAP}.
-     */
-    boolean isValueMap(Object data);
-
     boolean isIntMap(Object data);
 
     boolean isLongMap(Object data);
@@ -185,6 +189,11 @@ public interface ValueOps {
     boolean isSelf(Object data);
 
     boolean isCustom(Object data);
+
+    /**
+     * @return the id of the custom type {@code data} was created with
+     */
+    int getCustomId(Object data);
 
     // ===== Creation =====
 
@@ -222,57 +231,57 @@ public interface ValueOps {
     /**
      * The boxed form of {@link #createBoolean(boolean)}.
      */
-    default Object createBoolean(Boolean value) {
-        return createBoolean((boolean) value);
+    default Object createBooleanBoxed(Boolean value) {
+        return createBoolean(value);
     }
 
     /**
      * The boxed form of {@link #createByte(byte)}.
      */
-    default Object createByte(Byte value) {
-        return createByte((byte) value);
+    default Object createByteBoxed(Byte value) {
+        return createByte(value);
     }
 
     /**
      * The boxed form of {@link #createShort(short)}.
      */
-    default Object createShort(Short value) {
-        return createShort((short) value);
+    default Object createShortBoxed(Short value) {
+        return createShort(value);
     }
 
     /**
      * The boxed form of {@link #createChar(char)}.
      */
-    default Object createChar(Character value) {
-        return createChar((char) value);
+    default Object createCharBoxed(Character value) {
+        return createChar(value);
     }
 
     /**
      * The boxed form of {@link #createInt(int)}.
      */
-    default Object createInt(Integer value) {
-        return createInt((int) value);
+    default Object createIntBoxed(Integer value) {
+        return createInt(value);
     }
 
     /**
      * The boxed form of {@link #createLong(long)}.
      */
-    default Object createLong(Long value) {
-        return createLong((long) value);
+    default Object createLongBoxed(Long value) {
+        return createLong(value);
     }
 
     /**
      * The boxed form of {@link #createFloat(float)}.
      */
-    default Object createFloat(Float value) {
-        return createFloat((float) value);
+    default Object createFloatBoxed(Float value) {
+        return createFloat(value);
     }
 
     /**
      * The boxed form of {@link #createDouble(double)}.
      */
-    default Object createDouble(Double value) {
-        return createDouble((double) value);
+    default Object createDoubleBoxed(Double value) {
+        return createDouble(value);
     }
 
     Object createString(String value);
@@ -289,14 +298,10 @@ public interface ValueOps {
     Object createList(List<Object> elements);
 
     /**
-     * Creates a map keyed by strings, from carrier values.
+     * Creates a map keyed by strings, from carrier values. Every map is this one: a map whose keys are
+     * not strings has no id of its own and cannot be stored.
      */
     Object createStringMap(Map<String, Object> entries);
-
-    /**
-     * Creates a map keyed by carrier values (any type the implementation supports as a key).
-     */
-    Object createValueMap(Map<Object, Object> entries);
 
     Object createIntMap(Int2ObjectMap<Object> entries);
 
@@ -312,7 +317,7 @@ public interface ValueOps {
      *
      * @throws IllegalArgumentException if no custom type is registered under {@code typeId}
      */
-    <V> Object createCustom(int typeId, V value);
+    <V> Object createCustom(CustomTypes.Type<V> type, V value);
 
     // ===== Reads: unchecked (cast) flavour =====
 
@@ -350,8 +355,6 @@ public interface ValueOps {
 
     Map<String, Object> getStringMap(Object data);
 
-    Map<Object, Object> getValueMap(Object data);
-
     Int2ObjectMap<Object> getIntMap(Object data);
 
     Long2ObjectMap<Object> getLongMap(Object data);
@@ -362,96 +365,42 @@ public interface ValueOps {
     <V> V getSelf(Object data);
 
     /**
-     * @return the id of the custom type {@code data} was created with
+     * The opaque value behind {@code data}, read as {@code type}.
+     *
+     * <p>Two shapes reach here. A value the carrier already holds as {@code type} — the identity
+     * case, and the one a {@code SELF} value a codec built itself has — is handed straight back. Any
+     * other shape is a payload a registered {@link ValueConverters.Converter} produced on the way out:
+     * the one that covers {@code type} turns it back, whether it was declared for {@code type} or
+     * covers it through its predicate.</p>
+     *
+     * @param type the class the value should come back as, and the key the converter is looked up by
+     * @return the value, or {@code null} when {@code data} is absent
+     * @throws IllegalArgumentException if {@code data} is neither that type nor convertible to it
      */
-    int getCustomId(Object data);
+    default <V> V getSelf(Object data, Class<V> type) {
+        if (isNull(data)) return null;
+        if (type.isInstance(data)) return type.cast(data);
+        var converter = ValueConverters.converter(type);
+        if (converter == null) {
+            throw new IllegalArgumentException("No converter is registered for " + type.getName()
+                    + " and the stored value is a " + describe(data));
+        }
+        return type.cast(converter.toValue(this, data));
+    }
+
+    /**
+     * The class name of {@code data}, for the messages of the unchecked getters. A default so a
+     * carrier that has no naming of its own still reports something useful.
+     */
+    default String describe(Object data) {
+        return data == null ? "null" : data.getClass().getName();
+    }
 
     /**
      * @return the payload of a custom value, as it was handed to {@link #createCustom(int, Object)}
      */
-    <V> V getCustom(Object data);
+    <V> V getCustom(CustomTypes.Type<V> type, Object data);
 
-    /**
-     * The format version this carrier reads at; {@code 0} when there is none.
-     *
-     * <p>The version belongs to the carrier rather than to a codec signature: a codec that has to read
-     * an older shape asks the ops it was handed, so no {@code decode} overload has to thread a number
-     * through every composite or container helper.
-     * {@link JavaValueOps#create(int)} hands back the same carrier at another version, and
-     * {@link JavaValueOps#INSTANCE} is version {@code 0}.</p>
-     */
-    default int dataVersion() {
-        return 0;
-    }
-    // ===== Binary form =====
-
-    /**
-     * The id of the type {@code data} holds — one of {@link Type}.
-     */
-    byte getTypeId(Object data);
-
-    /**
-     * Reads the payload of a value of type {@code id}; the id byte itself has already been consumed
-     * by the caller.
-     */
-    Object read(byte id, ByteBuf stream);
-
-    /**
-     * Writes the payload of {@code data}; the id byte ({@link #getTypeId(Object)}) is the caller's to
-     * write first.
-     */
-    void write(Object data, ByteBuf stream);
-
-    /**
-     * Writes a complete nested value: the id byte, then the payload of {@link #write(Object, ByteBuf)}.
-     * This pair is what the wire format repeats for every list element and every map key and value, so
-     * a carrier that can name a type without a second lookup should override this and fold the two
-     * steps into one — {@link JavaValueOps} does, which is what keeps a long list of scalars cheap.
-     */
-    default void writeValue(Object value, ByteBuf stream) {
-        stream.writeByte(getTypeId(value));
-        write(value, stream);
-    }
-
-    /**
-     * Reads a {@link #writeValue(Object, ByteBuf)} back. The id byte is on the wire, so this is a
-     * single dispatch for every carrier.
-     */
-    default Object readValue(ByteBuf stream) {
-        return read(stream.readByte(), stream);
-    }
-
-    /**
-     * The value as a standalone byte array: the id byte followed by the payload — exactly what
-     * {@link #getTypeId(Object)} and {@link #write(Object, ByteBuf)} produce, and the layout the Data
-     * type system stored a value in. This is what a field is persisted as, and because the ids are
-     * Data's, a byte array written by one carrier reads in the other.
-     */
-    default byte[] toBytes(Object value) {
-        var buf = Unpooled.buffer();
-        try {
-            writeValue(value, buf);
-            var bytes = new byte[buf.readableBytes()];
-            buf.getBytes(buf.readerIndex(), bytes);
-            return bytes;
-        } finally {
-            buf.release();
-        }
-    }
-
-    /**
-     * Reads a {@link #toBytes(Object)} byte array back, id byte included.
-     *
-     * @throws IllegalArgumentException if the id byte names no type
-     */
-    default Object fromBytes(byte[] bytes) {
-        var buf = Unpooled.wrappedBuffer(bytes);
-        try {
-            return read(buf.readByte(), buf);
-        } finally {
-            buf.release();
-        }
-    }
 
     // ===== Boxed reads: the wrapper form of the primitive getters =====
     // The mirror of the boxed creators: a ValueCodec<Integer> has to return an Integer, so
@@ -514,166 +463,133 @@ public interface ValueOps {
     default Double getDoubleBoxed(Object data) {
         return getDouble(data);
     }
-    // ===== Derived values: convenience views over the primitive types =====
-    // None of these adds a wire type: each one is a packing over an array the type set already has,
-    // spelled the way the Data type system spells it, so a value written through one carrier reads
-    // through the other. They are default methods because every carrier gets them for free from its
-    // own primitive array pair.
 
-    /**
-     * A {@code boolean[]} as the {@code byte[]} of {@code 0}/{@code 1} values — the shape Data stores
-     * a boolean array in. Reads back through {@link #getBooleanArray(Object)}; a byte that is not
-     * {@code 0} or {@code 1} only round-trips as a byte array.
-     */
     default Object createBooleanArray(boolean[] value) {
-        var bytes = new byte[value.length];
-        for (int i = 0; i < value.length; i++) {
-            bytes[i] = value[i] ? (byte) 1 : (byte) 0;
-        }
-        return createByteArray(bytes);
+        return createSelf(value);
     }
 
-    /**
-     * @return the {@code boolean[]} behind {@code data}, where a byte is {@code true} only when it is
-     * exactly {@code 1} — the same rule {@link #getBoolean(Object)} uses
-     */
     default boolean[] getBooleanArray(Object data) {
-        var bytes = getByteArray(data);
-        var value = new boolean[bytes.length];
-        for (int i = 0; i < bytes.length; i++) {
-            value[i] = bytes[i] == 1;
-        }
-        return value;
+        return getSelf(data) instanceof boolean[] value ? value : ValueOpsConverters.BOOLEAN_ARRAY.toValue(this, data);
     }
 
-    /**
-     * A {@code short[]} as an {@code int[]} — the shape Data stores it in.
-     */
     default Object createShortArray(short[] value) {
-        var ints = new int[value.length];
-        for (int i = 0; i < value.length; i++) {
-            ints[i] = value[i];
-        }
-        return createIntArray(ints);
+        return createSelf(value);
     }
 
-    /**
-     * @return the {@code short[]} behind {@code data}, each {@code int} narrowed back to a short
-     */
     default short[] getShortArray(Object data) {
-        var ints = getIntArray(data);
-        var value = new short[ints.length];
-        for (int i = 0; i < ints.length; i++) {
-            value[i] = (short) ints[i];
-        }
-        return value;
+        return getSelf(data) instanceof short[] value ? value : ValueOpsConverters.SHORT_ARRAY.toValue(this, data);
     }
 
-    /**
-     * A {@code char[]} as an {@code int[]} — the shape Data stores it in.
-     */
     default Object createCharArray(char[] value) {
-        var ints = new int[value.length];
-        for (int i = 0; i < value.length; i++) {
-            ints[i] = value[i];
-        }
-        return createIntArray(ints);
+        return createSelf(value);
     }
 
-    /**
-     * @return the {@code char[]} behind {@code data}, each {@code int} narrowed back to a char
-     */
     default char[] getCharArray(Object data) {
-        var ints = getIntArray(data);
-        var value = new char[ints.length];
-        for (int i = 0; i < ints.length; i++) {
-            value[i] = (char) ints[i];
-        }
-        return value;
+        return getSelf(data) instanceof char[] value ? value : ValueOpsConverters.CHAR_ARRAY.toValue(this, data);
     }
 
-    /**
-     * A {@code float[]} as the {@code int[]} of its raw bits ({@link Float#floatToIntBits}) — the
-     * shape Data stores it in, so {@code NaN} and {@code -0.0f} survive untouched.
-     */
     default Object createFloatArray(float[] value) {
-        var ints = new int[value.length];
-        for (int i = 0; i < value.length; i++) {
-            ints[i] = Float.floatToIntBits(value[i]);
-        }
-        return createIntArray(ints);
+        return createSelf(value);
     }
 
-    /**
-     * @return the {@code float[]} behind {@code data}, rebuilt from the raw bits
-     */
     default float[] getFloatArray(Object data) {
-        var ints = getIntArray(data);
-        var value = new float[ints.length];
-        for (int i = 0; i < ints.length; i++) {
-            value[i] = Float.intBitsToFloat(ints[i]);
-        }
-        return value;
+        return getSelf(data) instanceof float[] value ? value : ValueOpsConverters.FLOAT_ARRAY.toValue(this, data);
     }
 
-    /**
-     * A {@code double[]} as the {@code long[]} of its raw bits ({@link Double#doubleToLongBits}) —
-     * the shape Data stores it in.
-     */
     default Object createDoubleArray(double[] value) {
-        var longs = new long[value.length];
-        for (int i = 0; i < value.length; i++) {
-            longs[i] = Double.doubleToLongBits(value[i]);
-        }
-        return createLongArray(longs);
+        return createSelf(value);
     }
 
-    /**
-     * @return the {@code double[]} behind {@code data}, rebuilt from the raw bits
-     */
     default double[] getDoubleArray(Object data) {
-        var longs = getLongArray(data);
-        var value = new double[longs.length];
-        for (int i = 0; i < longs.length; i++) {
-            value[i] = Double.longBitsToDouble(longs[i]);
-        }
-        return value;
+        return getSelf(data) instanceof double[] value ? value : ValueOpsConverters.DOUBLE_ARRAY.toValue(this, data);
     }
 
-    /**
-     * A {@link UUID} as its two longs, most- then least-significant — the layout Data uses (and the
-     * one {@code FriendlyByteBuf.writeUUID} writes).
-     */
     default Object createUUID(UUID value) {
-        return createLongArray(new long[]{value.getMostSignificantBits(), value.getLeastSignificantBits()});
+        return createSelf(value);
     }
 
-    /**
-     * @return the {@link UUID} behind {@code data}, or {@code null} when the long array is empty —
-     * the same "no UUID stored" answer {@code Data.getUUID()} gives
-     */
     default UUID getUUID(Object data) {
-        var longs = getLongArray(data);
-        if (longs.length == 0) return null;
-        return new UUID(longs[0], longs[1]);
+        return getSelf(data) instanceof UUID value ? value : ValueOpsConverters.UUID.toValue(this, data);
     }
 
-    /**
-     * A {@link BigInteger} as its two's-complement byte array ({@link BigInteger#toByteArray()}) — the
-     * shape Data stores it in, so the sign travels in the payload.
-     */
     default Object createBigInteger(BigInteger value) {
-        return createByteArray(value.toByteArray());
+        return createSelf(value);
+    }
+
+    default BigInteger getBigInteger(Object data) {
+        return getSelf(data) instanceof BigInteger value ? value : ValueOpsConverters.BIG_INTEGER.toValue(this, data);
+    }
+
+    default Object createBigDecimal(BigDecimal value) {
+        return createSelf(value);
+    }
+
+    default BigDecimal getBigDecimal(Object data) {
+        return getSelf(data) instanceof BigDecimal value ? value : ValueOpsConverters.BIG_DECIMAL.toValue(this, data);
     }
 
     /**
-     * @return the {@link BigInteger} behind {@code data}, or {@link BigInteger#ZERO} when the byte
-     * array is empty — the same answer {@code Data.getBigInteger()} gives. A payload that is
-     * not a number throws {@link NumberFormatException}.
+     * The format version this carrier reads at; {@code 0} when there is none.
+     *
+     * <p>The version belongs to the carrier rather than to a codec signature: a codec that has to read
+     * an older shape asks the ops it was handed, so no {@code decode} overload has to thread a number
+     * through every composite or container helper.
+     * {@link JavaValueOps#create(int)} hands back the same carrier at another version, and
+     * {@link JavaValueOps#INSTANCE} is version {@code 0}.</p>
      */
-    default BigInteger getBigInteger(Object data) {
-        var bytes = getByteArray(data);
-        if (bytes.length == 0) return BigInteger.ZERO;
-        return new BigInteger(bytes);
+    default int dataVersion() {
+        return 0;
+    }
+    // ===== Binary form =====
+
+    /**
+     * The id of the type {@code data} holds — one of {@link Type}.
+     */
+    byte getTypeId(Object data);
+
+    /**
+     * Writes a complete nested value: the id byte, then the payload of {@link #write(Object, ByteBuf)}.
+     * This pair is what the wire format repeats for every list element and every map key and value, so
+     * a carrier that can name a type without a second lookup should override this and fold the two
+     * steps into one — {@link JavaValueOps} does, which is what keeps a long list of scalars cheap.
+     */
+    void writeValue(Object value, ByteBuf stream);
+
+    /**
+     * Reads a {@link #writeValue(Object, ByteBuf)} back. The id byte is on the wire, so this is a
+     * single dispatch for every carrier.
+     */
+    Object readValue(ByteBuf stream);
+
+    /**
+     * The value as a standalone byte array: the id byte followed by the payload — exactly what
+     * {@link #getTypeId(Object)} and {@link #write(Object, ByteBuf)} produce, and the layout the Data
+     * type system stored a value in. This is what a field is persisted as, and because the ids are
+     * Data's, a byte array written by one carrier reads in the other.
+     */
+    default byte[] toBytes(Object value) {
+        var buf = Unpooled.buffer();
+        try {
+            writeValue(value, buf);
+            var bytes = new byte[buf.readableBytes()];
+            buf.getBytes(buf.readerIndex(), bytes);
+            return bytes;
+        } finally {
+            buf.release();
+        }
+    }
+
+    /**
+     * Reads a {@link #toBytes(Object)} byte array back, id byte included.
+     *
+     * @throws IllegalArgumentException if the id byte names no type
+     */
+    default Object fromBytes(byte[] bytes) {
+        var buf = Unpooled.wrappedBuffer(bytes);
+        try {
+            return readValue(buf);
+        } finally {
+            buf.release();
+        }
     }
 }

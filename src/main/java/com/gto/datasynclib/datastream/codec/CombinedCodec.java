@@ -1,7 +1,7 @@
 package com.gto.datasynclib.datastream.codec;
 
 import com.gto.datasynclib.DataSyncCodec;
-import com.gto.datasynclib.util.StreamCodecExtends;
+import com.gto.datasynclib.util.ByteBufCodecExtends;
 import com.gto.datasynclib.util.ValueCodecs;
 import com.mojang.datafixers.util.*;
 import com.mojang.serialization.Codec;
@@ -40,7 +40,7 @@ import java.util.function.Supplier;
  * handful of primitives and is synchronized often — a position, a vector, a bounding box —
  * writing the codec pair by hand is usually worth the extra lines: talk to
  * {@code FriendlyByteBuf} and the carrier's own values directly and no boxing happens at
- * all. {@link StreamCodecExtends#VEC3I_CODEC} /
+ * all. {@link ByteBufCodecExtends#VEC3I_CODEC} /
  * {@link com.gto.datasynclib.util.ValueCodecs#VEC3I} (and
  * {@link com.gto.datasynclib.util.ValueCodecs#AABB}) show that shape, and the pre-registered
  * constants follow it.</p>

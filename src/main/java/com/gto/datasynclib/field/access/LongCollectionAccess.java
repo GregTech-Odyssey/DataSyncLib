@@ -55,7 +55,7 @@ public final class LongCollectionAccess extends AbstractFieldAccess<LongCollecti
     @Override
     protected void doReadValue(@NotNull LongCollection instance, @NotNull Object data, @NotNull ValueOps ops) {
         instance.clear();
-        if (!ops.isLongArray(data)) return;
+        if (ops.isNull(data)) return;
         var array = ops.getLongArray(data);
         for (var element : array) {
             instance.add(element);

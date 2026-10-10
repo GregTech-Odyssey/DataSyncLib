@@ -71,10 +71,11 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
 
     @Override
     protected @NotNull Object doWriteValue(@NotNull Object source, IDataSerializable @NotNull [] instance, @NotNull ValueOps ops) {
-        var list = new ArrayList<Object>(instance.length);
+        var list = new ArrayList<>(instance.length);
         for (var element : instance) {
             list.add(element == null ? ops.createNull() : element.writeValue(ops));
         }
+        if (list.isEmpty()) return ops.createNull();
         if (definition.saveEmpty) return ops.createList(list);
         for (var element : list) {
             // the slots hold carrier values, so an absent one is the null value, never a Java null
@@ -86,27 +87,14 @@ public final class SerializableArrayAccess extends AbstractFieldAccess<IDataSeri
     @Override
     protected void doReadValue(IDataSerializable @NotNull [] instance, @NotNull Object data, @NotNull ValueOps ops) {
         // an empty container was stored as the null value, which is a missing payload, not a failure
-        if (!ops.isList(data)) return;
+        if (ops.isNull(data)) return;
         var list = ops.getList(data);
         var length = Math.min(list.size(), instance.length);
-        if (ops.dataVersion() == -1) {
-            // legacy layout: each element was a map of "uid"/"p" rather than the value itself
-            for (int i = 0; i < length; i++) {
-                var element = list.get(i);
-                if (ops.isStringMap(element)) {
-                    var map = ops.getStringMap(element);
-                    if (map.isEmpty()) continue;
-                    var serializable = instance[i];
-                    if (serializable != null) serializable.readValue(map.get("p"), ops);
-                }
-            }
-        } else {
-            for (int i = 0; i < length; i++) {
-                var element = list.get(i);
-                if (ops.isNull(element)) continue;
-                var serializable = instance[i];
-                if (serializable != null) serializable.readValue(element, ops);
-            }
+        for (int i = 0; i < length; i++) {
+            var element = list.get(i);
+            if (ops.isNull(element)) continue;
+            var serializable = instance[i];
+            if (serializable != null) serializable.readValue(element, ops);
         }
     }
 }

@@ -2,6 +2,9 @@ package com.gto.datasynclib.datastream.codec;
 
 import com.mojang.datafixers.util.*;
 
+import com.mojang.serialization.Codec;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
@@ -10,6 +13,7 @@ import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongList;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
+import net.minecraft.network.FriendlyByteBuf;
 
 import java.lang.reflect.Array;
 import java.math.BigInteger;
@@ -105,7 +109,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, Boolean value) {
-            return ops.createBoolean(value);
+            return ops.createBooleanBoxed(value);
         }
 
         @Override
@@ -118,7 +122,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, Byte value) {
-            return ops.createByte(value);
+            return ops.createByteBoxed(value);
         }
 
         @Override
@@ -131,7 +135,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, Short value) {
-            return ops.createShort(value);
+            return ops.createShortBoxed(value);
         }
 
         @Override
@@ -144,7 +148,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, Character value) {
-            return ops.createChar(value);
+            return ops.createCharBoxed(value);
         }
 
         @Override
@@ -157,7 +161,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, Integer value) {
-            return ops.createInt(value);
+            return ops.createIntBoxed(value);
         }
 
         @Override
@@ -170,7 +174,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, Long value) {
-            return ops.createLong(value);
+            return ops.createLongBoxed(value);
         }
 
         @Override
@@ -183,7 +187,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, Float value) {
-            return ops.createFloat(value);
+            return ops.createFloatBoxed(value);
         }
 
         @Override
@@ -196,7 +200,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, Double value) {
-            return ops.createDouble(value);
+            return ops.createDoubleBoxed(value);
         }
 
         @Override
@@ -254,7 +258,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, boolean[] value) {
-            return ops.createBooleanArray(value);
+            return value.length == 0 ? ops.createNull() : ops.createBooleanArray(value);
         }
 
         @Override
@@ -267,7 +271,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, byte[] value) {
-            return ops.createByteArray(value);
+            return value.length == 0 ? ops.createNull() : ops.createByteArray(value);
         }
 
         @Override
@@ -280,7 +284,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, short[] value) {
-            return ops.createShortArray(value);
+            return value.length == 0 ? ops.createNull() : ops.createShortArray(value);
         }
 
         @Override
@@ -293,7 +297,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, char[] value) {
-            return ops.createCharArray(value);
+            return value.length == 0 ? ops.createNull() : ops.createCharArray(value);
         }
 
         @Override
@@ -306,7 +310,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, int[] value) {
-            return ops.createIntArray(value);
+            return value.length == 0 ? ops.createNull() : ops.createIntArray(value);
         }
 
         @Override
@@ -319,7 +323,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, long[] value) {
-            return ops.createLongArray(value);
+            return value.length == 0 ? ops.createNull() : ops.createLongArray(value);
         }
 
         @Override
@@ -332,7 +336,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, float[] value) {
-            return ops.createFloatArray(value);
+            return value.length == 0 ? ops.createNull() : ops.createFloatArray(value);
         }
 
         @Override
@@ -345,7 +349,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, double[] value) {
-            return ops.createDoubleArray(value);
+            return value.length == 0 ? ops.createNull() : ops.createDoubleArray(value);
         }
 
         @Override
@@ -526,7 +530,8 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
             @Override
             public Object encode(ValueOps ops, List<T> value) {
-                var elements = new ArrayList<Object>(value.size());
+                if (value.isEmpty()) return ops.createNull();
+                var elements = new ArrayList<>(value.size());
                 for (var element : value) {
                     elements.add(codec.encode(ops, element));
                 }
@@ -535,8 +540,8 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
             @Override
             public List<T> decode(ValueOps ops, Object data) {
-                // an absent payload is the empty list, never a failure
-                if (!ops.isList(data)) return new ArrayList<>();
+                // the absent marker an empty list is stored as, or anything that is not a list
+                if (ops.isNull(data)) return new ArrayList<>();
                 var elements = ops.getList(data);
                 var list = new ArrayList<T>(elements.size());
                 for (var element : elements) {
@@ -1302,7 +1307,8 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
             @Override
             public Object encode(ValueOps ops, M obj) {
-                var pairs = new ArrayList<Object>(obj.size() * 2);
+                if (obj.isEmpty()) return ops.createNull();
+                var pairs = new ArrayList<>(obj.size() * 2);
                 obj.forEach((key, value) -> {
                     pairs.add(keyCodec.encode(ops, key));
                     pairs.add(valueCodec.encode(ops, value));
@@ -1312,9 +1318,8 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
             @Override
             public M decode(ValueOps ops, Object data) {
-                // the same absent-payload rule as collection/array: a payload that is not a list is
-                // the empty map this method documents, not a failure
-                if (!ops.isList(data)) return factory.apply(1);
+                // the absent marker an empty map is stored as, or anything that is not a list
+                if (ops.isNull(data)) return factory.apply(1);
                 var pairs = ops.getList(data);
                 if (pairs.size() < 2) return factory.apply(1);
                 var map = factory.apply(pairs.size() / 2);
@@ -1337,7 +1342,8 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
             @Override
             public Object encode(ValueOps ops, C obj) {
-                var elements = new ArrayList<Object>(obj.size());
+                if (obj.isEmpty()) return ops.createNull();
+                var elements = new ArrayList<>(obj.size());
                 for (var element : obj) {
                     elements.add(elementCodec.encode(ops, element));
                 }
@@ -1346,10 +1352,8 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
             @Override
             public C decode(ValueOps ops, Object data) {
-                // a payload that is not a list at all — the null value an older writer could leave,
-                // or a slot no version ever wrote — is the empty collection this method documents,
-                // not an error
-                if (!ops.isList(data)) return factory.apply(1);
+                // the absent marker an empty collection is stored as, or anything that is not a list
+                if (ops.isNull(data)) return factory.apply(1);
                 var elements = ops.getList(data);
                 var collection = factory.apply(elements.size());
                 for (var element : elements) {
@@ -1362,16 +1366,18 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
     /**
      * An object array as the list of its elements. A <em>primitive</em> array has its own codec and
-     * does not need this; the array is allocated from the payload's length. A payload that is not a
-     * list decodes to a zero-length array, the answer the retired array codec gave, and a null-valued
-     * element decodes to a {@code null} slot instead of reaching {@code elementCodec}.
+     * does not need this; the array is allocated from the payload's length. A zero-length array is
+     * stored as the absent marker and a payload that is not a list decodes back to a zero-length
+     * array, while a null-valued element decodes to a {@code null} slot instead of reaching
+     * {@code elementCodec}.
      */
     static <E> ValueCodec<E[]> array(Class<E> type, ValueCodec<E> elementCodec) {
         return new ValueCodec<>() {
 
             @Override
             public Object encode(ValueOps ops, E[] obj) {
-                var elements = new ArrayList<Object>(obj.length);
+                if (obj.length == 0) return ops.createNull();
+                var elements = new ArrayList<>(obj.length);
                 for (var element : obj) {
                     elements.add(elementCodec.encode(ops, element));
                 }
@@ -1381,9 +1387,8 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
             @SuppressWarnings("unchecked")
             @Override
             public E[] decode(ValueOps ops, Object data) {
-                // the same absent-payload rule as the collection above: an object array is a list of
-                // its elements, so anything that is not a list is the empty array
-                if (!ops.isList(data)) return (E[]) Array.newInstance(type, 0);
+                // the absent marker an empty array is stored as, or anything that is not a list
+                if (ops.isNull(data)) return (E[]) Array.newInstance(type, 0);
                 var elements = ops.getList(data);
                 var array = (E[]) Array.newInstance(type, elements.size());
                 for (int i = 0; i < elements.size(); i++) {
@@ -1441,6 +1446,55 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
             @Override
             public T decode(ValueOps ops, Object data) {
                 return resolve().decode(ops, data);
+            }
+        };
+    }
+
+
+    /**
+     * A {@link StreamCodec} seen as a value codec: the wire bytes are stored as one
+     * {@code BYTE_ARRAY} value, which is what the retired {@code Data} bridge used to do. Use it
+     * for a quick persistence path; a type that is persisted often wants a codec of its own.
+     */
+    static <T> ValueCodec<T> fromStreamCodec(StreamCodec<? super FriendlyByteBuf, T> streamCodec) {
+        return new ValueCodec<>() {
+
+            @Override
+            public Object encode(ValueOps ops, T value) {
+                var buf = Unpooled.buffer();
+                try {
+                    streamCodec.encode(new FriendlyByteBuf(buf), value);
+                    var bytes = new byte[buf.readableBytes()];
+                    buf.getBytes(buf.readerIndex(), bytes);
+                    return ops.createByteArray(bytes);
+                } finally {
+                    buf.release();
+                }
+            }
+
+            @Override
+            public T decode(ValueOps ops, Object data) {
+                var buf = Unpooled.wrappedBuffer(ops.getByteArray(data));
+                try {
+                    return streamCodec.decode(new FriendlyByteBuf(buf));
+                } finally {
+                    buf.release();
+                }
+            }
+        };
+    }
+
+    static <T> ValueCodec<T> custom(CustomTypes.Type<T> type) {
+        return new ValueCodec<>() {
+
+            @Override
+            public Object encode(ValueOps ops, T value) {
+                return ops.createCustom(type, value);
+            }
+
+            @Override
+            public T decode(ValueOps ops, Object data) {
+                return ops.getCustom(type, data);
             }
         };
     }

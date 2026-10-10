@@ -1,8 +1,8 @@
 package com.gto.datasynclib.datastream.codec;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufInputStream;
 import io.netty.buffer.ByteBufOutputStream;
+import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
@@ -31,8 +31,7 @@ import java.util.*;
  *   <tr><td>{@code STRING}</td><td>{@link String}</td></tr>
  *   <tr><td>{@code BYTE_ARRAY}, {@code INT_ARRAY}, {@code LONG_ARRAY}</td><td>{@code byte[]}, {@code int[]}, {@code long[]}</td></tr>
  *   <tr><td>{@code LIST}</td><td>{@link List} — {@link ArrayList} when created here</td></tr>
- *   <tr><td>{@code STRING_MAP}</td><td>any other {@link Map} — {@link HashMap} when created here</td></tr>
- *   <tr><td>{@code OBJECT_MAP}</td><td>a FastUtil object-keyed map — {@link Object2ObjectMap}, {@link Object2ReferenceMap} or {@link Reference2ReferenceMap}</td></tr>
+ *   <tr><td>{@code STRING_MAP}</td><td>any {@link Map} — {@link HashMap} when created here</td></tr>
  *   <tr><td>{@code INT_MAP}, {@code LONG_MAP}</td><td>{@link Int2ObjectMap}, {@link Long2ObjectMap}</td></tr>
  *   <tr><td>{@code CUSTOM}</td><td>{@link Custom} — a registered custom type id plus its payload</td></tr>
  *   <tr><td>{@code SELF}</td><td>anything else — written with Java serialization, so it must implement {@link java.io.Serializable}</td></tr>
@@ -47,15 +46,13 @@ import java.util.*;
  * for both shapes, while a byte that is neither {@code 0} nor {@code 1} is just a byte.
  * {@link #read(byte, ByteBuf)} still understands the reserved id, so a carrier that does write it is
  * readable too.</p>
- * * <h3>How the three map shapes are told apart</h3>
- * <p>{@code INT_MAP} and {@code LONG_MAP} are the FastUtil interfaces, and {@code OBJECT_MAP} is any of
- * the three FastUtil object-keyed map interfaces ({@link Object2ObjectMap}, {@link Object2ReferenceMap},
- * {@link Reference2ReferenceMap}) — every other {@code Map}, including a plain {@code HashMap}, is a
- * {@code STRING_MAP} whose keys are read as strings. Creation
- * and inspection therefore agree on every map, including the empty one, which a purely
- * key-based rule could not decide. Because {@code createValueMap} hands its argument straight back,
- * a value-keyed map has to be built as one of these types to be recognized as {@code OBJECT_MAP} —
- * {@link HashMap} is the one this implementation reads values back into.</p>
+ *
+ * <h3>The map shapes</h3>
+ * <p>{@code INT_MAP} and {@code LONG_MAP} are the FastUtil interfaces; every other {@code Map},
+ * including the FastUtil object-keyed ones and a plain {@code HashMap}, is a {@code STRING_MAP} whose
+ * keys are read as strings — a map keyed by anything else is refused on the way out, because the
+ * carrier has no id for that shape any more. Creation and inspection therefore agree on every map,
+ * including the empty one, which a purely key-based rule could not decide.</p>
  *
  * <h3>Creation and reading hand the object straight back</h3>
  * <p>{@code createXxx} returns the collection it is given — the carrier <em>is</em> the Java object, so
@@ -70,11 +67,16 @@ import java.util.*;
  *
  * <p>{@code SELF} is the carrier's escape hatch for whatever the type set does not cover, and it is
  * stored with Java's own serializer: the value has to implement {@link java.io.Serializable}, its
- * bytes travel length-prefixed (see {@link #writeSelf(ByteBuf, Object)}) and reading hands them to an
+ * bytes are written as a length-framed byte array (see {@link #writeSelf(ByteBuf, Object)}, so a value
+ * nested in a list or a map cannot swallow what follows) and reading hands them to an
  * {@link ObjectInputStream}. That makes any serializable object storable without registering a
  * {@link CustomTypes.Type} — at the usual price of Java deserialization, so read only payloads you
  * trust. A value the ops cannot serialize at all (not {@code Serializable}) fails on the way out,
  * where the mistake is visible.</p>
+ *
+ * <p>A class with a {@link ValueConverters.Converter} never takes that path: it is written as the
+ * payload its converter produced, under the payload's own type id, so a UUID in a save file is a
+ * {@code LONG_ARRAY} rather than a serialized object.</p>
  */
 public final class JavaValueOps implements ValueOps {
 
@@ -95,6 +97,19 @@ public final class JavaValueOps implements ValueOps {
         return dataVersion == 0 ? INSTANCE : new JavaValueOps(dataVersion);
     }
 
+    /**
+     * Registers the {@link ValueConverters} entries this carrier needs: {@link ValueOpsConverters}'s
+     * set, so a UUID, a BigInteger, a BigDecimal or one of the {@code java.time} types is stored as the
+     * payload the matching {@code createXxx} produces instead of a Java-serialized object.
+     *
+     * <p>They belong to this carrier because {@code SELF} is its escape hatch; a carrier whose type set
+     * covers everything needs none. Called once during mod construction, before any holder is scanned,
+     * and idempotent — the converters register as {@link ValueOpsConverters} initializes.</p>
+     */
+    public static void init() {
+        ValueOpsConverters.init();
+    }
+
     @Override
     public int dataVersion() {
         return dataVersion;
@@ -104,21 +119,17 @@ public final class JavaValueOps implements ValueOps {
      * A custom value: the id of the registered {@link CustomTypes.Type} it belongs to, plus the
      * payload that type's functions write and read.
      */
-    public record Custom(int typeId, Object value) {
+    public record Custom(CustomTypes.Type<?> type, Object value) {
     }
 
     // ===== Type inspection =====
 
     @Override
     public byte getTypeId(Object data) {
-        // Ordered by how often the library actually sees each shape: the scalars and the two common
-        // containers first, the rare ones after, and every concrete map interface before the generic
-        // Map. javac compiles this into a chain of instanceof checks in source order, so the order is
-        // the cost — and the map shapes have to come before Map regardless, or Map would dominate them.
         return switch (data) {
             case null -> Type.NULL;
             case Null ignored -> Type.NULL;
-            case Boolean ignored -> Type.BYTE;
+            case Boolean ignored -> Type.BOOLEAN;
             case Integer ignored -> Type.INT;
             case Long ignored -> Type.LONG;
             case String ignored -> Type.STRING;
@@ -130,11 +141,11 @@ public final class JavaValueOps implements ValueOps {
             case byte[] ignored -> Type.BYTE_ARRAY;
             case int[] ignored -> Type.INT_ARRAY;
             case long[] ignored -> Type.LONG_ARRAY;
+            // the arrays with no id of their own — boolean[], short[], char[], float[], double[] — are
+            // converters, so they are named by the default branch below like every other derived type
             case List<?> ignored -> Type.LIST;
-            case Reference2ObjectMap<?, ?> ignored -> Type.OBJECT_MAP;
-            case Reference2ReferenceMap<?, ?> ignored -> Type.OBJECT_MAP;
-            case Object2ReferenceMap<?, ?> ignored -> Type.OBJECT_MAP;
-            case Object2ObjectMap<?, ?> ignored -> Type.OBJECT_MAP;
+            // the two primitive-keyed maps are Maps too, so they have to be named before Map; every
+            // other map — the FastUtil object-keyed ones included — is a STRING_MAP
             case Int2ObjectMap<?> ignored -> Type.INT_MAP;
             case Long2ObjectMap<?> ignored -> Type.LONG_MAP;
             case Map<?, ?> ignored -> Type.STRING_MAP;
@@ -216,22 +227,11 @@ public final class JavaValueOps implements ValueOps {
 
     @Override
     public boolean isStringMap(Object data) {
-        // asked directly instead of through getTypeId: a Map is a Map, and only the six value-keyed
-        // map interfaces that would otherwise answer "yes" have to be ruled out first
-        return data instanceof Map && !(data instanceof Reference2ObjectMap
-                || data instanceof Reference2ReferenceMap
-                || data instanceof Object2ReferenceMap
-                || data instanceof Object2ObjectMap
-                || data instanceof Int2ObjectMap
-                || data instanceof Long2ObjectMap);
-    }
-
-    @Override
-    public boolean isValueMap(Object data) {
-        return data instanceof Reference2ObjectMap
-                || data instanceof Reference2ReferenceMap
-                || data instanceof Object2ReferenceMap
-                || data instanceof Object2ObjectMap;
+        // asked directly instead of through getTypeId: a Map is a Map, and only the two
+        // primitive-keyed map interfaces are a shape of their own
+        return data instanceof Map
+                && !(data instanceof Int2ObjectMap)
+                && !(data instanceof Long2ObjectMap);
     }
 
     @Override
@@ -304,42 +304,42 @@ public final class JavaValueOps implements ValueOps {
     // ===== Boxed creators: the wrapper is already the carrier, so hand it straight back =====
 
     @Override
-    public Object createBoolean(Boolean value) {
+    public Object createBooleanBoxed(Boolean value) {
         return value;
     }
 
     @Override
-    public Object createByte(Byte value) {
+    public Object createByteBoxed(Byte value) {
         return value;
     }
 
     @Override
-    public Object createShort(Short value) {
+    public Object createShortBoxed(Short value) {
         return value;
     }
 
     @Override
-    public Object createChar(Character value) {
+    public Object createCharBoxed(Character value) {
         return value;
     }
 
     @Override
-    public Object createInt(Integer value) {
+    public Object createIntBoxed(Integer value) {
         return value;
     }
 
     @Override
-    public Object createLong(Long value) {
+    public Object createLongBoxed(Long value) {
         return value;
     }
 
     @Override
-    public Object createFloat(Float value) {
+    public Object createFloatBoxed(Float value) {
         return value;
     }
 
     @Override
-    public Object createDouble(Double value) {
+    public Object createDoubleBoxed(Double value) {
         return value;
     }
 
@@ -374,11 +374,6 @@ public final class JavaValueOps implements ValueOps {
     }
 
     @Override
-    public Object createValueMap(Map<Object, Object> entries) {
-        return entries;
-    }
-
-    @Override
     public Object createIntMap(Int2ObjectMap<Object> entries) {
         return entries;
     }
@@ -394,11 +389,8 @@ public final class JavaValueOps implements ValueOps {
     }
 
     @Override
-    public <V> Object createCustom(int typeId, V value) {
-        if (CustomTypes.type(typeId) == null) {
-            throw new IllegalArgumentException("No custom data type is registered for id " + typeId);
-        }
-        return new Custom(typeId, value);
+    public <V> Object createCustom(CustomTypes.Type<V> type, V value) {
+        return new Custom(type, value);
     }
 
     // ===== Reads: unchecked (cast) flavour =====
@@ -504,6 +496,9 @@ public final class JavaValueOps implements ValueOps {
         return (String) data;
     }
 
+    // an absent value reads as an empty array rather than a ClassCastException: an empty array is what
+    // the codecs store an empty one as, so the two are the same value on the way in
+
     @Override
     public byte[] getByteArray(Object data) {
         return (byte[]) data;
@@ -533,12 +528,6 @@ public final class JavaValueOps implements ValueOps {
 
     @SuppressWarnings("unchecked")
     @Override
-    public Map<Object, Object> getValueMap(Object data) {
-        return (Map<Object, Object>) data;
-    }
-
-    @SuppressWarnings("unchecked")
-    @Override
     public Int2ObjectMap<Object> getIntMap(Object data) {
         return (Int2ObjectMap<Object>) data;
     }
@@ -557,125 +546,15 @@ public final class JavaValueOps implements ValueOps {
 
     @Override
     public int getCustomId(Object data) {
-        return ((Custom) data).typeId();
+        return ((Custom) data).type.id();
     }
 
     @SuppressWarnings("unchecked")
     @Override
-    public <V> V getCustom(Object data) {
+    public <V> V getCustom(CustomTypes.Type<V> type, Object data) {
         return (V) ((Custom) data).value();
     }
 
-    // ===== Binary form =====
-
-    @Override
-    public void write(Object data, ByteBuf stream) {
-        switch (data) {
-            case null -> {
-            }
-            case Null ignored -> {
-            }
-            case Boolean value -> stream.writeByte(value ? 1 : 0);
-            case Byte value -> stream.writeByte(value);
-            case Short value -> stream.writeShort(value);
-            case Character value -> stream.writeChar(value);
-            case Integer value -> stream.writeInt(value);
-            case Long value -> stream.writeLong(value);
-            case Float value -> stream.writeFloat(value);
-            case Double value -> stream.writeDouble(value);
-            case String value -> writeString(stream, value);
-            case byte[] value -> writeByteArray(stream, value);
-            case int[] value -> writeIntArray(stream, value);
-            case long[] value -> writeLongArray(stream, value);
-            case List<?> elements -> {
-                VarInts.write(stream, elements.size());
-                for (var element : elements) {
-                    writeValue(element, stream);
-                }
-            }
-            // the value-keyed and the primitive-keyed maps are Maps as well, so they must come first
-            case Reference2ReferenceMap<?, ?> entries -> writeValueMap(stream, entries);
-            case Reference2ObjectMap<?, ?> entries -> writeValueMap(stream, entries);
-            case Object2ReferenceMap<?, ?> entries -> writeValueMap(stream, entries);
-            // Object2ObjectMap is a Map too, and getTypeId calls it OBJECT_MAP: without this case it
-            // would fall into the string-keyed case below and be written with STRING_MAP framing
-            // under the OBJECT_MAP id
-            case Object2ObjectMap<?, ?> entries -> writeValueMap(stream, entries);
-            case Int2ObjectMap<?> entries -> {
-                VarInts.write(stream, entries.size());
-                for (var entry : entries.int2ObjectEntrySet()) {
-                    VarInts.write(stream, entry.getIntKey());
-                    writeValue(entry.getValue(), stream);
-                }
-            }
-            case Long2ObjectMap<?> entries -> {
-                VarInts.write(stream, entries.size());
-                for (var entry : entries.long2ObjectEntrySet()) {
-                    VarInts.writeVarLong(stream, entry.getLongKey());
-                    writeValue(entry.getValue(), stream);
-                }
-            }
-            case Map<?, ?> entries -> {
-                VarInts.write(stream, entries.size());
-                entries.forEach((key, value) -> {
-                    writeString(stream, (String) key);
-                    writeValue(value, stream);
-                });
-            }
-            case Custom custom -> {
-                VarInts.write(stream, custom.typeId());
-                writeCustom(custom, stream);
-            }
-            default -> writeSelf(stream, data);
-        }
-    }
-
-    @Override
-    public Object read(byte id, ByteBuf stream) {
-        return switch (id) {
-            case Type.NULL -> Null.INSTANCE;
-            case Type.BOOLEAN -> stream.readBoolean();
-            case Type.BYTE -> stream.readByte();
-            case Type.SHORT -> stream.readShort();
-            case Type.CHAR -> stream.readChar();
-            case Type.INT -> stream.readInt();
-            case Type.LONG -> stream.readLong();
-            case Type.FLOAT -> stream.readFloat();
-            case Type.DOUBLE -> stream.readDouble();
-            case Type.STRING -> readString(stream);
-            case Type.BYTE_ARRAY -> readByteArray(stream);
-            case Type.INT_ARRAY -> readIntArray(stream);
-            case Type.LONG_ARRAY -> readLongArray(stream);
-            case Type.LIST -> readList(stream);
-            case Type.STRING_MAP -> readStringMap(stream);
-            case Type.OBJECT_MAP -> readValueMap(stream);
-            case Type.INT_MAP -> readIntMap(stream);
-            case Type.LONG_MAP -> readLongMap(stream);
-            case Type.CUSTOM -> readCustom(stream);
-            case Type.SELF -> readSelf(stream);
-            default -> throw new IllegalArgumentException("Unknown type id: " + id);
-        };
-    }
-
-    // ===== Nested values: id byte + payload, the layout Data.writeData / Data.readData use =====
-
-    private static void writeValueMap(ByteBuf stream, Map<?, ?> entries) {
-        VarInts.write(stream, entries.size());
-        for (var entry : entries.entrySet()) {
-            INSTANCE.writeValue(entry.getKey(), stream);
-            INSTANCE.writeValue(entry.getValue(), stream);
-        }
-    }
-
-    /**
-     * {@inheritDoc}
-     *
-     * <p>The carrier can name the type of a scalar without a second lookup, so the id byte and the
-     * payload come out of one switch here instead of {@link #getTypeId(Object)} followed by
-     * {@link #write(Object, ByteBuf)}. That is exactly where the format is repetitive — every element
-     * of a list, every key and every value of a map — so the scalars take the fused path and the
-     * containers, whose cost is in their elements rather than in being named, keep the generic one.</p>
-     */
     @Override
     public void writeValue(Object data, ByteBuf stream) {
         switch (data) {
@@ -729,16 +608,79 @@ public final class JavaValueOps implements ValueOps {
                 stream.writeByte(Type.LONG_ARRAY);
                 writeLongArray(stream, value);
             }
+            case List<?> elements -> {
+                stream.writeByte(Type.LIST);
+                VarInts.write(stream, elements.size());
+                for (var element : elements) {
+                    writeValue(element, stream);
+                }
+            }
+            case Int2ObjectMap<?> entries -> {
+                stream.writeByte(Type.INT_MAP);
+                VarInts.write(stream, entries.size());
+                for (var entry : entries.int2ObjectEntrySet()) {
+                    VarInts.write(stream, entry.getIntKey());
+                    writeValue(entry.getValue(), stream);
+                }
+            }
+            case Long2ObjectMap<?> entries -> {
+                stream.writeByte(Type.LONG_MAP);
+                VarInts.write(stream, entries.size());
+                for (var entry : entries.long2ObjectEntrySet()) {
+                    VarInts.writeVarLong(stream, entry.getLongKey());
+                    writeValue(entry.getValue(), stream);
+                }
+            }
+            case Map<?, ?> entries -> {
+                stream.writeByte(Type.STRING_MAP);
+                VarInts.write(stream, entries.size());
+                entries.forEach((key, value) -> {
+                    writeString(stream, (String) key);
+                    writeValue(value, stream);
+                });
+            }
+            case Custom custom -> {
+                stream.writeByte(Type.CUSTOM);
+                VarInts.write(stream, custom.type.id());
+                writeCustom(custom, stream);
+            }
             default -> {
-                stream.writeByte(getTypeId(data));
-                write(data, stream);
+                var converter = ValueConverters.converterOf(data);
+                if (converter == null) {
+                    stream.writeByte(Type.SELF);
+                    writeSelf(stream, data);
+                } else {
+                    writeValue(converted(converter, data), stream);
+                }
             }
         }
     }
 
     @Override
     public Object readValue(ByteBuf stream) {
-        return read(stream.readByte(), stream);
+        var id = stream.readByte();
+        return switch (id) {
+            case Type.NULL -> Null.INSTANCE;
+            case Type.BOOLEAN -> stream.readBoolean();
+            case Type.BYTE -> stream.readByte();
+            case Type.SHORT -> stream.readShort();
+            case Type.CHAR -> stream.readChar();
+            case Type.INT -> stream.readInt();
+            case Type.LONG -> stream.readLong();
+            case Type.FLOAT -> stream.readFloat();
+            case Type.DOUBLE -> stream.readDouble();
+            case Type.STRING -> readString(stream);
+            case Type.BYTE_ARRAY -> readByteArray(stream);
+            case Type.INT_ARRAY -> readIntArray(stream);
+            case Type.LONG_ARRAY -> readLongArray(stream);
+            case Type.LIST -> readList(stream);
+            case Type.STRING_MAP -> readStringMap(stream);
+            case Type.INT_MAP -> readIntMap(stream);
+            case Type.LONG_MAP -> readLongMap(stream);
+            case Type.CUSTOM -> readCustom(stream);
+            case Type.SELF -> readSelf(stream);
+            default -> throw new IllegalArgumentException("Unknown type id: " + id);
+        };
     }
 
     public static int initialCapacity(int size) {
@@ -813,16 +755,6 @@ public final class JavaValueOps implements ValueOps {
         return map;
     }
 
-    public Map<Object, Object> readValueMap(ByteBuf stream) {
-        var size = VarInts.read(stream);
-        var map = new HashMap<>(initialCapacity(size));
-        for (int i = 0; i < size; i++) {
-            var key = readValue(stream);
-            map.put(key, readValue(stream));
-        }
-        return map;
-    }
-
     public Int2ObjectMap<Object> readIntMap(ByteBuf stream) {
         var size = VarInts.read(stream);
         var map = new Int2ObjectOpenHashMap<>(initialCapacity(size));
@@ -845,11 +777,7 @@ public final class JavaValueOps implements ValueOps {
 
     @SuppressWarnings("unchecked")
     public static void writeCustom(Custom custom, ByteBuf stream) {
-        var type = CustomTypes.type(custom.typeId());
-        if (type == null) {
-            throw new IllegalArgumentException("No custom data type is registered for id " + custom.typeId());
-        }
-        ((CustomTypes.Type<Object>) type).write().accept(custom.value(), stream);
+        ((CustomTypes.Type<Object>) custom.type).write().accept(custom.value(), stream);
     }
 
     @SuppressWarnings("unchecked")
@@ -859,36 +787,41 @@ public final class JavaValueOps implements ValueOps {
         if (type == null) {
             throw new IllegalArgumentException("No custom data type is registered for id " + typeId);
         }
-        return new Custom(typeId, ((CustomTypes.Type<Object>) type).read().apply(stream));
+        return new Custom(type, ((CustomTypes.Type<Object>) type).read().apply(stream));
     }
 
-    /**
-     * Writes a {@link Type#SELF} value with Java's own serializer, length-prefixed. The prefix is not
-     * decoration: an {@link ObjectInputStream} reads ahead into a block buffer, so the payload has to
-     * be bounded before it is handed over, or it would swallow the values framed after it.
-     *
-     * @throws UncheckedIOException if {@code data} does not implement {@link java.io.Serializable}
-     */
     public static void writeSelf(ByteBuf stream, Object data) {
+        var buffer = Unpooled.buffer();
         try {
-            var out = new ObjectOutputStream(new ByteBufOutputStream(stream));
-            out.writeObject(data);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Could not serialize a SELF value (" + describe(data)
-                    + "): it has to implement java.io.Serializable", e);
+            try (var out = new ObjectOutputStream(new ByteBufOutputStream(buffer))) {
+                out.writeObject(data);
+            } catch (IOException e) {
+                throw new UncheckedIOException("Could not serialize a SELF value (" + INSTANCE.describe(data)
+                        + "): it has to implement java.io.Serializable, or have a registered converter", e);
+            }
+            var bytes = new byte[buffer.readableBytes()];
+            buffer.getBytes(buffer.readerIndex(), bytes);
+            writeByteArray(stream, bytes);
+        } finally {
+            buffer.release();
         }
     }
 
-    /**
-     * Reads back a {@link #writeSelf(ByteBuf, Object)} payload. Only trusted bytes belong here:
-     * deserialization runs the payload's own {@code readObject}.
-     *
-     * @throws IllegalArgumentException if the payload names a class this side does not have
-     * @throws UncheckedIOException     if the payload is not a readable serialized object
-     */
+    @SuppressWarnings("unchecked")
+    private static Object converted(ValueConverters.Converter<?> converter, Object data) {
+        var payload = ((ValueConverters.Converter<Object>) converter).toPayload(INSTANCE, data);
+        if (payload == data || converter.type().isInstance(payload)) {
+            throw new IllegalStateException("The converter for " + converter.type().getName()
+                    + " produced a " + INSTANCE.describe(payload) + ", which it would convert again");
+        }
+        return payload;
+    }
+
     public static Object readSelf(ByteBuf stream) {
-        try {
-            return new ObjectInputStream(new ByteBufInputStream(stream)).readObject();
+        // the frame the writer put around it, so an ObjectInputStream cannot read out of this value
+        var bytes = readByteArray(stream);
+        try (var in = new ObjectInputStream(new ByteArrayInputStream(bytes))) {
+            return in.readObject();
         } catch (IOException e) {
             throw new UncheckedIOException("Could not deserialize a SELF value", e);
         } catch (ClassNotFoundException e) {
@@ -896,7 +829,8 @@ public final class JavaValueOps implements ValueOps {
         }
     }
 
-    public static String describe(Object data) {
+    @Override
+    public String describe(Object data) {
         return data == null || data == Null.INSTANCE ? "null" : data.getClass().getName();
     }
 }

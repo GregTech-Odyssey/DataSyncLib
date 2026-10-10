@@ -79,7 +79,7 @@ public final class CollectionAccess<E> extends AbstractFieldAccess<Collection> {
     @Override
     protected void doReadValue(@NotNull Collection instance, @NotNull Object data, @NotNull ValueOps ops) {
         // an empty container was stored as the null value, which is a missing payload, not a failure
-        if (!ops.isList(data)) return;
+        if (ops.isNull(data)) return;
         var list = ops.getList(data);
         instance.clear();
         for (var element : list) {

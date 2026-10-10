@@ -75,7 +75,7 @@ public class Object2IntMapAccess<K> extends AbstractFieldAccess<Object2IntMap> {
     @Override
     protected @NotNull Object doWriteValue(@NotNull Object source, @NotNull Object2IntMap instance, @NotNull ValueOps ops) {
         if (instance.isEmpty()) return ops.createNull();
-        var list = new ArrayList<Object>(instance.size() * 2);
+        var list = new ArrayList<>(instance.size() * 2);
         Object2IntMaps.fastForEach(instance, e -> {
             list.add(keyCodec.encode(ops, (K) e.getKey()));
             list.add(e.getIntValue());
@@ -86,7 +86,7 @@ public class Object2IntMapAccess<K> extends AbstractFieldAccess<Object2IntMap> {
     @Override
     protected void doReadValue(@NotNull Object2IntMap instance, @NotNull Object data, @NotNull ValueOps ops) {
         // an empty container was stored as the null value, which is a missing payload, not a failure
-        if (!ops.isList(data)) return;
+        if (ops.isNull(data)) return;
         var list = ops.getList(data);
         var size = list.size();
         instance.clear();

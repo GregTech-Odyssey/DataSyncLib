@@ -69,11 +69,13 @@ public final class CharArrayAccess extends AbstractFieldAccess<char[]> {
     protected @NotNull Object doWriteValue(@NotNull Object source, char @NotNull [] instance, @NotNull ValueOps ops) {
         if (definition.hasDefaultValue() && Arrays.equals(instance, definition.getDefaultValue(source)))
             return NOT_PERSISTED;
+        if (instance.length == 0) return ops.createNull();
         return ops.createCharArray(instance);
     }
 
     @Override
     protected void doReadValue(char @NotNull [] instance, @NotNull Object data, @NotNull ValueOps ops) {
+        if (ops.isNull(data)) return;
         var array = ops.getCharArray(data);
         System.arraycopy(array, 0, instance, 0, Math.min(array.length, instance.length));
     }

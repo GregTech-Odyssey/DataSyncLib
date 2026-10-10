@@ -1,7 +1,7 @@
 package com.gto.datasynclib.datastream.codec;
 
 import com.gto.datasynclib.DataSyncCodec;
-import com.gto.datasynclib.util.StreamCodecExtends;
+import com.gto.datasynclib.util.ByteBufCodecExtends;
 import com.mojang.datafixers.util.*;
 import io.netty.buffer.ByteBuf;
 import net.minecraft.network.FriendlyByteBuf;
@@ -25,7 +25,7 @@ import java.util.function.Function;
  * constants (the numeric family is {@code StreamCodec<ByteBuf, …>}, the least a buffer can be while
  * still carrying a VarInt, while Minecraft-flavoured payloads need {@link FriendlyByteBuf}) and the
  * container builders, which write a length or a presence flag. The Minecraft value types live in
- * {@link StreamCodecExtends} — the Minecraft-type extension of
+ * {@link ByteBufCodecExtends} — the Minecraft-type extension of
  * {@link ByteBufCodecs}, which therefore inherits every constant here. There is no per-interface
  * registry: runtime type lookup goes through
  * {@link com.gto.datasynclib.DataSyncCodec#get(Class)}, the single table for both
@@ -35,7 +35,7 @@ import java.util.function.Function;
  * <p>{@link #convert} is generic over both its types, so a primitive travels as its wrapper; the same
  * is true of {@link ByteBufCodecs}'s container builders. For a type that is a few primitives and is
  * synchronized often, prefer a hand-written pair
- * ({@link StreamCodecExtends#VEC3I_CODEC} shows the shape) — primitive
+ * ({@link ByteBufCodecExtends#VEC3I_CODEC} shows the shape) — primitive
  * <em>arrays</em> and the FastUtil primitive collections already have primitive-backed codecs
  * ({@link ByteBufCodecs#VAR_INT_ARRAY} and friends), and those helpers are for containers whose
  * elements are objects anyway.</p>

@@ -9,14 +9,13 @@ import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Map;
+import java.util.ArrayList;
 
 /**
  * Synchronizes a generic java.util.Map with separate codecs for keys and values.
  * Change detection uses hashCode() comparison.
  * Entries are written as alternating key-value pairs.
  */
-
-import java.util.ArrayList;
 
 public final class MapAccess<K, V> extends AbstractFieldAccess<Map> {
 
@@ -70,7 +69,7 @@ public final class MapAccess<K, V> extends AbstractFieldAccess<Map> {
     @Override
     protected @NotNull Object doWriteValue(@NotNull Object source, @NotNull Map instance, @NotNull ValueOps ops) {
         if (instance.isEmpty()) return ops.createNull();
-        var list = new ArrayList<Object>(instance.size() * 2);
+        var list = new ArrayList<>(instance.size() * 2);
         instance.forEach((k, v) -> {
             list.add(ops.isNull(k) ? ops.createNull() : keyCodec.encode(ops, (K) k));
             list.add(ops.isNull(v) ? ops.createNull() : valueCodec.encode(ops, (V) v));
@@ -81,7 +80,7 @@ public final class MapAccess<K, V> extends AbstractFieldAccess<Map> {
     @Override
     protected void doReadValue(@NotNull Map instance, @NotNull Object data, @NotNull ValueOps ops) {
         // an empty container was stored as the null value, which is a missing payload, not a failure
-        if (!ops.isList(data)) return;
+        if (ops.isNull(data)) return;
         var list = ops.getList(data);
         var size = list.size();
         instance.clear();

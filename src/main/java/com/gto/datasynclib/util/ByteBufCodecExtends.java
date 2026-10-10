@@ -40,7 +40,7 @@ import net.minecraftforge.fluids.FluidStack;
  * instead of going through the boxed components of {@link com.gto.datasynclib.datastream.codec.CombinedCodec#composite}.
  * See that method's documentation for the trade-off.</p>
  */
-public interface StreamCodecExtends extends ByteBufCodecs {
+public interface ByteBufCodecExtends extends ByteBufCodecs {
 
     StreamCodec<FriendlyByteBuf, ResourceLocation> RESOURCE_LOCATION_CODEC = new StreamCodec<>() {
 

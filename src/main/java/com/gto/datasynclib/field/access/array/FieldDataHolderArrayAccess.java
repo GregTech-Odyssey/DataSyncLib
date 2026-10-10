@@ -77,10 +77,11 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
 
     @Override
     protected @NotNull Object doWriteValue(@NotNull Object source, IFieldDataHolder @NotNull [] instance, @NotNull ValueOps ops) {
-        var list = new ArrayList<Object>(instance.length);
+        var list = new ArrayList<>(instance.length);
         for (var element : instance) {
             list.add(element == null ? ops.createNull() : element.getFieldDataManager().writeToValue(ops));
         }
+        if (list.isEmpty()) return ops.createNull();
         if (definition.saveEmpty) return ops.createList(list);
         for (var element : list) {
             // the slots hold carrier values, so an absent one is the null value, never a Java null
@@ -92,7 +93,7 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
     @Override
     protected void doReadValue(IFieldDataHolder @NotNull [] instance, @NotNull Object data, @NotNull ValueOps ops) {
         // an empty container was stored as the null value, which is a missing payload, not a failure
-        if (!ops.isList(data)) return;
+        if (ops.isNull(data)) return;
         var list = ops.getList(data);
         var length = Math.min(list.size(), instance.length);
         for (int i = 0; i < length; i++) {

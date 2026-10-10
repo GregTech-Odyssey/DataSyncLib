@@ -192,6 +192,31 @@ TAGS.freeze(); // ← 自动：DataSyncCodec.get(ResearchTag.class) 现在可用
 
 注册后，任何 `ResearchTag` 类型的字段都能用 `DataSyncCodec.get(ResearchTag.class)` 自动编解码，而无需手动注册。
 
+### 高级用法：自定义类型的 SELF 转换器
+
+内置类型集覆盖不到的类型到达载体时会变成 `SELF` 值，默认走 Java 序列化。注册一个转换器后，它就以普通载体值的形式存储 —— 更小、在存档里可读、类结构变动也不会失效：
+
+```java
+ValueConverters.Converter.<UUID>builder(ValueOps.Type.LONG_ARRAY, UUID.class)
+        .write((ops, uuid) -> ops.createUUID(uuid))        // payload 用 ops 的原语构造
+        .read((ops, data) -> ops.getUUID(data))
+        .build();                                          // build() 会完成注册
+```
+
+`builder` 的 id 是 payload 的 `ValueOps.Type` id，不是转换器自己的编号，也不会额外写进数据里：转换过的值就按它的 payload 存储，所以无论是字段编解码器写出的 UUID 还是作为不透明值写出的 UUID，存档里都是 `LONG_ARRAY`。payload 类型相同的转换器共用同一个 id，而同一个类只能注册一次。
+
+如果转换器要代表一整族类型，加上选择器（谓词）。谓词按注册顺序匹配，先注册的优先，所以窄的放前面：
+
+```java
+ValueConverters.Converter.<Tagged>builder(ValueOps.Type.STRING, Tagged.class)
+        .when(Tagged.class::isAssignableFrom)              // 覆盖所有实现类
+        .write((ops, tagged) -> ops.createString(tagged.tag()))
+        .read((ops, data) -> Tagged.of(ops.getString(data)))
+        .build();
+```
+
+读取侧是 `ValueOps#getSelf(data, Type.class)`：本来就是该类型就直接返回，是转换过的就用对应转换器还原，两者都不成立时报错而不是瞎猜。`JavaValueOps#init()` 在模组构造期已经替你注册了内置的那一批：`UUID`、`BigInteger`、`BigDecimal`、`Instant`、`Duration`、`LocalDate`、`LocalTime`、`LocalDateTime`，以及类型集里没有自己 id 的数组（`boolean[]`、`short[]`、`char[]`、`float[]`、`double[]`），每个存的就是对应 `ValueOps#createXxx` 产出的 payload。
+
 ### 高级用法：泛型层级解析
 
 `ReflectUtil` 提供了沿泛型**父类/接口/多层继承**解析完整泛型实参的工具，适合需要从"实现了泛型接口/继承了泛型父类"的字段类型反推完整类型参数的场景。

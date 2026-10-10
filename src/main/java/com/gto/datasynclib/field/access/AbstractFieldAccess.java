@@ -42,8 +42,7 @@ import java.util.List;
  *   <li><strong>{@code instanceAsValue} mode:</strong> When the field's definition has
  *       {@link com.gto.datasynclib.DataFieldDefinition#instanceAsValue} = {@code true},
  *       the container itself (not just its contents) is serialized. This handles fields
- *       that may be {@code null} and need full instance replacement on deserialization.
- *       Also supports a legacy data version ({@code ops.dataVersion() == -1}) migration path.</li>
+ *       that may be {@code null} and need full instance replacement on deserialization.</li>
  *   <li><strong>Dirty flag:</strong> {@link #detectChange} never clears the flag itself;
  *       {@link com.gto.datasynclib.FieldDataManager#writeToNetworkBuffer} clears it via
  *       {@code clearChanged(source)} only for fields it actually serialized.</li>
@@ -173,23 +172,12 @@ public abstract class AbstractFieldAccess<T> implements DataField<T> {
     public final void readFromValue(@NotNull Object source, @NotNull Object data, @NotNull ValueOps ops) {
         T value = null;
         if (definition.instanceAsValue) {
-            if (ops.dataVersion() == -1) {
-                if (ops.isStringMap(data)) {
-                    var mapData = ops.getStringMap(data);
-                    if (!mapData.isEmpty()) {
-                        value = definition.decode(source, mapData.get("uid"), ops);
-                        doReadValue(value, ops.getStringMap(mapData.get("payload")).get("d"), ops);
-                        definition.set(source, value);
-                    }
-                }
-            } else {
-                if (!ops.isNull(data)) {
-                    var list = ops.getList(data);
-                    value = definition.decode(source, list.get(0), ops);
-                    if (value != null) doReadValue(value, list.get(1), ops);
-                }
-                definition.set(source, value);
+            if (!ops.isNull(data)) {
+                var list = ops.getList(data);
+                value = definition.decode(source, list.get(0), ops);
+                if (value != null) doReadValue(value, list.get(1), ops);
             }
+            definition.set(source, value);
         } else {
             value = getInstance(source);
             if (value != null) doReadValue(value, data, ops);

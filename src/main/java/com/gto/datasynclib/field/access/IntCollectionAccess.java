@@ -66,7 +66,7 @@ public final class IntCollectionAccess extends AbstractFieldAccess<IntCollection
     @Override
     protected void doReadValue(@NotNull IntCollection instance, @NotNull Object data, @NotNull ValueOps ops) {
         instance.clear();
-        if (!ops.isIntArray(data)) return;
+        if (ops.isNull(data)) return;
         var array = ops.getIntArray(data);
         for (var element : array) {
             instance.add(element);

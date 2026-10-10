@@ -64,7 +64,7 @@ public class Object2LongMapAccess<K> extends AbstractFieldAccess<Object2LongMap>
     @Override
     protected @NotNull Object doWriteValue(@NotNull Object source, @NotNull Object2LongMap instance, @NotNull ValueOps ops) {
         if (instance.isEmpty()) return ops.createNull();
-        var list = new ArrayList<Object>(instance.size() * 2);
+        var list = new ArrayList<>(instance.size() * 2);
         Object2LongMaps.fastForEach(instance, e -> {
             list.add(keyCodec.encode(ops, (K) e.getKey()));
             list.add(e.getLongValue());
@@ -75,7 +75,7 @@ public class Object2LongMapAccess<K> extends AbstractFieldAccess<Object2LongMap>
     @Override
     protected void doReadValue(@NotNull Object2LongMap instance, @NotNull Object data, @NotNull ValueOps ops) {
         // an empty container was stored as the null value, which is a missing payload, not a failure
-        if (!ops.isList(data)) return;
+        if (ops.isNull(data)) return;
         var list = ops.getList(data);
         var size = list.size();
         instance.clear();

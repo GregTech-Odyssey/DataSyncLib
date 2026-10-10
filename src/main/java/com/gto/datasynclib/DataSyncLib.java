@@ -11,6 +11,7 @@ import com.gto.datasynclib.network.DataSyncNetwork;
 import com.gto.datasynclib.remote.RemoteNetwork;
 import com.gto.datasynclib.test.ModBlockEntities;
 import com.gto.datasynclib.test.ModBlocks;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.test.ModEntityTypes;
 import com.gto.datasynclib.test.ModItems;
 import com.gto.datasynclib.util.*;
@@ -189,6 +190,7 @@ public final class DataSyncLib {
         EnumUtil.addFixedEnum(Direction.class);
         EnumUtil.addFixedEnum(Direction.Axis.class);
         NbtUtil.init(); // no-op hook, kept for initialization ordering
+        JavaValueOps.init(); // the converters a value the type set does not cover is stored through
 
         if (FMLLoader.isProduction()) return;
         // Register test blocks and block entities (development mode only)
