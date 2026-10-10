@@ -40,7 +40,7 @@ import java.util.function.Function;
  * ({@link ByteBufCodecs#VAR_INT_ARRAY} and friends), and those helpers are for containers whose
  * elements are objects anyway.</p>
  *
- * <p>The persistence bridges ({@link DataSyncCodec#of(StreamCodec)}, {@link DataSyncCodec#of(ValueCodec)})
+ * <p>The persistence bridges ({@link DataSyncCodec#of(StreamCodec)}, {@link DataSyncCodec#of(int, ValueCodec)})
  * exist as static factories only, because they allocate a buffer of their own.</p>
  *
  * @param <B> the buffer this codec reads from and writes to — anything; the built-ins use

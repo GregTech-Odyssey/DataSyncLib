@@ -2,6 +2,7 @@ package com.gto.datasynclib;
 
 import com.gto.datasynclib.annotations.*;
 import com.gto.datasynclib.datastream.codec.ByteBufCodecs;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.datastream.codec.StreamCodec;
 import com.gto.datasynclib.datastream.codec.ValueCodec;
 import com.gto.datasynclib.datastream.codec.ValueOps;
@@ -202,8 +203,13 @@ final class FieldAnnotationMetadata {
                         f.setAccessible(true);
                         this.streamCodec = (StreamCodec) f.get(null);
                     } else {
-                        // the network half is then the same id+payload bytes, inline
-                        this.streamCodec = ByteBufCodecs.fromValueCodec(valueCodec);
+                        // the network half is then the same id+payload bytes, inline. A wire value
+                        // carries no version of its own and this codec writes and reads it, so the
+                        // shape is symmetric either way: the carrier's default version is what a save
+                        // codec without a syncCodec gets. A codec whose reading branches on the version
+                        // needs its own syncCodec, where the field layer hands it one.
+                        this.streamCodec = ByteBufCodecs.fromValueCodec(JavaValueOps.INSTANCE.dataVersion(),
+                                valueCodec);
                     }
                     this.writeToValue = null;
                     this.readFromValue = null;

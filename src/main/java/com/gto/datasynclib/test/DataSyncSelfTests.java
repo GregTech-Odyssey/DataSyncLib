@@ -844,9 +844,9 @@ public final class DataSyncSelfTests {
         expect("mirror.convert.combined.disk", "7", coveredConverted.decode(ops, coveredConverted.encode(ops, "7")));
 
         // Cross-path mirrors: adapt a half to the other path, or to a combined codec.
-        var valueAsStream = ByteBufCodecs.fromValueCodec(ValueCodec.STRING);
+        var valueAsStream = ByteBufCodecs.fromValueCodec(0, ValueCodec.STRING);
         expect("mirror.valueAsStream", "x", streamDecode(valueAsStream, streamEncode(valueAsStream, "x")));
-        var fromValue = DataSyncCodec.of(ValueCodec.STRING);
+        var fromValue = DataSyncCodec.of(0, ValueCodec.STRING);
         expect("mirror.ofValueCodec.disk", "x", fromValue.decode(ops, fromValue.encode(ops, "x")));
         expect("mirror.ofValueCodec.wire", "x", streamDecode(fromValue, streamEncode(fromValue, "x")));
         var fromStream = DataSyncCodec.of(ByteBufCodecs.STRING_UTF8);

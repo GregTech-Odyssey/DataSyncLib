@@ -93,9 +93,12 @@ public interface CombinedCodec<T> extends StreamCodec<FriendlyByteBuf, T>, Value
      * Adapts a disk codec, deriving the stream codec by writing its id+payload bytes inline
      * ({@link ByteBufCodecs#fromValueCodec}) — the layout the persistence form already has, so there
      * is no extra copy in between.
+     *
+     * @param version the data version the derived stream codec hands the disk codec, since a wire value
+     *                carries none of its own
      */
-    static <T> DataSyncCodec<T> of(ValueCodec<T> valueCodec) {
-        return DataSyncCodec.of(valueCodec);
+    static <T> DataSyncCodec<T> of(int version, ValueCodec<T> valueCodec) {
+        return DataSyncCodec.of(version, valueCodec);
     }
 
     /**

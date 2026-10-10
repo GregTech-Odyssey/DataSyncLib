@@ -51,7 +51,7 @@ import java.util.function.ToIntFunction;
  *       {@link StreamCodec.CodecOperation}s, read fluently as
  *       {@code STRING_UTF8.apply(ByteBufCodecs.list())} or
  *       {@code STRING_UTF8.apply(ByteBufCodecs.optional())}</li>
- *   <li>{@link #fromCodec(Codec)} / {@link #fromValueCodec(ValueCodec)}, which allocate a buffer of
+ *   <li>{@link #fromCodec(Codec)} / {@link #fromValueCodec(int, ValueCodec)}, which allocate a buffer of
  *       their own to carry the other path's payload, and {@link #get(Class)}, the network-side
  *       registry lookup</li>
  * </ul>
@@ -832,21 +832,25 @@ public interface ByteBufCodecs {
      * ({@link ValueOps#writeValue(Object, ByteBuf)}) — the native twin of
      * the retired Data codec bridge, and the same layout, since the ids are the wire ids.
      *
-     * <p>The adapter writes through a fresh {@link JavaValueOps#INSTANCE} view, which is the ops a
-     * codec needs when nobody supplied one: the codec's own signature is what makes this possible.</p>
+     * <p>The version is the one the codec is handed: the ops is {@link JavaValueOps#create(int)}, so a
+     * codec whose reading depends on {@link ValueOps#dataVersion()} sees {@code version} and not the
+     * carrier's default. A wire value carries no version of its own — the bytes are written and read by
+     * this same codec — so the caller passes the version its data is written at, which is the current
+     * one: {@code 0} for a codec with no versioned layouts, a mod's own {@code VERSION} otherwise. A
+     * defaulted version would silently hand a codec that adapts an old shape the branch for that old
+     * shape while it decodes a value written today.</p>
      */
-    static <T> StreamCodec<ByteBuf, T> fromValueCodec(ValueCodec<T> codec) {
+    static <T> StreamCodec<ByteBuf, T> fromValueCodec(int version, ValueCodec<T> codec) {
+        var ops = JavaValueOps.create(version);
         return new StreamCodec<>() {
 
             @Override
             public void encode(ByteBuf buf, T obj) {
-                var ops = JavaValueOps.INSTANCE;
                 ops.writeValue(codec.encode(ops, obj), buf);
             }
 
             @Override
             public T decode(ByteBuf buf) {
-                var ops = JavaValueOps.INSTANCE;
                 return codec.decode(ops, ops.readValue(buf));
             }
         };

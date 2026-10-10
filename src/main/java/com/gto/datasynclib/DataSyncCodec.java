@@ -85,9 +85,8 @@ import java.util.UUID;
  * element. See that method for the trade-off.</p>
  *
  * <p>Downstream mods add their own types with the static {@code register(...)} family —
- * {@link #register(Class, StreamCodec, ValueCodec)} for a plain runtime type,
- * {@link #register(Class, ValueCodec)} for one whose network form is the same bytes,
- * {@link #register(Class, StreamCodec, ValueCodec)} for a plain runtime type and
+ * {@link #register(Class, int, ValueCodec)} for a type whose network form is the same bytes as its
+ * disk form, {@link #register(Class, StreamCodec, ValueCodec)} for a plain runtime type and
  * {@link #register(Class, Registry)} for registry entries. Register during mod construction:
  * the field-definition layer caches the resolved factory per field type, so a registration that
  * arrives after that type was first scanned can be shadowed, and the tables are only
@@ -327,9 +326,14 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
     /**
      * Creates a codec from a native disk codec, deriving the stream codec by writing its id+payload
      * bytes inline ({@link ByteBufCodecs#fromValueCodec}).
+     *
+     * @param version    the data version the derived stream codec hands the disk codec — the version
+     *                   this data is written at, since a wire value carries none of its own. See
+     *                   {@link ByteBufCodecs#fromValueCodec(int, ValueCodec)}
+     * @param valueCodec the persistence codec to bridge
      */
-    public static <T> DataSyncCodec<T> of(ValueCodec<T> valueCodec) {
-        return of(ByteBufCodecs.fromValueCodec(valueCodec), valueCodec);
+    public static <T> DataSyncCodec<T> of(int version, ValueCodec<T> valueCodec) {
+        return of(ByteBufCodecs.fromValueCodec(version, valueCodec), valueCodec);
     }
 
     /**
@@ -468,10 +472,13 @@ public final class DataSyncCodec<T> implements CombinedCodec<T> {
 
     /**
      * Registers a codec from a disk codec, deriving the stream codec automatically
-     * ({@link #of(ValueCodec)}).
+     * ({@link #of(int, ValueCodec)}).
+     *
+     * @param version the data version the derived stream codec hands the disk codec — the version this
+     *                data is written at, since a wire value carries none of its own
      */
-    public static <T> DataSyncCodec<T> register(Class<T> type, ValueCodec<T> valueCodec) {
-        return register(type, ByteBufCodecs.fromValueCodec(valueCodec), valueCodec);
+    public static <T> DataSyncCodec<T> register(Class<T> type, int version, ValueCodec<T> valueCodec) {
+        return register(type, ByteBufCodecs.fromValueCodec(version, valueCodec), valueCodec);
     }
 
     /**

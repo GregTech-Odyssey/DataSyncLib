@@ -105,7 +105,10 @@ public class FieldDataHolderEntity extends Entity implements IFieldDataHolder {
     @Override
     public void addAdditionalSaveData(@NotNull CompoundTag tag) {
         tag.putInt("field_data_dataVersion", VERSION);
-        tag.putByteArray("field_save", JavaValueOps.INSTANCE.toBytes(getFieldDataManager().writeToValue(JavaValueOps.INSTANCE)));
+        // the writer carries the version it is writing, the same one the tag records and the reader hands
+        // back, so a codec that shapes its output by version writes what it stamps
+        var ops = JavaValueOps.create(VERSION);
+        tag.putByteArray("field_save", ops.toBytes(getFieldDataManager().writeToValue(ops)));
     }
 
     /**
