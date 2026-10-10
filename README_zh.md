@@ -35,7 +35,7 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 - **📦 DataComponent 系统** — 基于标识（identity）的组件数据模型，内置合并语义
 - **🗂️ Registry 工具** — 泛型注册表，支持 freeze/unfreeze 生命周期，内置 3 种序列化方式
 - **⚡ 高性能** — MethodHandle 替代反射、FastUtil 集合、多级缓存、VarInt 紧凑编码
-- **🗜️ 自定义数据类型** — 19 种载体值类型（ValueOps），支持 CustomTypes 自定义类型扩展
+- **🗜️ 自定义数据类型** — 19 种载体值类型（ValueOps），模组自己的对象用 `ValueConverters` 转换器扩展（`CustomTypes` 是库内部 payload 的注册表，不对外）
 - **🧩 开箱即用** — 继承 `FieldDataHolderBlockEntity` 即可获得全部能力
 - **🪆 嵌套 Holder** — `@AdditionalHolder` 递归发现嵌套对象中的注解字段；`childManager` 模式为子对象生成独立子管理器
 - **🧬 泛型层级解析** — `ReflectUtil` 沿父类/接口解析完整泛型实参（如 `A<T> extends HashMap<String,T>` 可取得 `[String, T]`）
@@ -205,7 +205,7 @@ ValueConverters.Converter.<UUID>builder(ValueOps.Type.LONG_ARRAY, UUID.class)
 
 `builder` 的 id 是 payload 的 `ValueOps.Type` id，不是转换器自己的编号，也不会额外写进数据里：转换过的值就按它的 payload 存储，所以无论是字段编解码器写出的 UUID 还是作为不透明值写出的 UUID，存档里都是 `LONG_ARRAY`。payload 类型相同的转换器共用同一个 id，而同一个类只能注册一次。
 
-如果转换器要代表一整族类型，加上选择器（谓词）。谓词按注册顺序匹配，先注册的优先，所以窄的放前面：
+如果转换器要代表一整族类型，加上选择器（谓词）。谓词按注册顺序匹配，先注册的优先，所以窄的放前面——一个注册覆盖全部 `IntList`、`IntSet` 之类就是这么做的：
 
 ```java
 ValueConverters.Converter.<Tagged>builder(ValueOps.Type.STRING, Tagged.class)
@@ -215,7 +215,13 @@ ValueConverters.Converter.<Tagged>builder(ValueOps.Type.STRING, Tagged.class)
         .build();
 ```
 
-读取侧是 `ValueOps#getSelf(data, Type.class)`：本来就是该类型就直接返回，是转换过的就用对应转换器还原，两者都不成立时报错而不是瞎猜。`JavaValueOps#init()` 在模组构造期已经替你注册了内置的那一批：`UUID`、`BigInteger`、`BigDecimal`、`Instant`、`Duration`、`LocalDate`、`LocalTime`、`LocalDateTime`，以及类型集里没有自己 id 的数组（`boolean[]`、`short[]`、`char[]`、`float[]`、`double[]`），每个存的就是对应 `ValueOps#createXxx` 产出的 payload。
+读取侧是 `ValueOps#getSelf(data, Type.class)`：本来就是该类型就直接返回，是转换过的就用对应转换器还原，两者都不成立时报错而不是瞎猜。`JavaValueOps#init()` 在模组构造期已经替你注册了内置的那一批：
+
+- `UUID` 存成 `LONG_ARRAY`，`BigInteger`/`BigDecimal` 存成 `BYTE_ARRAY`，以及类型集里没有自己 id 的数组（`boolean[]`→`BYTE_ARRAY`、`short[]`/`char[]`/`float[]`→`INT_ARRAY`、`double[]`→`LONG_ARRAY`），每个存的就是对应 `ValueOps#createXxx` 产出的 payload。
+- **FastUtil 原始集合**：`IntList`/`LongList` 存成原始数组（和它们字段 codec 写的形状一致，值不会变成装箱数字的列表），`IntSet`/`LongSet` 同样存数组。**有序集合**故意不转换、继续走 Java 序列化：payload 里没有顺序，重建出来会是一个"相等判断方式不同"的集合。
+- 枚举是**字段**类型（`DataSyncCodec` 按 ordinal 或名字存）；作为裸**值**它没有转换器——要放枚举就放进字段，或放进元素类型就是该枚举的集合里。
+
+> **`CustomTypes` 是库自己的注册表，不是给模组用的。** 它的 key 是裸 `int`，落在存档和网络都会携带的同一张全局表里：16 以下已经被占（NBT `0…2`、JSON `3…5`），没有任何区间留给别人，撞 id 是直接报错而不是合并，而且 id 一旦发出去就永远收不回来。payload 格式还要求对端也得认识——没有该类型的客户端会直接拒绝这个值而不是降级——所以在这里注册的格式会渗进整个游戏的线格式。模组自己的对象是**值**，应该走上面的 `ValueConverters`：不占 id、不新增格式、也不会和谁冲突。读取自定义值（`ops.isCustom`、`ops.getCustom`）对所有代码开放，因为那是库自己的 payload 在回来。
 
 ### 高级用法：泛型层级解析
 

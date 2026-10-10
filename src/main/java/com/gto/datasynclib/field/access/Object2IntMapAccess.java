@@ -3,15 +3,16 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.datastream.codec.ValueOps;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntMaps;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.ArrayList;
+
 /**
- * Synchronizes a FastUtil {@link it.unimi.dsi.fastutil.objects.Object2IntMap}.
+ * Synchronizes a FastUtil {@link Object2IntMap}.
  *
  * <p>Uses the generic type's key codec ({@link DataSyncCodec}) for serializing map keys,
  * while int values are written/read directly as VarInts (no codec needed for the value type).
@@ -25,8 +26,6 @@ import org.jetbrains.annotations.NotNull;
  * <p>Interleaved key-value pairs in a carrier list:
  * {@code [keyData0, IntData(value0), keyData1, IntData(value1), ...]}</p>
  */
-
-import java.util.ArrayList;
 
 public class Object2IntMapAccess<K> extends AbstractFieldAccess<Object2IntMap> {
 

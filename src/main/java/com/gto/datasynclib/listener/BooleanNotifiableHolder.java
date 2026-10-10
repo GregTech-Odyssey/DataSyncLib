@@ -1,9 +1,8 @@
 package com.gto.datasynclib.listener;
 
 import com.gto.datasynclib.IDataSerializable;
-import com.gto.datasynclib.datastream.codec.JavaValueOps;
-import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.util.holder.BooleanHolder;
 import lombok.Setter;
 import lombok.experimental.Accessors;

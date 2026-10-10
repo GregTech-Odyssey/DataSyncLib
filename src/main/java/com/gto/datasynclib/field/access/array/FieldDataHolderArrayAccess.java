@@ -3,20 +3,19 @@ package com.gto.datasynclib.field.access.array;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import com.gto.datasynclib.util.HashUtil;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.ArrayList;
+
 /**
  * Synchronizes an array of IFieldDataHolder instances.
  * Uses identity-based hash for array change detection with per-element dirty flag propagation.
  * Overrides mustDetect() for mandatory detection.
  */
-
-import java.util.ArrayList;
 
 public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IFieldDataHolder[]> {
 

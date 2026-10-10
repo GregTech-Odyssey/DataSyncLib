@@ -1,5 +1,8 @@
 package com.gto.datasynclib.util;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.gto.datasynclib.datastream.codec.JavaOps;
 import com.gto.datasynclib.datastream.codec.ValueCodec;
 import com.gto.datasynclib.datastream.codec.ValueOps;
@@ -187,6 +190,14 @@ public class ValueCodecs {
     public final ValueCodec<CompoundTag> COMPOUND_TAG = ValueCodec.custom(NbtUtil.COMPOUND_TAG_TYPE);
 
     public final ValueCodec<Tag> TAG = ValueCodec.custom(NbtUtil.TAG_TYPE);
+
+    // ---- JSON: a registered custom payload holding the element itself, the same arrangement as NBT ----
+
+    public final ValueCodec<JsonElement> JSON = ValueCodec.custom(JsonUtils.JSON_TYPE);
+
+    public final ValueCodec<JsonObject> JSON_OBJECT = ValueCodec.custom(JsonUtils.JSON_OBJECT_TYPE);
+
+    public final ValueCodec<JsonArray> JSON_ARRAY = ValueCodec.custom(JsonUtils.JSON_ARRAY_TYPE);
 
     public final ValueCodec<ItemStack> ITEM_STACK = new ValueCodec<>() {
 

@@ -1,9 +1,9 @@
 package com.gto.datasynclib.util;
 
 import com.gto.datasynclib.DataSyncCodec;
+import com.gto.datasynclib.datastream.codec.StreamCodec;
 import com.gto.datasynclib.datastream.codec.ValueCodec;
 import com.gto.datasynclib.datastream.codec.ValueOps;
-import com.gto.datasynclib.datastream.codec.StreamCodec;
 import com.gto.datasynclib.util.holder.IntObjectHolder;
 import com.mojang.serialization.Codec;
 import it.unimi.dsi.fastutil.HashCommon;

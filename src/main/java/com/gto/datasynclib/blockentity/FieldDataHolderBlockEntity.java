@@ -1,10 +1,10 @@
 package com.gto.datasynclib.blockentity;
 
-import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LazyFieldDataManager;
 import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.datastream.codec.ValueOps;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.ByteArrayTag;

@@ -7,12 +7,7 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
-import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -69,6 +64,14 @@ import java.util.UUID;
  *       untrusted input or dispatching on what the carrier holds:
  *       {@code if (ops.isInt(data)) return ops.getInt(data);} They exist so a caller never has to
  *       catch a cast failure to find out what it is holding.</li>
+ *   <li><strong>{@code  getXxx} / {@code  getXxx} / {@code  getXxx} / {@code  getXxx}
+ *       and the overloaded {@code addXxx} / {@code putXxx} — the element shortcuts.</strong> One
+ *       conversion for a list element or a map entry, so a codec walking a stored list does not repeat
+ *       {@code getInt(list.get(i))} at every element. The reads take the container the caller already
+ *       holds and name it, because the key type alone cannot say which container it is — an int is a list
+ *       index in one call and an int-map key in another. The writes are one name per value type, overloaded
+ *       by the container, and build through the creators, which keeps a carrier that shapes its values
+ *       shaping them.</li>
  * </ul>
  *
  * <h3>Boxed creators and readers</h3>
@@ -81,8 +84,8 @@ import java.util.UUID;
  * and never unboxes to box again.</p>
  *
  * <h3>Binary form</h3>
- * <p>{@link #getTypeId(Object)} reports the id, {@link #write(Object, ByteBuf)} writes the
- * <em>payload</em> and {@link #read(byte, ByteBuf)} reads one back for a given id — the id byte
+ * <p>{@link #getTypeId(Object)} reports the id, {@link #writeValue(Object, ByteBuf)} writes the
+ * <em>payload</em> and {@link #readValue(ByteBuf)} reads one back for a given id — the id byte
  * itself belongs to the caller, exactly as {@code Data.writeData} / {@code Data.readData} split it.
  * A carrier written this way is byte-compatible with the Data encoding of the same value, so the
  * native implementation can take over from the Data one without changing a single stored file.</p>
@@ -139,6 +142,11 @@ public interface ValueOps {
         byte STRING = 12;
         byte LIST = 13;
         byte STRING_MAP = 14;
+        /**
+         * A payload format the library registered with {@link CustomTypes} — NBT or JSON today. The registry
+         * is the library's own rather than a mod's: a mod's value belongs in a
+         * {@link ValueConverters.Converter}, which needs no id. See {@link CustomTypes}.
+         */
         byte CUSTOM = 15;
         // 16 is retired: it held OBJECT_MAP, the map keyed by carrier values. Every map is a
         // STRING_MAP now, so nothing may take the id back — a stored 16 is not readable.
@@ -316,6 +324,9 @@ public interface ValueOps {
      * Creates a custom value of the registered type {@code typeId} around {@code value}.
      *
      * @throws IllegalArgumentException if no custom type is registered under {@code typeId}
+     * @apiNote For the payloads the library registers — NBT, JSON. A mod's own object is stored as a
+     * {@link ValueConverters.Converter} value rather than as a payload format of its own; see
+     * {@link CustomTypes}.
      */
     <V> Object createCustom(CustomTypes.Type<V> type, V value);
 
@@ -397,7 +408,7 @@ public interface ValueOps {
     }
 
     /**
-     * @return the payload of a custom value, as it was handed to {@link #createCustom(int, Object)}
+     * @return the payload of a custom value, as it was handed to {@link #createCustom(CustomTypes.Type, Object)}
      */
     <V> V getCustom(CustomTypes.Type<V> type, Object data);
 
@@ -528,6 +539,10 @@ public interface ValueOps {
         return getSelf(data) instanceof BigDecimal value ? value : ValueOpsConverters.BIG_DECIMAL.toValue(this, data);
     }
 
+    default Object createList(Object... value) {
+        return createList(Arrays.asList(value));
+    }
+
     /**
      * The format version this carrier reads at; {@code 0} when there is none.
      *
@@ -540,6 +555,801 @@ public interface ValueOps {
     default int dataVersion() {
         return 0;
     }
+    // ===== Element access: the list and map shortcuts =====
+    // A codec walking a stored list or map otherwise repeats the same conversion at every element —
+    // {@code getInt(list.get(i))}, {@code map.put(key, createString(value))} — so the carrier offers the pair.
+    // Both halves are one name per value type, overloaded by the container: a read takes the container the
+    // caller already holds plus the index or key into it, a write takes the container plus the value. The
+    // container parameter is what tells the overloads apart, because the key alone cannot say which one it
+    // is: {@code 5} is a list index in one call and an int-map key in another. The writers build through the
+    // creators, so a carrier that shapes its values keeps shaping them. A read of a value that is not that
+    // type reports through the element getter, as it would there.
+
+    /**
+     * @return the boolean at {@code index} of the list — {@code getBoolean} of it
+     */
+    default boolean getBoolean(List<Object> list, int index) {
+        return getBoolean(list.get(index));
+    }
+
+    /**
+     * @return the byte at {@code index} of the list — {@code getByte} of it
+     */
+    default byte getByte(List<Object> list, int index) {
+        return getByte(list.get(index));
+    }
+
+    /**
+     * @return the short at {@code index} of the list — {@code getShort} of it
+     */
+    default short getShort(List<Object> list, int index) {
+        return getShort(list.get(index));
+    }
+
+    /**
+     * @return the char at {@code index} of the list — {@code getChar} of it
+     */
+    default char getChar(List<Object> list, int index) {
+        return getChar(list.get(index));
+    }
+
+    /**
+     * @return the int at {@code index} of the list — {@code getInt} of it
+     */
+    default int getInt(List<Object> list, int index) {
+        return getInt(list.get(index));
+    }
+
+    /**
+     * @return the long at {@code index} of the list — {@code getLong} of it
+     */
+    default long getLong(List<Object> list, int index) {
+        return getLong(list.get(index));
+    }
+
+    /**
+     * @return the float at {@code index} of the list — {@code getFloat} of it
+     */
+    default float getFloat(List<Object> list, int index) {
+        return getFloat(list.get(index));
+    }
+
+    /**
+     * @return the double at {@code index} of the list — {@code getDouble} of it
+     */
+    default double getDouble(List<Object> list, int index) {
+        return getDouble(list.get(index));
+    }
+
+    /**
+     * @return the String at {@code index} of the list — {@code getString} of it
+     */
+    default String getString(List<Object> list, int index) {
+        return getString(list.get(index));
+    }
+
+    /**
+     * @return the byte array at {@code index} of the list — {@code getByteArray} of it
+     */
+    default byte[] getByteArray(List<Object> list, int index) {
+        return getByteArray(list.get(index));
+    }
+
+    /**
+     * @return the int array at {@code index} of the list — {@code getIntArray} of it
+     */
+    default int[] getIntArray(List<Object> list, int index) {
+        return getIntArray(list.get(index));
+    }
+
+    /**
+     * @return the long array at {@code index} of the list — {@code getLongArray} of it
+     */
+    default long[] getLongArray(List<Object> list, int index) {
+        return getLongArray(list.get(index));
+    }
+
+    /**
+     * @return the list at {@code index} of the list — {@code  get} of it
+     */
+    default List<Object> getList(List<Object> list, int index) {
+        return getList(list.get(index));
+    }
+
+    /**
+     * @return the string map at {@code index} of the list — {@code getStringMap} of it
+     */
+    default Map<String, Object> getStringMap(List<Object> list, int index) {
+        return getStringMap(list.get(index));
+    }
+
+    /**
+     * @return the boolean at {@code key} of the string map — {@code getBoolean} of it
+     */
+    default boolean getBoolean(Map<String, Object> map, String key) {
+        return getBoolean(map.get(key));
+    }
+
+    /**
+     * @return the byte at {@code key} of the string map — {@code getByte} of it
+     */
+    default byte getByte(Map<String, Object> map, String key) {
+        return getByte(map.get(key));
+    }
+
+    /**
+     * @return the short at {@code key} of the string map — {@code getShort} of it
+     */
+    default short getShort(Map<String, Object> map, String key) {
+        return getShort(map.get(key));
+    }
+
+    /**
+     * @return the char at {@code key} of the string map — {@code getChar} of it
+     */
+    default char getChar(Map<String, Object> map, String key) {
+        return getChar(map.get(key));
+    }
+
+    /**
+     * @return the int at {@code key} of the string map — {@code getInt} of it
+     */
+    default int getInt(Map<String, Object> map, String key) {
+        return getInt(map.get(key));
+    }
+
+    /**
+     * @return the long at {@code key} of the string map — {@code getLong} of it
+     */
+    default long getLong(Map<String, Object> map, String key) {
+        return getLong(map.get(key));
+    }
+
+    /**
+     * @return the float at {@code key} of the string map — {@code getFloat} of it
+     */
+    default float getFloat(Map<String, Object> map, String key) {
+        return getFloat(map.get(key));
+    }
+
+    /**
+     * @return the double at {@code key} of the string map — {@code getDouble} of it
+     */
+    default double getDouble(Map<String, Object> map, String key) {
+        return getDouble(map.get(key));
+    }
+
+    /**
+     * @return the String at {@code key} of the string map — {@code getString} of it
+     */
+    default String getString(Map<String, Object> map, String key) {
+        return getString(map.get(key));
+    }
+
+    /**
+     * @return the byte array at {@code key} of the string map — {@code getByteArray} of it
+     */
+    default byte[] getByteArray(Map<String, Object> map, String key) {
+        return getByteArray(map.get(key));
+    }
+
+    /**
+     * @return the int array at {@code key} of the string map — {@code getIntArray} of it
+     */
+    default int[] getIntArray(Map<String, Object> map, String key) {
+        return getIntArray(map.get(key));
+    }
+
+    /**
+     * @return the long array at {@code key} of the string map — {@code getLongArray} of it
+     */
+    default long[] getLongArray(Map<String, Object> map, String key) {
+        return getLongArray(map.get(key));
+    }
+
+    /**
+     * @return the list at {@code key} of the string map — {@code  get} of it
+     */
+    default List<Object> getList(Map<String, Object> map, String key) {
+        return getList(map.get(key));
+    }
+
+    /**
+     * @return the string map at {@code key} of the string map — {@code getStringMap} of it
+     */
+    default Map<String, Object> getStringMap(Map<String, Object> map, String key) {
+        return getStringMap(map.get(key));
+    }
+
+    /**
+     * @return the boolean at {@code key} of the int map — {@code getBoolean} of it
+     */
+    default boolean getBoolean(Int2ObjectMap<Object> map, int key) {
+        return getBoolean(map.get(key));
+    }
+
+    /**
+     * @return the byte at {@code key} of the int map — {@code getByte} of it
+     */
+    default byte getByte(Int2ObjectMap<Object> map, int key) {
+        return getByte(map.get(key));
+    }
+
+    /**
+     * @return the short at {@code key} of the int map — {@code getShort} of it
+     */
+    default short getShort(Int2ObjectMap<Object> map, int key) {
+        return getShort(map.get(key));
+    }
+
+    /**
+     * @return the char at {@code key} of the int map — {@code getChar} of it
+     */
+    default char getChar(Int2ObjectMap<Object> map, int key) {
+        return getChar(map.get(key));
+    }
+
+    /**
+     * @return the int at {@code key} of the int map — {@code getInt} of it
+     */
+    default int getInt(Int2ObjectMap<Object> map, int key) {
+        return getInt(map.get(key));
+    }
+
+    /**
+     * @return the long at {@code key} of the int map — {@code getLong} of it
+     */
+    default long getLong(Int2ObjectMap<Object> map, int key) {
+        return getLong(map.get(key));
+    }
+
+    /**
+     * @return the float at {@code key} of the int map — {@code getFloat} of it
+     */
+    default float getFloat(Int2ObjectMap<Object> map, int key) {
+        return getFloat(map.get(key));
+    }
+
+    /**
+     * @return the double at {@code key} of the int map — {@code getDouble} of it
+     */
+    default double getDouble(Int2ObjectMap<Object> map, int key) {
+        return getDouble(map.get(key));
+    }
+
+    /**
+     * @return the String at {@code key} of the int map — {@code getString} of it
+     */
+    default String getString(Int2ObjectMap<Object> map, int key) {
+        return getString(map.get(key));
+    }
+
+    /**
+     * @return the byte array at {@code key} of the int map — {@code getByteArray} of it
+     */
+    default byte[] getByteArray(Int2ObjectMap<Object> map, int key) {
+        return getByteArray(map.get(key));
+    }
+
+    /**
+     * @return the int array at {@code key} of the int map — {@code getIntArray} of it
+     */
+    default int[] getIntArray(Int2ObjectMap<Object> map, int key) {
+        return getIntArray(map.get(key));
+    }
+
+    /**
+     * @return the long array at {@code key} of the int map — {@code getLongArray} of it
+     */
+    default long[] getLongArray(Int2ObjectMap<Object> map, int key) {
+        return getLongArray(map.get(key));
+    }
+
+    /**
+     * @return the list at {@code key} of the int map — {@code  get} of it
+     */
+    default List<Object> getList(Int2ObjectMap<Object> map, int key) {
+        return getList(map.get(key));
+    }
+
+    /**
+     * @return the string map at {@code key} of the int map — {@code getStringMap} of it
+     */
+    default Map<String, Object> getStringMap(Int2ObjectMap<Object> map, int key) {
+        return getStringMap(map.get(key));
+    }
+
+    /**
+     * @return the boolean at {@code key} of the long map — {@code getBoolean} of it
+     */
+    default boolean getBoolean(Long2ObjectMap<Object> map, long key) {
+        return getBoolean(map.get(key));
+    }
+
+    /**
+     * @return the byte at {@code key} of the long map — {@code getByte} of it
+     */
+    default byte getByte(Long2ObjectMap<Object> map, long key) {
+        return getByte(map.get(key));
+    }
+
+    /**
+     * @return the short at {@code key} of the long map — {@code getShort} of it
+     */
+    default short getShort(Long2ObjectMap<Object> map, long key) {
+        return getShort(map.get(key));
+    }
+
+    /**
+     * @return the char at {@code key} of the long map — {@code getChar} of it
+     */
+    default char getChar(Long2ObjectMap<Object> map, long key) {
+        return getChar(map.get(key));
+    }
+
+    /**
+     * @return the int at {@code key} of the long map — {@code getInt} of it
+     */
+    default int getInt(Long2ObjectMap<Object> map, long key) {
+        return getInt(map.get(key));
+    }
+
+    /**
+     * @return the long at {@code key} of the long map — {@code getLong} of it
+     */
+    default long getLong(Long2ObjectMap<Object> map, long key) {
+        return getLong(map.get(key));
+    }
+
+    /**
+     * @return the float at {@code key} of the long map — {@code getFloat} of it
+     */
+    default float getFloat(Long2ObjectMap<Object> map, long key) {
+        return getFloat(map.get(key));
+    }
+
+    /**
+     * @return the double at {@code key} of the long map — {@code getDouble} of it
+     */
+    default double getDouble(Long2ObjectMap<Object> map, long key) {
+        return getDouble(map.get(key));
+    }
+
+    /**
+     * @return the String at {@code key} of the long map — {@code getString} of it
+     */
+    default String getString(Long2ObjectMap<Object> map, long key) {
+        return getString(map.get(key));
+    }
+
+    /**
+     * @return the byte array at {@code key} of the long map — {@code getByteArray} of it
+     */
+    default byte[] getByteArray(Long2ObjectMap<Object> map, long key) {
+        return getByteArray(map.get(key));
+    }
+
+    /**
+     * @return the int array at {@code key} of the long map — {@code getIntArray} of it
+     */
+    default int[] getIntArray(Long2ObjectMap<Object> map, long key) {
+        return getIntArray(map.get(key));
+    }
+
+    /**
+     * @return the long array at {@code key} of the long map — {@code getLongArray} of it
+     */
+    default long[] getLongArray(Long2ObjectMap<Object> map, long key) {
+        return getLongArray(map.get(key));
+    }
+
+    /**
+     * @return the list at {@code key} of the long map — {@code  get} of it
+     */
+    default List<Object> getList(Long2ObjectMap<Object> map, long key) {
+        return getList(map.get(key));
+    }
+
+    /**
+     * @return the string map at {@code key} of the long map — {@code getStringMap} of it
+     */
+    default Map<String, Object> getStringMap(Long2ObjectMap<Object> map, long key) {
+        return getStringMap(map.get(key));
+    }
+
+    /**
+     * Appends a boolean built with {@code createBoolean} to the list.
+     */
+    default void addBoolean(List<Object> list, boolean value) {
+        list.add(createBoolean(value));
+    }
+
+    /**
+     * Appends a byte built with {@code createByte} to the list.
+     */
+    default void addByte(List<Object> list, byte value) {
+        list.add(createByte(value));
+    }
+
+    /**
+     * Appends a short built with {@code createShort} to the list.
+     */
+    default void addShort(List<Object> list, short value) {
+        list.add(createShort(value));
+    }
+
+    /**
+     * Appends a char built with {@code createChar} to the list.
+     */
+    default void addChar(List<Object> list, char value) {
+        list.add(createChar(value));
+    }
+
+    /**
+     * Appends a int built with {@code createInt} to the list.
+     */
+    default void addInt(List<Object> list, int value) {
+        list.add(createInt(value));
+    }
+
+    /**
+     * Appends a long built with {@code createLong} to the list.
+     */
+    default void addLong(List<Object> list, long value) {
+        list.add(createLong(value));
+    }
+
+    /**
+     * Appends a float built with {@code createFloat} to the list.
+     */
+    default void addFloat(List<Object> list, float value) {
+        list.add(createFloat(value));
+    }
+
+    /**
+     * Appends a double built with {@code createDouble} to the list.
+     */
+    default void addDouble(List<Object> list, double value) {
+        list.add(createDouble(value));
+    }
+
+    /**
+     * Appends a String built with {@code createString} to the list.
+     */
+    default void addString(List<Object> list, String value) {
+        list.add(createString(value));
+    }
+
+    /**
+     * Appends a byte array built with {@code createByteArray} to the list.
+     */
+    default void addByteArray(List<Object> list, byte[] value) {
+        list.add(createByteArray(value));
+    }
+
+    /**
+     * Appends a int array built with {@code createIntArray} to the list.
+     */
+    default void addIntArray(List<Object> list, int[] value) {
+        list.add(createIntArray(value));
+    }
+
+    /**
+     * Appends a long array built with {@code createLongArray} to the list.
+     */
+    default void addLongArray(List<Object> list, long[] value) {
+        list.add(createLongArray(value));
+    }
+
+    /**
+     * Appends a list built with {@code createList} to the list.
+     */
+    default void addList(List<Object> list, List<Object> value) {
+        list.add(createList(value));
+    }
+
+    /**
+     * Appends a string map built with {@code createStringMap} to the list.
+     */
+    default void addStringMap(List<Object> list, Map<String, Object> value) {
+        list.add(createStringMap(value));
+    }
+
+    /**
+     * Stores a boolean built with {@code createBoolean} under {@code key} of the string map.
+     */
+    default void putBoolean(Map<String, Object> map, String key, boolean value) {
+        map.put(key, createBoolean(value));
+    }
+
+    /**
+     * Stores a byte built with {@code createByte} under {@code key} of the string map.
+     */
+    default void putByte(Map<String, Object> map, String key, byte value) {
+        map.put(key, createByte(value));
+    }
+
+    /**
+     * Stores a short built with {@code createShort} under {@code key} of the string map.
+     */
+    default void putShort(Map<String, Object> map, String key, short value) {
+        map.put(key, createShort(value));
+    }
+
+    /**
+     * Stores a char built with {@code createChar} under {@code key} of the string map.
+     */
+    default void putChar(Map<String, Object> map, String key, char value) {
+        map.put(key, createChar(value));
+    }
+
+    /**
+     * Stores a int built with {@code createInt} under {@code key} of the string map.
+     */
+    default void putInt(Map<String, Object> map, String key, int value) {
+        map.put(key, createInt(value));
+    }
+
+    /**
+     * Stores a long built with {@code createLong} under {@code key} of the string map.
+     */
+    default void putLong(Map<String, Object> map, String key, long value) {
+        map.put(key, createLong(value));
+    }
+
+    /**
+     * Stores a float built with {@code createFloat} under {@code key} of the string map.
+     */
+    default void putFloat(Map<String, Object> map, String key, float value) {
+        map.put(key, createFloat(value));
+    }
+
+    /**
+     * Stores a double built with {@code createDouble} under {@code key} of the string map.
+     */
+    default void putDouble(Map<String, Object> map, String key, double value) {
+        map.put(key, createDouble(value));
+    }
+
+    /**
+     * Stores a String built with {@code createString} under {@code key} of the string map.
+     */
+    default void putString(Map<String, Object> map, String key, String value) {
+        map.put(key, createString(value));
+    }
+
+    /**
+     * Stores a byte array built with {@code createByteArray} under {@code key} of the string map.
+     */
+    default void putByteArray(Map<String, Object> map, String key, byte[] value) {
+        map.put(key, createByteArray(value));
+    }
+
+    /**
+     * Stores a int array built with {@code createIntArray} under {@code key} of the string map.
+     */
+    default void putIntArray(Map<String, Object> map, String key, int[] value) {
+        map.put(key, createIntArray(value));
+    }
+
+    /**
+     * Stores a long array built with {@code createLongArray} under {@code key} of the string map.
+     */
+    default void putLongArray(Map<String, Object> map, String key, long[] value) {
+        map.put(key, createLongArray(value));
+    }
+
+    /**
+     * Stores a list built with {@code createList} under {@code key} of the string map.
+     */
+    default void putList(Map<String, Object> map, String key, List<Object> value) {
+        map.put(key, createList(value));
+    }
+
+    /**
+     * Stores a string map built with {@code createStringMap} under {@code key} of the string map.
+     */
+    default void putStringMap(Map<String, Object> map, String key, Map<String, Object> value) {
+        map.put(key, createStringMap(value));
+    }
+
+    /**
+     * Stores a boolean built with {@code createBoolean} under {@code key} of the int map.
+     */
+    default void putBoolean(Int2ObjectMap<Object> map, int key, boolean value) {
+        map.put(key, createBoolean(value));
+    }
+
+    /**
+     * Stores a byte built with {@code createByte} under {@code key} of the int map.
+     */
+    default void putByte(Int2ObjectMap<Object> map, int key, byte value) {
+        map.put(key, createByte(value));
+    }
+
+    /**
+     * Stores a short built with {@code createShort} under {@code key} of the int map.
+     */
+    default void putShort(Int2ObjectMap<Object> map, int key, short value) {
+        map.put(key, createShort(value));
+    }
+
+    /**
+     * Stores a char built with {@code createChar} under {@code key} of the int map.
+     */
+    default void putChar(Int2ObjectMap<Object> map, int key, char value) {
+        map.put(key, createChar(value));
+    }
+
+    /**
+     * Stores a int built with {@code createInt} under {@code key} of the int map.
+     */
+    default void putInt(Int2ObjectMap<Object> map, int key, int value) {
+        map.put(key, createInt(value));
+    }
+
+    /**
+     * Stores a long built with {@code createLong} under {@code key} of the int map.
+     */
+    default void putLong(Int2ObjectMap<Object> map, int key, long value) {
+        map.put(key, createLong(value));
+    }
+
+    /**
+     * Stores a float built with {@code createFloat} under {@code key} of the int map.
+     */
+    default void putFloat(Int2ObjectMap<Object> map, int key, float value) {
+        map.put(key, createFloat(value));
+    }
+
+    /**
+     * Stores a double built with {@code createDouble} under {@code key} of the int map.
+     */
+    default void putDouble(Int2ObjectMap<Object> map, int key, double value) {
+        map.put(key, createDouble(value));
+    }
+
+    /**
+     * Stores a String built with {@code createString} under {@code key} of the int map.
+     */
+    default void putString(Int2ObjectMap<Object> map, int key, String value) {
+        map.put(key, createString(value));
+    }
+
+    /**
+     * Stores a byte array built with {@code createByteArray} under {@code key} of the int map.
+     */
+    default void putByteArray(Int2ObjectMap<Object> map, int key, byte[] value) {
+        map.put(key, createByteArray(value));
+    }
+
+    /**
+     * Stores a int array built with {@code createIntArray} under {@code key} of the int map.
+     */
+    default void putIntArray(Int2ObjectMap<Object> map, int key, int[] value) {
+        map.put(key, createIntArray(value));
+    }
+
+    /**
+     * Stores a long array built with {@code createLongArray} under {@code key} of the int map.
+     */
+    default void putLongArray(Int2ObjectMap<Object> map, int key, long[] value) {
+        map.put(key, createLongArray(value));
+    }
+
+    /**
+     * Stores a list built with {@code createList} under {@code key} of the int map.
+     */
+    default void putList(Int2ObjectMap<Object> map, int key, List<Object> value) {
+        map.put(key, createList(value));
+    }
+
+    /**
+     * Stores a string map built with {@code createStringMap} under {@code key} of the int map.
+     */
+    default void putStringMap(Int2ObjectMap<Object> map, int key, Map<String, Object> value) {
+        map.put(key, createStringMap(value));
+    }
+
+    /**
+     * Stores a boolean built with {@code createBoolean} under {@code key} of the long map.
+     */
+    default void putBoolean(Long2ObjectMap<Object> map, long key, boolean value) {
+        map.put(key, createBoolean(value));
+    }
+
+    /**
+     * Stores a byte built with {@code createByte} under {@code key} of the long map.
+     */
+    default void putByte(Long2ObjectMap<Object> map, long key, byte value) {
+        map.put(key, createByte(value));
+    }
+
+    /**
+     * Stores a short built with {@code createShort} under {@code key} of the long map.
+     */
+    default void putShort(Long2ObjectMap<Object> map, long key, short value) {
+        map.put(key, createShort(value));
+    }
+
+    /**
+     * Stores a char built with {@code createChar} under {@code key} of the long map.
+     */
+    default void putChar(Long2ObjectMap<Object> map, long key, char value) {
+        map.put(key, createChar(value));
+    }
+
+    /**
+     * Stores a int built with {@code createInt} under {@code key} of the long map.
+     */
+    default void putInt(Long2ObjectMap<Object> map, long key, int value) {
+        map.put(key, createInt(value));
+    }
+
+    /**
+     * Stores a long built with {@code createLong} under {@code key} of the long map.
+     */
+    default void putLong(Long2ObjectMap<Object> map, long key, long value) {
+        map.put(key, createLong(value));
+    }
+
+    /**
+     * Stores a float built with {@code createFloat} under {@code key} of the long map.
+     */
+    default void putFloat(Long2ObjectMap<Object> map, long key, float value) {
+        map.put(key, createFloat(value));
+    }
+
+    /**
+     * Stores a double built with {@code createDouble} under {@code key} of the long map.
+     */
+    default void putDouble(Long2ObjectMap<Object> map, long key, double value) {
+        map.put(key, createDouble(value));
+    }
+
+    /**
+     * Stores a String built with {@code createString} under {@code key} of the long map.
+     */
+    default void putString(Long2ObjectMap<Object> map, long key, String value) {
+        map.put(key, createString(value));
+    }
+
+    /**
+     * Stores a byte array built with {@code createByteArray} under {@code key} of the long map.
+     */
+    default void putByteArray(Long2ObjectMap<Object> map, long key, byte[] value) {
+        map.put(key, createByteArray(value));
+    }
+
+    /**
+     * Stores a int array built with {@code createIntArray} under {@code key} of the long map.
+     */
+    default void putIntArray(Long2ObjectMap<Object> map, long key, int[] value) {
+        map.put(key, createIntArray(value));
+    }
+
+    /**
+     * Stores a long array built with {@code createLongArray} under {@code key} of the long map.
+     */
+    default void putLongArray(Long2ObjectMap<Object> map, long key, long[] value) {
+        map.put(key, createLongArray(value));
+    }
+
+    /**
+     * Stores a list built with {@code createList} under {@code key} of the long map.
+     */
+    default void putList(Long2ObjectMap<Object> map, long key, List<Object> value) {
+        map.put(key, createList(value));
+    }
+
+    /**
+     * Stores a string map built with {@code createStringMap} under {@code key} of the long map.
+     */
+    default void putStringMap(Long2ObjectMap<Object> map, long key, Map<String, Object> value) {
+        map.put(key, createStringMap(value));
+    }
+
+
     // ===== Binary form =====
 
     /**
@@ -548,7 +1358,7 @@ public interface ValueOps {
     byte getTypeId(Object data);
 
     /**
-     * Writes a complete nested value: the id byte, then the payload of {@link #write(Object, ByteBuf)}.
+     * Writes a complete nested value: the id byte, then that type's payload.
      * This pair is what the wire format repeats for every list element and every map key and value, so
      * a carrier that can name a type without a second lookup should override this and fold the two
      * steps into one — {@link JavaValueOps} does, which is what keeps a long list of scalars cheap.
@@ -563,7 +1373,7 @@ public interface ValueOps {
 
     /**
      * The value as a standalone byte array: the id byte followed by the payload — exactly what
-     * {@link #getTypeId(Object)} and {@link #write(Object, ByteBuf)} produce, and the layout the Data
+     * {@link #getTypeId(Object)} and {@link #writeValue(Object, ByteBuf)} produce, and the layout the Data
      * type system stored a value in. This is what a field is persisted as, and because the ids are
      * Data's, a byte array written by one carrier reads in the other.
      */

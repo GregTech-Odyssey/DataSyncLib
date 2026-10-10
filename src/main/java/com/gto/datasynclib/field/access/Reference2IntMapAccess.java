@@ -3,15 +3,16 @@ package com.gto.datasynclib.field.access;
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.datastream.codec.ValueOps;
 import it.unimi.dsi.fastutil.objects.Reference2IntMap;
 import it.unimi.dsi.fastutil.objects.Reference2IntMaps;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.ArrayList;
+
 /**
- * Synchronizes a FastUtil {@link it.unimi.dsi.fastutil.objects.Reference2IntMap} (identity-based key comparison).
+ * Synchronizes a FastUtil {@link Reference2IntMap} (identity-based key comparison).
  *
  * <p>Identical to {@link Object2IntMapAccess} in serialization format, but works with
  * reference-identity maps ({@code ==} key comparison instead of {@code equals()}).
@@ -25,8 +26,6 @@ import org.jetbrains.annotations.NotNull;
  *
  * @see Object2IntMapAccess
  */
-
-import java.util.ArrayList;
 
 public class Reference2IntMapAccess<K> extends AbstractFieldAccess<Reference2IntMap> {
 

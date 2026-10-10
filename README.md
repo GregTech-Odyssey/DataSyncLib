@@ -34,7 +34,7 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 - **📦 DataComponent System** — Identity-keyed component data model via `DataComponentRegistry` + `DataComponentMap` with merge semantics.
 - **🗂️ Registry Utility** — Generic registry with freeze/unfreeze lifecycle and built-in serialization (Stream/Data/Mojang Codec).
 - **⚡ High Performance** — MethodHandle instead of reflection, FastUtil collections, multi-level caching, VarInt compact encoding.
-- **🗜️ Data Type System** — Custom 19-type binary Data system, more compact than NBT Tag, with custom type extension.
+- **🗜️ Data Type System** — Custom 19-type binary Data system, more compact than NBT Tag; a mod's own object extends it with a `ValueConverters` converter (`CustomTypes` is the library's own payload registry, not an extension point).
 - **🧩 Ready to Use** — Extend `FieldDataHolderBlockEntity` to get full capabilities out of the box.
 - **🪆 Nested Holders** — `@AdditionalHolder` recursively discovers fields in nested objects with composed getter chains; `childManager` mode gives a sub-object its own dedicated `FieldDataManager`.
 - **🧬 Generic Hierarchy Resolution** — `ReflectUtil` resolves full generic arguments along superclasses/interfaces (e.g. `A<T> extends HashMap<String,T>` → `[String, T]`).
@@ -210,7 +210,8 @@ payload, so a UUID is a `LONG_ARRAY` whether a field codec wrote it or the value
 converters whose payloads are the same type share the id, and a class can only be registered once.
 
 A converter that should stand for a whole family adds a predicate; predicates are consulted in
-registration order, so register the narrow ones first:
+registration order, so register the narrow ones first — that is how one registration covers every
+`IntList`, `IntSet` and so on:
 
 ```java
 ValueConverters.Converter.<Tagged>builder(ValueOps.Type.STRING, Tagged.class)
@@ -222,10 +223,26 @@ ValueConverters.Converter.<Tagged>builder(ValueOps.Type.STRING, Tagged.class)
 
 `ValueOps#getSelf(data, Type.class)` is the read side: a value that already is that type comes back
 as it is, a converted one is turned back by its converter, and anything else is reported instead of
-guessed. `JavaValueOps#init()` registers the built-in set for you during mod construction — `UUID`,
-`BigInteger`, `BigDecimal`, `Instant`, `Duration`, `LocalDate`, `LocalTime`, `LocalDateTime`, and the
-arrays the type set has no id of its own for (`boolean[]`, `short[]`, `char[]`, `float[]`, `double[]`)
-— each of which stores the payload the matching `ValueOps#createXxx` produces.
+guessed. `JavaValueOps#init()` registers the built-in set for you during mod construction:
+
+- `UUID` as a `LONG_ARRAY`, `BigInteger` and `BigDecimal` as a `BYTE_ARRAY`, and the arrays the type set
+  has no id of its own for — `boolean[]` as a `BYTE_ARRAY`, `short[]`/`char[]`/`float[]` as an
+  `INT_ARRAY`, `double[]` as a `LONG_ARRAY` — each the payload the matching `ValueOps#createXxx` produces.
+- **FastUtil's primitive collections** — `IntList`/`LongList` as the primitive array (the shape their field
+  codecs already write, so a value is not a list of boxed numbers) and `IntSet`/`LongSet` as the same
+  arrays. A *sorted* set keeps Java serialization on purpose: the payload holds no order, so rebuilding one
+  would hand back a set that answers differently than it was stored.
+- An enum is a field type the library handles (`DataSyncCodec` stores it by ordinal or by name); as a bare
+  *value* it has no converter, so store enums in fields or in a collection whose element type they are.
+
+> **`CustomTypes` is the library's registry, not yours.** Its ids are raw `int`s in one global table that
+> both a save file and the network carry: the ids below 16 are already taken (NBT `0…2`, JSON `3…5`), nothing
+> reserves a range for anyone else, a collision is fatal rather than a merge, and an id that has shipped can
+> never be handed back. A payload format is also something every peer has to agree on — a client without the
+> type refuses the value rather than degrading — so a format registered there leaks into the wire format of
+> the whole game. A mod's own object is a **value**, and `ValueConverters` above is where a value goes: no id,
+> no new format, nothing to collide with. Reading a custom value (`ops.isCustom`, `ops.getCustom`) stays open
+> to everyone, since those are the library's own payloads coming back.
 
 ### Advanced: Generic Hierarchy Resolution
 

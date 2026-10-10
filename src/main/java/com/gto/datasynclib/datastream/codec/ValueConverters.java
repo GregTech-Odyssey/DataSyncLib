@@ -34,6 +34,12 @@ import java.util.function.Predicate;
  * its primitives rather than from one carrier's shapes, so a converter converts the same way on every
  * carrier. A class without a converter keeps Java serialization.</p>
  *
+ * <p>This is the route for a mod's own value: a converter is keyed by the class, so it claims nothing in the
+ * format and cannot collide with anyone. The library's other escape hatch, {@link CustomTypes}, registers a
+ * raw {@code int} in a global table that both a save file and the network carry, and is meant for the
+ * payloads the library itself teaches the carrier — NBT and JSON — rather than for application code; read its
+ * class documentation before reaching for it.</p>
+ *
  * <h3>Which converter applies</h3>
  * <p>A converter is registered for a class, and matches that class exactly. A converter that should
  * cover a family — an interface, an abstract base, everything under a package — adds a

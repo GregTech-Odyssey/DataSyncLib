@@ -1,5 +1,6 @@
 package com.gto.datasynclib;
 
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.field.*;
 import com.gto.datasynclib.field.access.*;
 import com.gto.datasynclib.field.access.array.*;
@@ -11,7 +12,6 @@ import com.gto.datasynclib.network.DataSyncNetwork;
 import com.gto.datasynclib.remote.RemoteNetwork;
 import com.gto.datasynclib.test.ModBlockEntities;
 import com.gto.datasynclib.test.ModBlocks;
-import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.test.ModEntityTypes;
 import com.gto.datasynclib.test.ModItems;
 import com.gto.datasynclib.util.*;

@@ -3,7 +3,6 @@ package com.gto.datasynclib.listener;
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.IDataSerializable;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.util.holder.ObjHolder;
 import net.minecraft.network.FriendlyByteBuf;

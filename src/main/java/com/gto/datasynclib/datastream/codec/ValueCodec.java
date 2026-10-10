@@ -1,17 +1,11 @@
 package com.gto.datasynclib.datastream.codec;
 
 import com.mojang.datafixers.util.*;
-
-import com.mojang.serialization.Codec;
-import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
-import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongList;
-import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.network.FriendlyByteBuf;
 
@@ -19,8 +13,8 @@ import java.lang.reflect.Array;
 import java.math.BigInteger;
 import java.util.*;
 import java.util.function.BiFunction;
-import java.util.function.IntFunction;
 import java.util.function.Function;
+import java.util.function.IntFunction;
 import java.util.function.Supplier;
 
 /**
@@ -258,7 +252,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, boolean[] value) {
-            return value.length == 0 ? ops.createNull() : ops.createBooleanArray(value);
+            return ops.createBooleanArray(value);
         }
 
         @Override
@@ -271,7 +265,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, byte[] value) {
-            return value.length == 0 ? ops.createNull() : ops.createByteArray(value);
+            return ops.createByteArray(value);
         }
 
         @Override
@@ -284,7 +278,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, short[] value) {
-            return value.length == 0 ? ops.createNull() : ops.createShortArray(value);
+            return ops.createSelf(value);
         }
 
         @Override
@@ -297,7 +291,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, char[] value) {
-            return value.length == 0 ? ops.createNull() : ops.createCharArray(value);
+            return ops.createSelf(value);
         }
 
         @Override
@@ -310,7 +304,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, int[] value) {
-            return value.length == 0 ? ops.createNull() : ops.createIntArray(value);
+            return ops.createIntArray(value);
         }
 
         @Override
@@ -323,7 +317,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, long[] value) {
-            return value.length == 0 ? ops.createNull() : ops.createLongArray(value);
+            return ops.createLongArray(value);
         }
 
         @Override
@@ -336,7 +330,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, float[] value) {
-            return value.length == 0 ? ops.createNull() : ops.createFloatArray(value);
+            return ops.createSelf(value);
         }
 
         @Override
@@ -349,7 +343,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, double[] value) {
-            return value.length == 0 ? ops.createNull() : ops.createDoubleArray(value);
+            return ops.createSelf(value);
         }
 
         @Override
@@ -365,12 +359,12 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, IntList value) {
-            return ops.createIntArray(value.toIntArray());
+            return ops.createSelf(value);
         }
 
         @Override
         public IntList decode(ValueOps ops, Object data) {
-            return new IntArrayList(ops.getIntArray(data));
+            return ops.getSelf(data) instanceof IntList value ? value : ValueOpsConverters.INT_LIST.toValue(ops, data);
         }
     };
 
@@ -381,12 +375,12 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, IntSet value) {
-            return ops.createIntArray(value.toIntArray());
+            return ops.createSelf(value);
         }
 
         @Override
         public IntSet decode(ValueOps ops, Object data) {
-            return new IntOpenHashSet(ops.getIntArray(data));
+            return ops.getSelf(data) instanceof IntSet value ? value : ValueOpsConverters.INT_SET.toValue(ops, data);
         }
     };
 
@@ -397,12 +391,12 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, LongList value) {
-            return ops.createLongArray(value.toLongArray());
+            return ops.createSelf(value);
         }
 
         @Override
         public LongList decode(ValueOps ops, Object data) {
-            return new LongArrayList(ops.getLongArray(data));
+            return ops.getSelf(data) instanceof LongList value ? value : ValueOpsConverters.LONG_LIST.toValue(ops, data);
         }
     };
 
@@ -413,12 +407,12 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, LongSet value) {
-            return ops.createLongArray(value.toLongArray());
+            return ops.createSelf(value);
         }
 
         @Override
         public LongSet decode(ValueOps ops, Object data) {
-            return new LongOpenHashSet(ops.getLongArray(data));
+            return ops.getSelf(data) instanceof LongSet value ? value : ValueOpsConverters.LONG_SET.toValue(ops, data);
         }
     };
 

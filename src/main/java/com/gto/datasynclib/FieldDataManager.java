@@ -2,9 +2,9 @@ package com.gto.datasynclib;
 
 import com.gto.datasynclib.annotations.RemoteCall;
 import com.gto.datasynclib.datastream.codec.JavaValueOps;
-import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.datastream.codec.StreamDecoder;
 import com.gto.datasynclib.datastream.codec.StreamEncoder;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.remote.RemoteInvoker;
 import com.gto.datasynclib.remote.RemoteMethod;
 import com.gto.datasynclib.remote.RemoteRouting;

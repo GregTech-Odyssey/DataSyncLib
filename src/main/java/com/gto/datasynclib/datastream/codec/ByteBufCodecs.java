@@ -20,14 +20,9 @@ import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Array;
+import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.function.IntFunction;
 import java.util.function.Supplier;
 import java.util.function.ToIntFunction;
@@ -334,6 +329,29 @@ public interface ByteBufCodecs {
             var bytes = new byte[VarInts.read(buf)];
             buf.readBytes(bytes);
             return new BigInteger(bytes);
+        }
+    };
+
+    /**
+     * A {@link BigDecimal} as its {@link #BIG_INTEGER} layout — the unscaled value's two's-complement bytes —
+     * followed by the scale. The scale is a VarInt, not the one byte a stored {@code BigDecimal} has, because a
+     * number written in JSON can carry any exponent: {@code 1e400} has scale -400 and {@code 1e-400} scale 400.
+     */
+    StreamCodec<ByteBuf, BigDecimal> BIG_DECIMAL = new StreamCodec<>() {
+
+        @Override
+        public void encode(ByteBuf buf, BigDecimal obj) {
+            var bytes = obj.unscaledValue().toByteArray();
+            VarInts.write(buf, bytes.length);
+            buf.writeBytes(bytes);
+            VarInts.write(buf, obj.scale());
+        }
+
+        @Override
+        public BigDecimal decode(ByteBuf buf) {
+            var bytes = new byte[VarInts.read(buf)];
+            buf.readBytes(bytes);
+            return new BigDecimal(new BigInteger(bytes), VarInts.read(buf));
         }
     };
 

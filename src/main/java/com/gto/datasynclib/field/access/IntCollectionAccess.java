@@ -2,7 +2,6 @@ package com.gto.datasynclib.field.access;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.datastream.codec.ValueOps;
 import it.unimi.dsi.fastutil.ints.IntCollection;
 import net.minecraft.network.FriendlyByteBuf;

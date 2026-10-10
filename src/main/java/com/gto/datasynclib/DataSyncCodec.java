@@ -1,9 +1,9 @@
 package com.gto.datasynclib;
 
 import com.gto.datasynclib.datastream.codec.*;
+import com.gto.datasynclib.util.ByteBufCodecExtends;
 import com.gto.datasynclib.util.EnumUtil;
 import com.gto.datasynclib.util.HashUtil;
-import com.gto.datasynclib.util.ByteBufCodecExtends;
 import com.gto.datasynclib.util.ValueCodecs;
 import com.mojang.serialization.Codec;
 import it.unimi.dsi.fastutil.ints.IntList;
@@ -43,8 +43,8 @@ import net.minecraftforge.fluids.FluidStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Array;
-import java.util.ArrayList;
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.UUID;
 

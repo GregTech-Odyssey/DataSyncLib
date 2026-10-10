@@ -5,11 +5,7 @@ import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.annotations.*;
-import com.gto.datasynclib.datastream.codec.ByteBufCodecs;
-import com.gto.datasynclib.datastream.codec.JavaValueOps;
-import com.gto.datasynclib.datastream.codec.ValueCodec;
-import com.gto.datasynclib.datastream.codec.CombinedCodec;
-import com.gto.datasynclib.datastream.codec.StreamCodec;
+import com.gto.datasynclib.datastream.codec.*;
 import com.gto.datasynclib.listener.ObjNotifiableHolder;
 import com.gto.datasynclib.remote.RemoteBlockEntityPacket;
 import com.gto.datasynclib.remote.RemoteEntityPacket;
@@ -72,6 +68,7 @@ public final class DataSyncSelfTests {
         boolean enabled = true;
 
         @SaveToDisk
+        @SyncToClient
         Direction facing = Direction.NORTH;
 
         @SaveToDisk
@@ -101,9 +98,11 @@ public final class DataSyncSelfTests {
         boolean enabled;
 
         @SaveToDisk
+        @SyncToClient
         String name = "";
 
         @SaveToDisk
+        @SyncToClient
         Direction facing = Direction.WEST;
 
         @SaveToDisk

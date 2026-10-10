@@ -1,7 +1,6 @@
 package com.gto.datasynclib.field.object;
 
 import com.gto.datasynclib.DataFieldDefinition;
-import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.datastream.codec.ValueOps;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;

@@ -24,6 +24,19 @@ import java.util.function.Supplier;
 @UtilityClass
 public class HashUtil {
 
+    public Hash.Strategy<Object[]> ARRAY_IDENTITY_STRATEGY = new Hash.Strategy<>() {
+
+        @Override
+        public int hashCode(Object[] o) {
+            return arrayIdentityHashCode(o);
+        }
+
+        @Override
+        public boolean equals(Object[] a, Object[] b) {
+            return arrayIdentityEquals(a, b);
+        }
+    };
+
     /**
      * Builds the {@code T[]} counterpart of a scalar strategy: the array is hashed and compared slot
      * by slot with {@code element}, so both a content-sensitive element strategy (a custom

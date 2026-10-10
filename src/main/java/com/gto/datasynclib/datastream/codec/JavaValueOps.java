@@ -5,18 +5,17 @@ import io.netty.buffer.ByteBufOutputStream;
 import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import it.unimi.dsi.fastutil.objects.*;
+import it.unimi.dsi.fastutil.longs.LongList;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.io.UncheckedIOException;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * The {@link ValueOps} implementation over plain Java objects: the carrier is the value itself —
@@ -44,7 +43,7 @@ import java.util.*;
  * value and an old file keeps reading. {@link #createBoolean(boolean)} builds that byte and
  * {@link #getBoolean(Object)} accepts a byte or a {@link Boolean}; {@link #isBoolean(Object)} answers
  * for both shapes, while a byte that is neither {@code 0} nor {@code 1} is just a byte.
- * {@link #read(byte, ByteBuf)} still understands the reserved id, so a carrier that does write it is
+ * {@link #readValue(ByteBuf)} still understands the reserved id, so a carrier that does write it is
  * readable too.</p>
  *
  * <h3>The map shapes</h3>
@@ -60,7 +59,7 @@ import java.util.*;
  * side copies, so copy a container yourself before mutating one you do not own.</p>
  *
  * <h3>Wire form</h3>
- * <p>{@link #read(byte, ByteBuf)} and {@link #write(Object, ByteBuf)} use the Data encoding of every
+ * <p>{@link #readValue(ByteBuf)} and {@link #writeValue(Object, ByteBuf)} use the Data encoding of every
  * type ({@code VarInt} lengths, {@code id + payload} nesting, {@code VarLong} long-map keys), so a
  * value stored by the Data type system reads back here unchanged. {@code BOOLEAN} has a payload of
  * its own (one byte) — the id Data's own table reserved for it but never implemented.</p>
@@ -99,8 +98,9 @@ public final class JavaValueOps implements ValueOps {
 
     /**
      * Registers the {@link ValueConverters} entries this carrier needs: {@link ValueOpsConverters}'s
-     * set, so a UUID, a BigInteger, a BigDecimal or one of the {@code java.time} types is stored as the
-     * payload the matching {@code createXxx} produces instead of a Java-serialized object.
+     * set, so a UUID, a BigInteger, a BigDecimal, an enum, a FastUtil collection or one of the arrays the
+     * type set has no id for is stored as the payload the matching {@code createXxx} produces instead of a
+     * Java-serialized object.
      *
      * <p>They belong to this carrier because {@code SELF} is its escape hatch; a carrier whose type set
      * covers everything needs none. Called once during mod construction, before any holder is scanned,
@@ -143,6 +143,10 @@ public final class JavaValueOps implements ValueOps {
             case long[] ignored -> Type.LONG_ARRAY;
             // the arrays with no id of their own — boolean[], short[], char[], float[], double[] — are
             // converters, so they are named by the default branch below like every other derived type
+            // the FastUtil primitive lists are Lists too, so they have to be named before List: they are
+            // stored as the primitive array their field codec writes, never as a list of boxed numbers
+            case IntList ignored -> Type.INT_ARRAY;
+            case LongList ignored -> Type.LONG_ARRAY;
             case List<?> ignored -> Type.LIST;
             // the two primitive-keyed maps are Maps too, so they have to be named before Map; every
             // other map — the FastUtil object-keyed ones included — is a STRING_MAP
@@ -607,6 +611,17 @@ public final class JavaValueOps implements ValueOps {
             case long[] value -> {
                 stream.writeByte(Type.LONG_ARRAY);
                 writeLongArray(stream, value);
+            }
+            // the FastUtil primitive lists are Lists too, so they have to be named before List — their
+            // field codecs store them as the primitive array, and a bare value takes the same shape
+            // rather than a list of boxed numbers
+            case IntList values -> {
+                stream.writeByte(Type.INT_ARRAY);
+                writeIntArray(stream, values.toIntArray());
+            }
+            case LongList values -> {
+                stream.writeByte(Type.LONG_ARRAY);
+                writeLongArray(stream, values.toLongArray());
             }
             case List<?> elements -> {
                 stream.writeByte(Type.LIST);

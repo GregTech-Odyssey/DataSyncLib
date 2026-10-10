@@ -2,7 +2,6 @@ package com.gto.datasynclib.forge;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.LogicalSide;
-import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
 import com.gto.datasynclib.util.ValueCodecs;
@@ -19,6 +18,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.BitSet;
 
 /**
@@ -59,8 +59,6 @@ import java.util.BitSet;
  * ({@code @SyncToClient(autoDetect = false)} plus {@code markFieldsForSync}), which still results in
  * a full payload because the framework cannot know which slot moved.</p>
  */
-
-import java.util.ArrayList;
 
 public final class TagSerializableArrayAccess extends AbstractFieldAccess<INBTSerializable[]> {
 

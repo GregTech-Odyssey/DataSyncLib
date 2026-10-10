@@ -1,12 +1,12 @@
 package com.gto.datasynclib.test;
 
-import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.FieldDataManager;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.annotations.AdditionalHolder;
 import com.gto.datasynclib.annotations.RemoteCall;
 import com.gto.datasynclib.annotations.SaveToDisk;
 import com.gto.datasynclib.annotations.SyncToClient;
+import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.network.DataSyncNetwork;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.Entity;

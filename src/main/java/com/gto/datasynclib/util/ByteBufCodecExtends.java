@@ -1,5 +1,8 @@
 package com.gto.datasynclib.util;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.gto.datasynclib.datastream.codec.ByteBufCodecs;
 import com.gto.datasynclib.datastream.codec.StreamCodec;
 import net.minecraft.core.BlockPos;
@@ -181,6 +184,45 @@ public interface ByteBufCodecExtends extends ByteBufCodecs {
         @Override
         public Tag decode(FriendlyByteBuf stream) {
             return NbtUtil.read(stream.readByte(), stream);
+        }
+    };
+
+    StreamCodec<FriendlyByteBuf, JsonElement> JSON_CODEC = new StreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf stream, JsonElement obj) {
+            JsonUtils.write(obj, stream);
+        }
+
+        @Override
+        public JsonElement decode(FriendlyByteBuf stream) {
+            return JsonUtils.read(stream);
+        }
+    };
+
+    StreamCodec<FriendlyByteBuf, JsonObject> JSON_OBJECT_CODEC = new StreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf stream, JsonObject obj) {
+            JsonUtils.writeObject(obj, stream);
+        }
+
+        @Override
+        public JsonObject decode(FriendlyByteBuf stream) {
+            return JsonUtils.readObject(stream);
+        }
+    };
+
+    StreamCodec<FriendlyByteBuf, JsonArray> JSON_ARRAY_CODEC = new StreamCodec<>() {
+
+        @Override
+        public void encode(FriendlyByteBuf stream, JsonArray obj) {
+            JsonUtils.writeArray(obj, stream);
+        }
+
+        @Override
+        public JsonArray decode(FriendlyByteBuf stream) {
+            return JsonUtils.readArray(stream);
         }
     };
 

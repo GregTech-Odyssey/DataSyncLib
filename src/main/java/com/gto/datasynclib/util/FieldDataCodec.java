@@ -1,10 +1,11 @@
 package com.gto.datasynclib.util;
 
-import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.*;
-import com.gto.datasynclib.datastream.codec.*;
+import com.gto.datasynclib.datastream.codec.CombinedCodec;
+import com.gto.datasynclib.datastream.codec.StreamDecoder;
+import com.gto.datasynclib.datastream.codec.StreamEncoder;
+import com.gto.datasynclib.datastream.codec.ValueOps;
 import net.minecraft.network.FriendlyByteBuf;
-import org.jetbrains.annotations.NotNull;
 
 import java.util.Map;
 import java.util.function.Supplier;
