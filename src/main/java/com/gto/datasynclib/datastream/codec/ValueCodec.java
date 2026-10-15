@@ -60,19 +60,19 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
     }
 
     /**
-     * A codec for a carrier's opaque value: {@link ValueOps#createSelf(Object)} on the way out and
-     * {@link ValueOps#getSelf(Object)} on the way back, with no encoding in between.
+     * A codec for a carrier's opaque value: the value travels as itself on the way out and comes back
+     * through {@link ValueOps#getSelf(Object)}, with no encoding in between.
      *
-     * <p>It is what makes a {@link ValueOps.Type#SELF} value usable — the ops cannot store such a
-     * value, but a codec that wraps one in this codec hands the value itself to the layer above,
-     * which is where the knowledge of how to serialize it lives.</p>
+     * <p>It is what makes a {@link ValueOps.Type#SELF} value usable — the value is already the shape the
+     * carrier stores, so there is nothing to write, and a codec that wraps one in this codec hands it to
+     * the layer above, which is where the knowledge of how to serialize it lives.</p>
      */
     static <T> ValueCodec<T> self() {
         return new ValueCodec<>() {
 
             @Override
             public Object encode(ValueOps ops, T value) {
-                return ops.createSelf(value);
+                return value;
             }
 
             @Override
@@ -278,7 +278,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, short[] value) {
-            return ops.createSelf(value);
+            return ops.createShortArray(value);
         }
 
         @Override
@@ -291,7 +291,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, char[] value) {
-            return ops.createSelf(value);
+            return ops.createCharArray(value);
         }
 
         @Override
@@ -330,7 +330,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, float[] value) {
-            return ops.createSelf(value);
+            return ops.createFloatArray(value);
         }
 
         @Override
@@ -343,7 +343,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, double[] value) {
-            return ops.createSelf(value);
+            return ops.createDoubleArray(value);
         }
 
         @Override
@@ -359,7 +359,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, IntList value) {
-            return ops.createSelf(value);
+            return value;
         }
 
         @Override
@@ -375,7 +375,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, IntSet value) {
-            return ops.createSelf(value);
+            return value;
         }
 
         @Override
@@ -391,7 +391,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, LongList value) {
-            return ops.createSelf(value);
+            return value;
         }
 
         @Override
@@ -407,7 +407,7 @@ public interface ValueCodec<T> extends ValueDecoder<T>, ValueEncoder<T> {
 
         @Override
         public Object encode(ValueOps ops, LongSet value) {
-            return ops.createSelf(value);
+            return value;
         }
 
         @Override

@@ -224,7 +224,7 @@ public final class TestBlockEntityTests {
         expect("codecs.intListEmptyRoundTrip", new IntArrayList(),
                 DataSyncCodec.INT_LIST_CODEC.decode(nativeOps, DataSyncCodec.INT_LIST_CODEC.encode(nativeOps, new IntArrayList())));
         // The disk payload is the primitive array of the matching array codec, so it stays compact…
-        // the codec hands the value straight on (createSelf), so the id to look at is the one the value is
+        // the codec hands the value straight on, so the id to look at is the one the value is
         // written under, not the one the ops reports for a value a converter still has to pack
         expect("codecs.intListStoredAsIntArray", Type.INT_ARRAY,
                 nativeOps.toBytes(DataSyncCodec.INT_LIST_CODEC.encode(nativeOps, intList))[0]);

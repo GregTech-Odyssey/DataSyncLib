@@ -64,37 +64,6 @@ import java.util.function.Predicate;
  */
 public final class ValueConverters {
 
-    /**
-     * Turns a value into the carrier value it is stored as — the one whose {@link ValueOps.Type} id the
-     * converter declares.
-     *
-     * <p>{@code ops} is the carrier doing the writing: build the payload with its primitives
-     * ({@code createLongArray}, {@code createByteArray}, …) so the converter works for every carrier,
-     * and never with a shape only one of them produces.</p>
-     */
-    @FunctionalInterface
-    public interface PayloadWriter<T> {
-
-        /**
-         * @return the carrier value {@code value} is stored as, of the converter's type id
-         */
-        Object write(ValueOps ops, T value);
-    }
-
-    /**
-     * Turns a stored carrier value back into the value.
-     */
-    @FunctionalInterface
-    public interface PayloadReader<T> {
-
-        /**
-         * @param data the stored carrier value; {@link Converter#toValue} answers the absent case
-         *             before this is reached
-         * @return the value, or {@code null} when the payload holds none
-         */
-        @Nullable
-        T read(ValueOps ops, Object data);
-    }
 
     /**
      * A registered converter: the type id of its payload, the class it handles, the predicate that
@@ -110,7 +79,7 @@ public final class ValueConverters {
      * @param <T>   the converted type
      */
     public record Converter<T>(byte id, Class<T> type, Predicate<Class<?>> when,
-                               PayloadWriter<T> write, PayloadReader<T> read) {
+                               ValueEncoder<T> write, ValueDecoder<T> read) {
 
         /**
          * The predicate of a converter registered for its class alone: an identity check, which is
@@ -141,7 +110,7 @@ public final class ValueConverters {
          * The carrier value {@code value} is stored as.
          */
         public Object toPayload(ValueOps ops, T value) {
-            return write.write(ops, value);
+            return write.encode(ops, value);
         }
 
         /**
@@ -150,7 +119,7 @@ public final class ValueConverters {
          */
         @Nullable
         public T toValue(ValueOps ops, Object data) {
-            return ops.isNull(data) ? null : read.read(ops, data);
+            return ops.isNull(data) ? null : read.decode(ops, data);
         }
 
         /**
@@ -267,8 +236,8 @@ public final class ValueConverters {
         private final byte id;
         private final Class<T> type;
         private Predicate<Class<?>> when = Converter.EXACT;
-        private PayloadWriter<T> write;
-        private PayloadReader<T> read;
+        private ValueEncoder<T> write;
+        private ValueDecoder<T> read;
 
         private Builder(byte id, Class<T> type) {
             this.id = id;
@@ -291,7 +260,7 @@ public final class ValueConverters {
         /**
          * Sets the value-to-payload function. Without one the converter cannot be used for writing.
          */
-        public Builder<T> write(PayloadWriter<T> write) {
+        public Builder<T> write(ValueEncoder<T> write) {
             this.write = write;
             return this;
         }
@@ -299,7 +268,7 @@ public final class ValueConverters {
         /**
          * Sets the payload-to-value function. Without one the converter cannot be used for reading.
          */
-        public Builder<T> read(PayloadReader<T> read) {
+        public Builder<T> read(ValueDecoder<T> read) {
             this.read = read;
             return this;
         }

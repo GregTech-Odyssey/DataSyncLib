@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Breaking Changes
+- **`ValueOps.createSelf(Object)` is gone.** It returned the object it was handed, and a `SELF` value is
+  already the shape the carrier stores — a caller that holds the value holds the payload, so there was
+  nothing left for the method to say. `ValueCodec.self()` keeps its identity on the way out by returning
+  the value itself, and the read side is unchanged: `ops.getSelf(data)` and `ops.getSelf(data, type)`.
+  A carrier implementation has one less method to provide.
+
 ## 26.10.9
 
 ### New Features

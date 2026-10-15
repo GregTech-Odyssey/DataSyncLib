@@ -94,11 +94,12 @@ import java.util.UUID;
  * <h3>SELF</h3>
  * <p>{@code SELF} is the carrier's own opaque value: an object the ops recognizes as a value but
  * cannot break into primitives — for the native implementation, anything that is not one of the
- * types above. {@link #createSelf(Object)} and {@link #getSelf(Object)} are the identity there, and
- * a SELF value has no wire form of its own: a codec that knows how to serialize it is what turns it
- * into something writable. {@link ValueConverters} is the other way out — register a converter for the
- * class and the ops writes an ordinary carrier value in its place, {@link #getSelf(Object, Class)}
- * being the read side that asks for the value back as its own type.</p>
+ * types above. Such a value is stored as itself, which is why there is nothing to create: a caller
+ * that already holds the value holds the payload, and {@link #getSelf(Object)} is the identity that
+ * hands it back. A SELF value has no wire form of its own either, so a codec that knows how to
+ * serialize it is what turns it into something writable. {@link ValueConverters} is the other way
+ * out — register a converter for the class and the ops writes an ordinary carrier value in its place,
+ * {@link #getSelf(Object, Class)} being the read side that asks for the value back as its own type.</p>
  */
 public interface ValueOps {
 
@@ -317,11 +318,6 @@ public interface ValueOps {
     Object createLongMap(Long2ObjectMap<Object> entries);
 
     /**
-     * Wraps an opaque value — the carrier's own {@link Type#SELF} form.
-     */
-    <V> Object createSelf(V value);
-
-    /**
      * Creates a custom value of the registered type {@code typeId} around {@code value}.
      *
      * @throws IllegalArgumentException if no custom type is registered under {@code typeId}
@@ -374,7 +370,10 @@ public interface ValueOps {
     /**
      * @return the opaque value this carrier wraps
      */
-    <V> V getSelf(Object data);
+    @SuppressWarnings("unchecked")
+   default  <V> V getSelf(Object data){
+       return (V) data;
+   }
 
     /**
      * The opaque value behind {@code data}, read as {@code type}.
@@ -477,7 +476,7 @@ public interface ValueOps {
     }
 
     default Object createBooleanArray(boolean[] value) {
-        return createSelf(value);
+        return value;
     }
 
     default boolean[] getBooleanArray(Object data) {
@@ -485,7 +484,7 @@ public interface ValueOps {
     }
 
     default Object createShortArray(short[] value) {
-        return createSelf(value);
+        return value;
     }
 
     default short[] getShortArray(Object data) {
@@ -493,7 +492,7 @@ public interface ValueOps {
     }
 
     default Object createCharArray(char[] value) {
-        return createSelf(value);
+        return value;
     }
 
     default char[] getCharArray(Object data) {
@@ -501,7 +500,7 @@ public interface ValueOps {
     }
 
     default Object createFloatArray(float[] value) {
-        return createSelf(value);
+        return value;
     }
 
     default float[] getFloatArray(Object data) {
@@ -509,7 +508,7 @@ public interface ValueOps {
     }
 
     default Object createDoubleArray(double[] value) {
-        return createSelf(value);
+        return value;
     }
 
     default double[] getDoubleArray(Object data) {
@@ -517,7 +516,7 @@ public interface ValueOps {
     }
 
     default Object createUUID(UUID value) {
-        return createSelf(value);
+        return value;
     }
 
     default UUID getUUID(Object data) {
@@ -525,7 +524,7 @@ public interface ValueOps {
     }
 
     default Object createBigInteger(BigInteger value) {
-        return createSelf(value);
+        return value;
     }
 
     default BigInteger getBigInteger(Object data) {
@@ -533,7 +532,7 @@ public interface ValueOps {
     }
 
     default Object createBigDecimal(BigDecimal value) {
-        return createSelf(value);
+        return value;
     }
 
     default BigDecimal getBigDecimal(Object data) {

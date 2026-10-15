@@ -389,11 +389,6 @@ public final class JavaValueOps implements ValueOps {
     }
 
     @Override
-    public <V> Object createSelf(V value) {
-        return value;
-    }
-
-    @Override
     public <V> Object createCustom(CustomTypes.Type<V> type, V value) {
         return new Custom(type, value);
     }
@@ -541,12 +536,6 @@ public final class JavaValueOps implements ValueOps {
     @Override
     public Long2ObjectMap<Object> getLongMap(Object data) {
         return (Long2ObjectMap<Object>) data;
-    }
-
-    @SuppressWarnings("unchecked")
-    @Override
-    public <V> V getSelf(Object data) {
-        return (V) data;
     }
 
     @Override
