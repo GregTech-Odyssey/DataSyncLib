@@ -7,6 +7,7 @@ import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntList;
+import it.unimi.dsi.fastutil.io.FastByteArrayInputStream;
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongList;
@@ -825,7 +826,7 @@ public final class JavaValueOps implements ValueOps {
     public static Object readSelf(ByteBuf stream) {
         // the frame the writer put around it, so an ObjectInputStream cannot read out of this value
         var bytes = readByteArray(stream);
-        try (var in = new ObjectInputStream(new ByteArrayInputStream(bytes))) {
+        try (var in = new ObjectInputStream(new FastByteArrayInputStream(bytes))) {
             return in.readObject();
         } catch (IOException e) {
             throw new UncheckedIOException("Could not deserialize a SELF value", e);

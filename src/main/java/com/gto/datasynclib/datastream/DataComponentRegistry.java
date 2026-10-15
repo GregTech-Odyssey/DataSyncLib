@@ -48,7 +48,7 @@ public final class DataComponentRegistry extends Registry<String, DataComponentK
         return register(DataComponentKey.create(name, builder));
     }
 
-    public <T> DataComponentKey<T> register(DataComponentKey<T> key) {
+    public <T,K extends DataComponentKey<T>> K register(K key) {
         return super.register(key.name, key);
     }
 

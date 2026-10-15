@@ -278,18 +278,12 @@ public interface ByteBufCodecExtends extends ByteBufCodecs {
         }
     };
 
-    StreamCodec<FriendlyByteBuf, Component> COMPONENT_CODEC = new StreamCodec<>() {
-
-        @Override
-        public void encode(FriendlyByteBuf buf, Component obj) {
-            buf.writeComponent(obj);
-        }
-
-        @Override
-        public Component decode(FriendlyByteBuf buf) {
-            return buf.readComponent();
-        }
-    };
+    /**
+     * A {@link Component} in the binary form of {@link ComponentStreamCodecs#COMPONENT} - the vanilla
+     * {@code writeComponent} JSON string is hundreds of bytes for a tooltip, and only the save side still
+     * wants it.
+     */
+    StreamCodec<FriendlyByteBuf, Component> COMPONENT_CODEC = ComponentStreamCodecs.COMPONENT;
 
     /**
      * Builds a codec for entries of a Minecraft {@link Registry}: values are written as a VarInt

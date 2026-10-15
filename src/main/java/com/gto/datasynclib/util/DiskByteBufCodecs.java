@@ -6,6 +6,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
@@ -27,9 +28,12 @@ import org.jetbrains.annotations.Nullable;
  * value differently on purpose.</p>
  *
  * <p>The members whose form is already self-describing — {@link #RESOURCE_LOCATION_CODEC},
- * {@link #TAG_CODEC}/{@link #COMPOUND_TAG_CODEC}/{@link #LIST_TAG_CODEC}, the {@code JsonElement} trio,
- * the positions, {@link #COMPONENT_CODEC} — are inherited unchanged, since there is nothing session-bound
- * about them. Only the registry-keyed entries and the two stacks are defined again here.</p>
+ * {@link #TAG_CODEC}/{@link #COMPOUND_TAG_CODEC}/{@link #LIST_TAG_CODEC}, the {@code JsonElement} trio
+ * and the positions — are inherited unchanged, since there is nothing session-bound about them. Only the
+ * registry-keyed entries, the two stacks and {@link #COMPONENT_CODEC} are defined again here: the network
+ * writes a component in the binary form of {@link ComponentStreamCodecs#COMPONENT}, while a file keeps the
+ * JSON string of {@link ComponentStreamCodecs#JSON}, the vanilla {@code writeComponent} this half used to
+ * inherit from {@link ByteBufCodecExtends}.</p>
  */
 public interface DiskByteBufCodecs extends ByteBufCodecExtends {
 
@@ -113,4 +117,11 @@ public interface DiskByteBufCodecs extends ByteBufCodecExtends {
             return FluidStack.loadFluidStackFromNBT((CompoundTag) NbtUtil.read(Tag.TAG_COMPOUND, buf));
         }
     };
+
+    /**
+     * A {@link Component} as the JSON string of {@link ComponentStreamCodecs#JSON}, where
+     * {@link ByteBufCodecExtends#COMPONENT_CODEC} writes the binary form: a file outlives the pair of peers
+     * that wrote it, and JSON is what a later session and a person can still read.
+     */
+    StreamCodec<FriendlyByteBuf, Component> COMPONENT_CODEC = ComponentStreamCodecs.JSON;
 }

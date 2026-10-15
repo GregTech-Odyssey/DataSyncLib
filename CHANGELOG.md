@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- **Component wire codec**: `ComponentStreamCodecs` writes a `Component` as a binary tree on the wire
+  (`ByteBufCodecExtends.COMPONENT_CODEC`), while `DiskByteBufCodecs.COMPONENT_CODEC` keeps the JSON string.
+- **Registered component contents**: `ComponentStreamCodecs.register(class, codec)` gives a mod's own
+  `ComponentContents` the wire kind `7` — the class name as the key, then a VarInt-framed payload — where
+  kind `6` would flatten it to the text it renders; a peer without the class skips the frame, warns once per
+  key and decodes that node empty while its style and siblings still read.
 - **Versioned files**: `VersionedFriendlyByteBuf` and `FileUtil.writeVersioned`/`readVersioned` put a VarInt
   version at the head of the file (`0` is not a version the library writes, so a plain read is the fallback);
   `DiskByteBufCodecs` is the disk half of the codec set.
