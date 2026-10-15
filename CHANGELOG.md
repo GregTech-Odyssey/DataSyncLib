@@ -1,76 +1,26 @@
 # Changelog
 
 ## Unreleased
-
-### New Features
-- **Versioned files**: `VersionedFriendlyByteBuf` is a `FriendlyByteBuf` that also carries the version its
-  payload was written at, and `FileUtil.writeVersioned(path, version, encoder, value)` /
-  `FileUtil.readVersioned(path, decoder)` put that version at the head of the file as a VarInt. A stream
-  codec reads it with `buf.version()`, a carrier codec with `ops.dataVersion()` (the value flavours build
-  the `ValueOps` at the file's version). The version must be in `1 .. FileUtil.MAX_VERSION`; `0` is not a
-  version the library writes, so a file that predates versioning is refused rather than misread, and a plain
-  `try { readVersioned } catch (RuntimeException) { read }` is a working fallback. `DiskByteBufCodecs` is the
-  disk half beside `ByteBufCodecExtends` (registry keys where the network half uses ids).
-- **Element access shortcuts on the ops**: `ValueOps` carries the container conversions the retired
-  `ListData`/`StringMapData`/`IntMapData`/`LongMapData` had as methods of their own — `ops.getInt(list, index)`,
-  `ops.getString(map, "key")`, `ops.getInt(intMap, key)`, `ops.getLong(longMap, key)` and the matching
-  `addXxx`/`putXxx` writers.
-- **JSON as a registered custom type**: `JsonUtils` stores a `JsonElement` as a kind byte plus that kind's
-  payload instead of a string, keeps a primitive's Java type, and narrows an untyped number by its digits
-  (`byte`/`short`/`int`/`long`/`BigInteger`, `float`/`double`/`BigDecimal`), so an ordinary decimal costs no
-  `BigDecimal`. Disk halves `ValueCodecs.JSON`/`JSON_OBJECT`/`JSON_ARRAY`, wire halves
-  `ByteBufCodecExtends.JSON_CODEC`/`JSON_OBJECT_CODEC`/`JSON_ARRAY_CODEC`.
-- **`ValueConverters` — converters for `SELF` values**: register one and a class the type set does not cover
-  travels as an ordinary carrier value instead of Java serialization.
-  `builder(id, type).write(encoder).read(decoder).build()` takes the payload's `ValueOps.Type` id (nothing of
-  the converter's own is written), and the two halves are the library's `ValueEncoder`/`ValueDecoder`, handed
-  the `ValueOps` doing the work. `JavaValueOps.init()` registers the built-ins (UUID, BigInteger, BigDecimal,
-  the FastUtil primitive lists and sets, the five no-id arrays); lookup is by class with an optional
-  `when(Predicate)`, and `ops.getSelf(data, type)` asks for a value back as a specific type.
-- `SELF` is Java serialization only now, written length-framed so an `ObjectInputStream` cannot read past it;
-  a nested `SELF` written by an earlier build of this refactor is no longer readable.
-
-### Changes
-- `OBJECT_MAP` is gone: a map is a `STRING_MAP`, `INT_MAP` or `LONG_MAP` (the FastUtil object-keyed maps
-  included), and id `16` is retired — `createValueMap`/`getValueMap`/`isValueMap` go with it.
-- The arrays with no id of their own are converters: `boolean[]` → `BYTE_ARRAY`,
-  `short[]`/`char[]`/`float[]` → `INT_ARRAY`, `double[]` → `LONG_ARRAY`.
-- `ValueOps#createUUID` … `#getBigDecimal` are payload definitions again — plain compositions of the carrier's
-  primitives — with `ValueOpsConverters` a thin adapter; the `java.time` set and its `createInstant` …
-  `getLocalDateTime` methods are gone.
-- FastUtil's `IntList`/`LongList`/`IntSet`/`LongSet` get converters (the primitive array their field codecs
-  write); a sorted set stays Java-serialized and an enum stays a field type.
-- `getTypeId`/`writeValue` name `IntList`/`LongList` before `List`, so a FastUtil list is written as an
-  `int[]` rather than a list of boxed integers; the FastUtil collection codecs in `ValueCodec` store what
-  `writeValue` makes of the value and read it back through the converter.
-- An empty value is the absent marker for object arrays, the list/collection/map helpers and the field
-  accessors, while the eight scalar-array codecs round-trip an empty array as one;
-  `FieldDataManager#readFromValue`/`#readAllFromValue`/`#readFieldsFromValue` read an absent payload as
-  "nothing was stored".
-- `AbstractFieldAccess`/`SerializableArrayAccess`: the `dataVersion == -1` legacy layout path is removed.
-- A stored `BigDecimal` carries its scale as a `VarInt` rather than one byte, so any scale round-trips
-  (`1e400`, `1e-400`); the bytes of an existing value change with it.
-- `CustomTypes` is documented as the library's own registry, not an extension point: its ids are global
-  `int`s that both a save file and the network carry, and a collision is fatal — a mod's own object belongs in
-  a `ValueConverters` converter.
-- `ValueOps.createSelf(Object)` is gone: it returned the object it was handed, and a `SELF` value already is
-  the shape the carrier stores. `ValueCodec.self()` hands the value itself on and the read side is unchanged
-  (`ops.getSelf(data)`, `ops.getSelf(data, type)`), so a carrier has one less method to provide.
-
-### Fixes
-- `TagSerializableAccess` wrote a tag with one codec and read it with another, so every `INBTSerializable`
-  field lost its state and an old save failed outright.
-- `TagSerializableArrayAccess`/`ArrayAccess` read a payload without a null guard, so a field whose slots were
-  all empty threw on load.
-- `JavaValueOps#write` had no `Object2ObjectMap` case although `getTypeId` reported `OBJECT_MAP`, so the map
-  was written with string-map framing under that id.
-- `@Codec(writeToValue=…, readFromValue=…)` resolved and invoked its hooks with the wrong signature; they now
-  take `(ValueOps, T)` / `(ValueOps, Object)` on the declaring instance.
-- `Registry` captured its constructor parameter instead of the resolved `keyGetter`, which disabled the
-  documented null → `getKeyByMap` fallback.
+- **Versioned files**: `VersionedFriendlyByteBuf` and `FileUtil.writeVersioned`/`readVersioned` put a VarInt
+  version at the head of the file (`0` is not a version the library writes, so a plain read is the fallback);
+  `DiskByteBufCodecs` is the disk half of the codec set.
+- **Ops**: container element accessors (`ops.getInt(list, i)`, `ops.putInt(map, k, v)`, …); JSON as a
+  registered custom type, with an untyped number narrowed from the literal's own digits.
+- **`ValueConverters`**: converters for `SELF` values — `builder(id, type).write(encoder).read(decoder)`, the
+  built-ins registered by `JavaValueOps.init()`, read back with `ops.getSelf(data, type)`. The five arrays with
+  no id of their own and FastUtil's `IntList`/`LongList`/`IntSet`/`LongSet` are converters too, and
+  `getTypeId`/`writeValue` name those two lists before `List`.
+- **Removed**: `ValueOps.createSelf`, `OBJECT_MAP` (id `16` retired), the `java.time` creators, and the
+  `dataVersion == -1` legacy layout path.
+- **Behaviour**: an empty value is the absent marker for object arrays, the list/collection/map helpers and the
+  field accessors, while the scalar-array codecs round-trip an empty array as one; a `BigDecimal`'s scale is a
+  VarInt, so its bytes changed; `CustomTypes` is the library's own registry and a mod's object belongs in a
+  converter.
+- **Fixes**: `TagSerializableAccess` read with the wrong codec, `TagSerializableArrayAccess`/`ArrayAccess` read
+  without a null guard, `JavaValueOps#write` had no `Object2ObjectMap` case, `@Codec`'s value hooks resolved
+  with the wrong signature, and `Registry` captured its constructor parameter instead of the `keyGetter`.
 
 ---
-
 ## 26.9.4 (2026-09-19)
 
 ### Breaking Changes
@@ -166,4 +116,5 @@
 ## Previous Versions
 
 For a complete changelog, see the [GitHub commits](https://github.com/GregTech-Odyssey/DataSyncLib/commits/).
+
 
