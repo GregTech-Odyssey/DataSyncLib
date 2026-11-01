@@ -1,18 +1,21 @@
 package com.gto.datasynclib.blockentity;
 
-import com.gto.datasynclib.FieldDataManager;
-import com.gto.datasynclib.IFieldDataHolder;
-import com.gto.datasynclib.LazyFieldDataManager;
-import com.gto.datasynclib.LogicalSide;
+import com.gto.datasynclib.*;
 import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.datastream.codec.ValueOps;
+import com.gto.datasynclib.forge.DataSyncEvent;
+import com.gto.datasynclib.network.DataSyncNetwork;
+import com.gto.datasynclib.util.TaskSubscription;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.ByteArrayTag;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.ArrayList;
 
 /**
  * Ready-to-use {@link net.minecraft.world.level.block.entity.BlockEntity} base class
@@ -39,6 +42,10 @@ import org.jetbrains.annotations.NotNull;
  *       {@code @SaveToDisk} fields as {@code "field_save"} NBT data with versioning</li>
  *   <li><strong>Disk loading:</strong> {@link #load} reads {@code "field_sync"} first
  *       (chunk sync takes precedence), falls back to {@code "field_save"} for full restore</li>
+ *   <li><strong>Item transfer (opt-in):</strong> fields marked
+ *       {@link SaveToItem @SaveToItem} travel with the dropped
+ *       item and come back when it is placed — see {@link #saveToItem(CompoundTag, boolean)},
+ *       {@link #loadFromItem(CompoundTag)} and {@link IDropSave}</li>
  * </ul>
  *
  * <h3>Manual steps needed:</h3>
@@ -67,13 +74,21 @@ import org.jetbrains.annotations.NotNull;
  * @see com.gto.datasynclib.FieldDataManager
  */
 
-public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDataHolder {
+public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDataHolder, IDropSave {
 
     /**
      * Data-format version written to {@code "field_data_dataVersion"}. Shared by all holders
      * and {@code 0} by default — see the class documentation before bumping it.
      */
     public static int VERSION;
+
+    public volatile boolean remove = false;
+
+    /**
+     * The holder's background sync registration, or {@code null} when it is not loaded. Kept so a
+     * re-registration reuses the live entry instead of stacking a second one.
+     */
+    private TaskSubscription syncTask;
 
     protected final LazyFieldDataManager fieldDataManager = new LazyFieldDataManager(this);
 
@@ -85,6 +100,79 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
     @Override
     public FieldDataManager getFieldDataManager() {
         return fieldDataManager.get();
+    }
+
+
+    @Override
+    public void setRemoved() {
+        this.remove = true;
+        super.setRemoved();
+        unsubscribeSyncTask();
+    }
+
+    /**
+     * Vanilla/Forge unload a chunk without {@link #setRemoved()} — it calls this instead, so the
+     * background task is dropped here too and cannot keep a dead holder alive until the session ends.
+     */
+    @Override
+    public void onChunkUnloaded() {
+        super.onChunkUnloaded();
+        unsubscribeSyncTask();
+    }
+
+    /**
+     * Registers this holder with the executor of its side, so {@link #autoSync()} runs in the
+     * background while the holder is loaded.
+     *
+     * <p>Vanilla calls this when the holder enters a chunk's block-entity map. The registration is
+     * a single linked entry and the handle is kept: passing a still-live handle back means the
+     * executor returns it unchanged, so a holder that is loaded twice never gets two sync loops.</p>
+     */
+    @Override
+    public void clearRemoved() {
+        this.remove = false;
+        super.clearRemoved();
+        if (level == null) return;
+        periodID = level.random.nextInt(40);
+        var executor = level instanceof ServerLevel
+                ? DataSyncEvent.SERVER_ASYNC_TICK_EXECUTOR
+                : level.isClientSide() ? DataSyncEvent.CLIENT_ASYNC_TICK_EXECUTOR : null;
+        if (executor != null) {
+            syncTask = executor.enqueueTick(syncTask, () -> remove, this::autoSync, getMinSyncCycle(), 0);
+        }
+    }
+
+    private void unsubscribeSyncTask() {
+        var task = syncTask;
+        syncTask = null;
+        if (task != null) task.unsubscribe();
+    }
+
+    protected int periodID;
+
+    protected void autoSync() {
+        if (remove || level == null) return;
+        periodID++;
+        var maxCycle = getMaxSyncCycle();
+        if (needSync() || (maxCycle > 0 && periodID % maxCycle == 0)) {
+            if (level.isClientSide()) {
+                DataSyncNetwork.syncBlockEntityToServer(this);
+            } else {
+                DataSyncNetwork.syncBlockEntityToClient(this);
+            }
+        }
+    }
+
+    protected int getMinSyncCycle() {
+        return 1;
+    }
+
+    protected int getMaxSyncCycle() {
+        return 40;
+    }
+
+    public boolean needSync() {
+        return true;
     }
 
     /**
@@ -146,7 +234,7 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
      * (via {@link FieldDataManager#writeToValue(ValueOps)}).</p>
      *
      * <p>Only fields annotated with {@code @SaveToDisk} are included. Use
-     * {@link FieldDataManager#writeAllToValue(ValueOps)} ()} if you need all managed fields.</p>
+     * {@link FieldDataManager#writeAllToValue(ValueOps)} if you need all managed fields.</p>
      *
      * @param tag the NBT compound tag to save into
      */
@@ -158,6 +246,66 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
         // back, so a codec that shapes its output by version writes what it stamps
         var ops = JavaValueOps.create(VERSION);
         tag.putByteArray("field_save", ops.toBytes(getFieldDataManager().writeToValue(ops)));
+    }
+
+    /**
+     * @return {@code true} if this holder marks at least one field with
+     * {@link SaveToItem @SaveToItem}
+     */
+    public boolean hasItemFields() {
+        return FieldDefinitionStorage.get(getClass()).getAnnotatedFields(SaveToItem.class).length > 0;
+    }
+
+    /**
+     * Writes this holder's {@code @SaveToItem} fields into {@code tag}, the root tag of its item.
+     *
+     * <p>The payload is what {@link FieldDataManager#writeFieldsToValue} produces for the marked
+     * fields — the same carrier format a save file holds — stored under {@link #ITEM_DATA_KEY}
+     * with the {@link #VERSION} it was written with under {@link #ITEM_DATA_VERSION_KEY}.</p>
+     *
+     * <p>Two per-field attributes narrow the payload here:</p>
+     * <ul>
+     *   <li>{@code @SaveToItem(saveOnClone = false)} — left out when {@code clone} is {@code true}
+     *       (creative pick-block); breaking the block still carries the field.</li>
+     *   <li>{@code @SaveToItem(skipWhen = "...")} — evaluated with the field's current value on
+     *       every write, so a value that is not worth carrying stays out.</li>
+     * </ul>
+     * <p>Both are read from the parsed {@link SaveToItemMetadata} the annotation's metadata factory
+     * stored in {@link FieldDefinitionStorage.AnnotatedField#metadata()} during the scan, not from
+     * the annotation instance itself.</p>
+     *
+     * <p>Nothing is written when no field survives those filters or when every surviving field had
+     * nothing to store (skipped by its {@code skipWhen} predicate or equal to its default), so the
+     * caller can clean an empty tag off the stack afterwards.</p>
+     *
+     * <p>Called by {@link com.gto.datasynclib.block.FieldDataHolderBlock} when the block drops
+     * ({@code clone = false}) and when creative pick-block clones it ({@code clone = true}). Called
+     * directly when a block hands out an item itself.</p>
+     *
+     * @param tag   the item's root tag, already writable
+     * @param clone {@code true} for a pick-block clone, {@code false} for a real drop
+     */
+    @Override
+    public void saveToItem(CompoundTag tag, boolean clone) {
+        IDropSave.saveToItem(this,tag,clone,VERSION);
+    }
+
+    /**
+     * Reads the {@link #saveToItem(CompoundTag, boolean) saved} fields back from {@code tag}, the
+     * root tag of the stack being placed.
+     *
+     * <p>Every marked field is read; keys the payload does not contain are left alone, so a field
+     * that was filtered out on the way out keeps the value the fresh block entity starts with.</p>
+     *
+     * <p>Called by {@link com.gto.datasynclib.block.FieldDataHolderBlock#setPlacedBy}; a block that
+     * does not extend it calls this method itself. An absent payload, or a holder that marks no
+     * field, leaves this block entity untouched.</p>
+     *
+     * @param tag the item's root tag
+     */
+    @Override
+    public void loadFromItem(CompoundTag tag) {
+        IDropSave.loadFromItem(this, tag);
     }
 
 

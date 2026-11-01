@@ -456,6 +456,89 @@ public class FieldDataManager {
         }
     }
 
+
+    /**
+     * Serializes one field for disk persistence, on the native carrier.
+     *
+     * <p>The definition form of {@link #writeFieldToValue(String, ValueOps)}: the definition is the
+     * instance the scan produced, so a consumer of an extension annotation can write the field it
+     * was given without going back to the field's name.</p>
+     *
+     * @param field the definition of the field to write
+     * @param ops   the carrier to build the value with
+     * @return the field's value, {@link DataField#NOT_PERSISTED} when it was skipped, or an explicit
+     * null value
+     */
+    @NotNull
+    public Object writeFieldToValue(DataFieldDefinition<?> field, @NotNull ValueOps ops) {
+            var f = allFieldMap.get(field);
+            if (f != null) return f.writeToValue(holder.getSource(field), ops);
+        throw ReflectUtil.createFieldNotFoundException(field.key);
+    }
+
+    /**
+     * Reads one field back from a carrier value — the counterpart of
+     * {@link #writeFieldToValue(DataFieldDefinition, ValueOps)}.
+     *
+     * @param data  the carrier value the field was written as
+     * @param ops   the carrier the value came from
+     * @param field the definition of the field to read
+     */
+    public void readFieldFromValue(@NotNull Object data, @NotNull ValueOps ops, DataFieldDefinition<?> field) {
+            var f = allFieldMap.get(field);
+            if (f != null) {
+                f.readFromValue(holder.getSource(field), data, ops);
+                return;
+            }
+        throw ReflectUtil.createFieldNotFoundException(field.key);
+    }
+
+    /**
+     * Serializes the given fields into a carrier string map, skipping the ones that have nothing to
+     * store ({@link DataField#NOT_PERSISTED}) and the explicit nulls of fields that do not
+     * {@code saveEmpty}.
+     *
+     * @param ops    the carrier to build the map with
+     * @param fields the definitions of the fields to write
+     * @return the map, or the carrier's null value when no field contributed
+     */
+    @NotNull
+    public Object writeFieldsToValue(@NotNull ValueOps ops, DataFieldDefinition<?>... fields) {
+        Map<String, Object> data = new HashMap<>();
+        for (var field : fields) {
+            var f = allFieldMap.get(field);
+            if (f == null) throw ReflectUtil.createFieldNotFoundException(field.key);
+            var result = f.writeToValue(holder.getSource(field), ops);
+            if (result == DataField.NOT_PERSISTED) continue;
+            if (!ops.isNull(result) || field.saveEmpty) data.put(field.key, result);
+        }
+        return data.isEmpty() ? ops.createNull() : ops.createStringMap(data);
+    }
+
+    /**
+     * Reads the given fields back from a carrier string map; an absent key leaves the field alone.
+     *
+     * <p>An absent payload — the carrier's null value the matching write method produces when
+     * nothing was stored — is a no-op rather than an error: there is nothing to read.</p>
+     *
+     * @param data   the carrier value produced by {@link #writeFieldsToValue(ValueOps,
+     *               DataFieldDefinition[])}
+     * @param ops    the carrier the value came from
+     * @param fields the definitions of the fields to read
+     */
+    public void readFieldsFromValue(@NotNull Object data, @NotNull ValueOps ops, DataFieldDefinition<?>... fields) {
+        if (ops.isNull(data)) return;
+        var map = ops.getStringMap(data);
+        for (var field : fields) {
+            var value = map.get(field.key);
+            if (value == null) continue;
+            var f = allFieldMap.get(field);
+            if (f == null) throw ReflectUtil.createFieldNotFoundException(field.key);
+            f.readFromValue(holder.getSource(field), value, ops);
+        }
+    }
+
+
     /**
      * Serializes one field for disk persistence, on the native carrier.
      *
@@ -493,7 +576,9 @@ public class FieldDataManager {
      * store ({@link DataField#NOT_PERSISTED}) and the explicit nulls of fields that do not
      * {@code saveEmpty}.
      *
-     * @return the map, or {@code null} when no field contributed
+     * @param ops    the carrier to build the map with
+     * @param fields the field names (as declared, or their {@code @SaveToDisk(key = ...)} override)
+     * @return the map, or the carrier's null value when no field contributed
      */
     @NotNull
     public Object writeFieldsToValue(@NotNull ValueOps ops, String... fields) {
@@ -513,8 +598,12 @@ public class FieldDataManager {
     /**
      * Reads the named fields back from a carrier string map; an absent key leaves the field alone.
      *
-     * <p>An absent payload — the null value {@link #writeToValue(ValueOps)} produces when nothing was
-     * stored — is a no-op rather than an error: there is nothing to read.</p>
+     * <p>An absent payload — the carrier's null value {@link #writeFieldsToValue(ValueOps, String[])}
+     * produces when nothing was stored — is a no-op rather than an error: there is nothing to read.</p>
+     *
+     * @param data   the carrier value produced by {@link #writeFieldsToValue(ValueOps, String[])}
+     * @param ops    the carrier the value came from
+     * @param fields the field names (as declared, or their {@code @SaveToDisk(key = ...)} override)
      */
     public void readFieldsFromValue(@NotNull Object data, @NotNull ValueOps ops, String... fields) {
         if (ops.isNull(data)) return;
@@ -522,10 +611,11 @@ public class FieldDataManager {
         for (var field : fields) {
             var d = storage.definitionMap.get(field);
             if (d == null) throw ReflectUtil.createFieldNotFoundException(field);
-            if (!map.containsKey(d.key)) continue;
+            var value = map.get(d.key);
+            if (value == null) continue;
             var f = allFieldMap.get(d);
             if (f == null) throw ReflectUtil.createFieldNotFoundException(field);
-            f.readFromValue(holder.getSource(d), map.get(d.key), ops);
+            f.readFromValue(holder.getSource(d), value, ops);
         }
     }
 
@@ -586,8 +676,9 @@ public class FieldDataManager {
         holder.readCustomSaveData(map, ops);
         for (var field : fields) {
             var d = field.getDefinition();
-            if (!map.containsKey(d.key)) continue;
-            field.readFromValue(holder.getSource(d), map.get(d.key), ops);
+            var value = map.get(d.key);
+            if (value == null) continue;
+            field.readFromValue(holder.getSource(d), value, ops);
         }
     }
 }

@@ -2,6 +2,7 @@ package com.gto.datasynclib.test;
 
 import com.gto.datasynclib.DataSyncCodec;
 import com.gto.datasynclib.FieldDataManager;
+import com.gto.datasynclib.FieldDefinitionStorage;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.annotations.*;
@@ -18,6 +19,10 @@ import net.minecraft.core.Direction;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.Nullable;
 
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 import java.util.*;
 import java.util.function.IntFunction;
 import java.util.function.Supplier;
@@ -207,6 +212,47 @@ public final class DataSyncSelfTests {
         void mark(int value) {
             marked = value;
         }
+
+        @Override
+        public FieldDataManager getFieldDataManager() {
+            return manager;
+        }
+    }
+
+    /**
+     * A downstream extension annotation, the kind a mod registers through
+     * {@link FieldDefinitionStorage#registerAnnotation(Class)} to make the library record the
+     * fields it marks.
+     */
+    @Retention(RetentionPolicy.RUNTIME)
+    @Target(ElementType.FIELD)
+    @interface UnitTag {
+        String value() default "";
+    }
+
+    /**
+     * The same shape with class retention: invisible to reflection at scan time, so registering
+     * it must be rejected instead of silently recording nothing.
+     */
+    @Retention(RetentionPolicy.CLASS)
+    @Target(ElementType.FIELD)
+    @interface NonRuntimeTag {
+    }
+
+    /**
+     * A holder for the extension-annotation test: {@code counter} is persisted <em>and</em> tagged,
+     * {@code label} carries only the custom annotation and is therefore managed by it alone.
+     */
+    static class ExtensionHolder implements IFieldDataHolder {
+
+        private final FieldDataManager manager = new FieldDataManager(this);
+
+        @SaveToDisk
+        @UnitTag("counted")
+        int counter;
+
+        @UnitTag("labelled")
+        int label;
 
         @Override
         public FieldDataManager getFieldDataManager() {
@@ -469,6 +515,8 @@ public final class DataSyncSelfTests {
         testRemoteCalls();
         testGenericResolution();
         testRegistryGlobalCodec();
+        // Last: it registers an annotation, which applies to classes scanned from here on.
+        testExtensionAnnotations();
         report();
     }
 
@@ -853,6 +901,87 @@ public final class DataSyncSelfTests {
         expect("mirror.ofStreamCodec.disk", "x", fromStream.decode(ops, fromStream.encode(ops, "x")));
         expect("mirror.ofStreamCodec.wire", "x", streamDecode(fromStream, streamEncode(fromStream, "x")));
         expect("mirror.toDataSyncCodec.self", true, DataSyncCodec.STRING_CODEC.toDataSyncCodec() == DataSyncCodec.STRING_CODEC);
+    }
+
+    /**
+     * Covers the extension-annotation registry: a downstream annotation registered through
+     * {@link FieldDefinitionStorage#registerAnnotation(Class)} is collected while the class is
+     * scanned, keyed by annotation type and paired with the field's definition
+     * ({@link FieldDefinitionStorage.AnnotatedField}); a field carrying only the custom annotation
+     * is managed like an {@code @AddToManager} field — it has a definition and round-trips through
+     * the bulk value path, but is not part of the incremental save — and a registration that could
+     * never be seen by a scan is rejected.
+     */
+    private void testExtensionAnnotations() {
+        try {
+            // Must happen before ExtensionHolder is first scanned (i.e. before it is constructed).
+            // The factory is the optional user metadata: it runs once per annotated field and its
+            // result is stored in AnnotatedField#metadata().
+            FieldDefinitionStorage.registerAnnotation(UnitTag.class,
+                    (lookup, definition, type, annotation) -> annotation.value().toUpperCase(Locale.ROOT));
+            var storage = FieldDefinitionStorage.get(ExtensionHolder.class);
+
+            expect("extensions.hasAnnotated", true, storage.hasAnnotatedFields(UnitTag.class));
+            expect("extensions.annotationTypes", true, storage.getAnnotationTypes().contains(UnitTag.class));
+            expect("extensions.unregisteredEmpty", 0,
+                    storage.getAnnotatedFields(Retention.class).length);
+
+            var counterField = ExtensionHolder.class.getDeclaredField("counter");
+            var labelField = ExtensionHolder.class.getDeclaredField("label");
+            var tagged = storage.getAnnotatedFields(UnitTag.class);
+            expect("extensions.count", 2, tagged.length);
+
+            boolean seenCounter = false;
+            boolean seenLabel = false;
+            for (var annotated : tagged) {
+                if (annotated.field().equals(counterField)) {
+                    seenCounter = "counted".equals(annotated.annotation().value());
+                    expect("extensions.counterDefinition", true,
+                            annotated.definition() == storage.getFieldDefinition(counterField));
+                    expect("extensions.counterMetadata", "COUNTED", annotated.metadata());
+                } else if (annotated.field().equals(labelField)) {
+                    seenLabel = "labelled".equals(annotated.annotation().value());
+                    expect("extensions.labelDefinition", true,
+                            annotated.definition() == storage.getFieldDefinition(labelField));
+                    expect("extensions.labelMetadata", "LABELLED", annotated.metadata());
+                } else {
+                    expect("extensions.unexpectedField", true, false);
+                }
+            }
+            expect("extensions.bothTagged", true, seenCounter && seenLabel);
+
+            // The custom annotation alone manages the field: a definition exists, but it is not a
+            // saved field (only @SaveToDisk puts a field on the incremental path).
+            var labelDefinition = storage.getFieldDefinition(labelField);
+            expect("extensions.labelManaged", true, labelDefinition != null);
+            expect("extensions.labelNotSaved", false, labelDefinition != null && labelDefinition.isSave);
+
+            ExtensionHolder src = new ExtensionHolder();
+            src.counter = 5;
+            src.label = 7;
+            expect("extensions.readThroughDefinition", (Object) 7, labelDefinition == null ? null : labelDefinition.get(src));
+
+            ExtensionHolder dst = new ExtensionHolder();
+            var bulk = src.getFieldDataManager().writeAllToValue(JavaValueOps.INSTANCE);
+            dst.getFieldDataManager().readAllFromValue(bulk, JavaValueOps.INSTANCE);
+            expect("extensions.bulkRoundTrip.counter", 5, dst.counter);
+            expect("extensions.bulkRoundTrip.label", 7, dst.label);
+
+            var saved = src.getFieldDataManager().writeToValue(JavaValueOps.INSTANCE);
+            expect("extensions.notSavedIncrementally", false,
+                    saved instanceof Map<?, ?> map && map.containsKey("label"));
+
+            boolean rejectedNonRuntime = false;
+            try {
+                FieldDefinitionStorage.registerAnnotation(NonRuntimeTag.class);
+            } catch (IllegalArgumentException e) {
+                rejectedNonRuntime = true;
+            }
+            expect("extensions.rejectsNonRuntime", true, rejectedNonRuntime);
+        } catch (Throwable t) {
+            expect("extensions.noThrow", true, false);
+            System.err.println(LOG + "extensions exception: " + t);
+        }
     }
 
     private <T> void expect(String name, T expected, T actual) {

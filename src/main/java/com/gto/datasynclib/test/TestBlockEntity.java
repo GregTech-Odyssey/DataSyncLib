@@ -3,8 +3,8 @@ package com.gto.datasynclib.test;
 import com.gto.datasynclib.*;
 import com.gto.datasynclib.annotations.*;
 import com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity;
+import com.gto.datasynclib.blockentity.SaveToItem;
 import com.gto.datasynclib.listener.ObjNotifiableHolder;
-import com.gto.datasynclib.network.DataSyncNetwork;
 import com.gto.datasynclib.util.FieldDataCodec;
 import com.gto.datasynclib.util.NbtUtil;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
@@ -68,6 +68,33 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
      */
     @SaveToDisk
     int i;
+
+    /**
+     * {@code @SaveToItem}: the value travels with the dropped item instead of the world save —
+     * {@code TestBlockEntityTests} drives the item round trip through
+     * {@link FieldDataHolderBlockEntity#saveToItem(CompoundTag, boolean)} and
+     * {@link FieldDataHolderBlockEntity#loadFromItem(CompoundTag)}, the hooks
+     * {@link com.gto.datasynclib.block.FieldDataHolderBlock} calls from {@code getDrops} and
+     * {@code setPlacedBy}. The field needs no {@code @SaveToDisk}: the annotation alone manages it.
+     */
+    @SaveToItem
+    int itemOnly;
+
+    /**
+     * {@code @SaveToItem} attributes: the field is left out while {@link #skipItemSave(int)} says so,
+     * and it is never written into a creative pick-block clone. {@code TestBlockEntityTests} checks
+     * both filters.
+     */
+    @SaveToItem(skipWhen = "skipItemSave", saveOnClone = false)
+    int itemConditional;
+
+    /**
+     * Skip predicate referenced by {@code @SaveToItem(skipWhen = "skipItemSave")}: the field is left
+     * out of the item while it is negative.
+     */
+    boolean skipItemSave(int value) {
+        return value < 0;
+    }
 
     /**
      * Object array ({@code ArrayAccess} + the {@code String} codec); elements may be null.
@@ -427,7 +454,6 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
             a = new A(b.a);
             aabb = new AABB(1, 4, 5, 6, 1, b.a);
             tagData.putInt("aaa", tagData.getInt("aaa") + 1);
-            DataSyncNetwork.syncBlockEntityToClient(this, false, true);
         }
     }
 
@@ -439,7 +465,6 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
     protected void clientTick() {
         if (level.getGameTime() % 20 == 0) {
             getFieldDataManager().markFieldsForSync("objectHolder");
-            DataSyncNetwork.syncBlockEntityToServer(this, false, true);
             DataSyncLib.LOGGER.info("tagData: {}", tagData);
             DataSyncLib.LOGGER.info("a.a: {}", a.a);
         }

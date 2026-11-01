@@ -40,6 +40,8 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 - **🧬 Generic Hierarchy Resolution** — `ReflectUtil` resolves full generic arguments along superclasses/interfaces (e.g. `A<T> extends HashMap<String,T>` → `[String, T]`).
 - **♻️ Registry Global Codec** — `Registry` auto-registers its stream + data codecs into the global `DataSyncCodec` when frozen with a known value type.
 - **🎯 Custom Strategies** — `@Strategy` for custom hash/equality change detection on complex types (ItemStack, FluidStack, etc.).
+- **🧷 Extension Annotations** — A mod registers its own field annotations; each class's scan collects them as `annotation type → (definition, annotation)` pairs.
+- **🧳 Item-Carried State** — `@SaveToItem` fields travel with the block's dropped item and come back on placement.
 
 ## Quick Start
 
@@ -169,7 +171,10 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 ```
 
 > **Key points:**
-> - Sync requires explicit calls to `DataSyncNetwork.syncBlockEntityToClient()` (async-safe).
+> - `FieldDataHolderBlockEntity` already syncs on its own: it registers a background task on the
+>   server (and client) executor and attempts a sync every `getMinSyncCycle()` periods, at most
+>   `getMaxSyncCycle()` periods apart. Calling `DataSyncNetwork.syncBlockEntityToClient()` yourself
+>   is still supported (async-safe) and is what a plain `IFieldDataHolder` needs.
 > - `autoDetect = false` fields need `markFieldsForSync()` calls to trigger sync.
 > - Persistence requires manual `setChanged()` calls on the BlockEntity.
 > - `syncBlockEntityToClient(be, false, true)`: `false` = incremental (only changed), `true` = only fields with `autoDetect=true`.
@@ -292,6 +297,126 @@ Class<?>[] args = ReflectUtil.getResolvedGenericArguments(fieldType, HashMap.cla
 
 Supports generic superclasses, generic interfaces (`List<T>`), multi-level inheritance, and bounded wildcards.
 
+### Advanced: Extension Annotations
+
+A mod can hand its own field annotations to the library. Once registered, an annotation becomes a
+reason for a field to be managed (exactly like `@AddToManager`), and scanning a class records every
+field carrying it — the annotation instance paired with that field's `DataFieldDefinition` — under
+the annotation type in the class's storage. An optional metadata factory can be passed at
+registration to store the parsed form of the annotation's attributes with each record.
+
+```java
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.FIELD)
+public @interface DirtyTracked {
+    String channel() default "default";
+}
+
+// in mod construction, next to the factory registrations
+FieldDefinitionStorage.registerAnnotation(DirtyTracked.class,
+        (lookup, definition, type, annotation) -> annotation.channel());   // optional user metadata
+
+public class MyBlockEntity extends FieldDataHolderBlockEntity {
+
+    @SaveToDisk
+    @DirtyTracked(channel = "energy")
+    private int energy;
+
+    @DirtyTracked(channel = "status")   // managed by the custom annotation alone
+    private int status;
+}
+```
+
+Query them back:
+
+```java
+var storage = FieldDefinitionStorage.get(MyBlockEntity.class);
+for (var annotated : storage.getAnnotatedFields(DirtyTracked.class)) {
+    var channel = annotated.annotation().channel();   // the annotation instance
+    var parsed = (String) annotated.metadata();       // built once by the factory during the scan
+    var definition = annotated.definition();          // that field's definition: read/write through it
+    definition.get(blockEntity);
+}
+```
+
+* `FieldDefinitionStorage.AnnotatedField` is the `(definition, annotation, metadata)` triple. One
+  annotation may mark several fields, and one field may carry several registered annotations.
+* The metadata factory has the signature
+  `(lookup, definition, managedType, annotation) -> Object`: `lookup` is a private-access `Lookup` for
+  the declaring class (usable with `ReflectUtil.createAdaptedMethodHandle`), `definition` is the
+  `DataFieldDefinition` built for the field (`definition.field` is the reflected field),
+  `managedType` is the field's managed type (the `toManaged` type of a `@Conversion` field), and the
+  returned object — anything — is computed once per annotated field and stored in `metadata()`.
+  Without a factory, or when it returns `null`, `metadata()` is `null`.
+* `getAnnotatedFields(...)` returns the array the class's storage holds — not a copy, read-only, and
+  a lookup allocates nothing; a shared empty array is returned when no field matches.
+* Registration validates the annotation: it must be `@Retention(RetentionPolicy.RUNTIME)` and
+  `@Target(ElementType.FIELD)`, otherwise `IllegalArgumentException`. Registering the same annotation
+  twice is a no-op.
+* Register before the target class is first scanned (mod construction): a class's storage is cached
+  for its lifetime, so a later registration is not retroactive.
+* A field managed by the custom annotation alone takes part in the bulk
+  `writeAllToValue`/`readAllFromValue` paths only — no automatic sync and no incremental save, exactly
+  like `@AddToManager`.
+
+### Advanced: State Carried by the Item (`@SaveToItem`)
+
+A dropped block item carries no block data by default. Mark fields with `@SaveToItem` and they travel
+with the item, coming back when it is placed — the shape GregTech Modern uses with its
+`IDropSave`:
+
+```java
+public class MyMachineBlockEntity extends FieldDataHolderBlockEntity {
+
+    @SaveToItem
+    private int mode;          // written into the item on break, restored on place
+
+    @SaveToItem(skipWhen = "isUpgradeInactive", saveOnClone = false)
+    private int upgradeMode;   // left out while inactive, and out of the clone item
+
+    private boolean isUpgradeInactive(int mode) {
+        return mode < 0;
+    }
+
+    @SaveToDisk
+    private int energy;        // world save only, stays out of the item
+}
+
+// block side: the three hooks, all provided by the base class
+public class MyMachineBlock extends FieldDataHolderBlock {
+    public MyMachineBlock(Properties properties) { super(properties); }
+
+    @Override
+    public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
+        return new MyMachineBlockEntity(pos, state);
+    }
+}
+```
+
+* Only the marked fields reach the item. `@SaveToItem` manages its field on its own (like
+  `@AddToManager`), so `@SaveToDisk` is not required; a field carrying both is written to both places.
+* The payload lives in the item's **root tag** under `field_item` (a byte array) and
+  `field_item_dataVersion` — the same carrier format a save file holds. The item stays a plain block
+  item: nothing goes under `BlockEntityTag`.
+* Two attributes narrow it per field:
+  - `skipWhen = "methodName"` — evaluated with the field's current value before every write; returning
+    `true` keeps the field out of the item. Same rule as `@SaveToDisk(skipWhen = ...)`: signature
+    `(T) -> boolean`, `T` the field's managed type (the `toManaged` type with `@Conversion`), declared
+    on the field's class.
+  - `saveOnClone = false` — only a real drop carries it; the creative pick-block clone starts without
+    it. (The attribute cannot be named `clone`: an annotation element may not share a name with a
+    method `Object` declares.)
+* The block entity implements `IDropSave` (`FieldDataHolderBlockEntity` already does):
+  `getDrops` → `saveToItem(tag, false)` on the block's own drop (the loot table result itself is not
+  changed), `setPlacedBy` → `loadFromItem(tag)`, and `getCloneItemStack` →
+  `saveToItem(tag, true)` so creative pick-block copies the state too.
+* Extending `FieldDataHolderBlock` gives those three hooks for free; a block with its own base class
+  calls the `IDropSave` static helpers instead — `IDropSave.getDrops(this, super.getDrops(state, params), params)`,
+  `IDropSave.setPlacedBy(level, pos, stack)`, `IDropSave.getCloneItemStack(stack, level, pos)` — and the
+  block entity side stays the same.
+* The block base clears the tag when the block entity wrote nothing, so an ordinary drop keeps no
+  empty NBT, and only the first matching drop is written to, so the state cannot be duplicated.
+
 ## Annotation Reference
 
 | Annotation | Purpose | Key Attributes |
@@ -306,6 +431,11 @@ Supports generic superclasses, generic interfaces (`List<T>`), multi-level inher
 | `@Strategy` | Custom change detection strategy | `value` (static field name) |
 | `@Generic` | Force generic-type factory resolution | — |
 | `@AddToManager` | Add to manager without auto sync/persist | — |
+| `@SaveToItem` | Field travels with the block's dropped item, restored on placement | — |
+
+Annotations a mod defines itself are registered with
+`FieldDefinitionStorage.registerAnnotation(...)` and read back with `getAnnotatedFields(...)` — see
+[Advanced: Extension Annotations](#advanced-extension-annotations).
 
 ## Data Flow
 

@@ -1,7 +1,11 @@
 package com.gto.datasynclib.test;
 
 import com.gto.datasynclib.*;
+import com.gto.datasynclib.block.FieldDataHolderBlock;
 import com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity;
+import com.gto.datasynclib.blockentity.IDropSave;
+import com.gto.datasynclib.blockentity.SaveToItem;
+import com.gto.datasynclib.blockentity.SaveToItemMetadata;
 import com.gto.datasynclib.datastream.codec.*;
 import com.gto.datasynclib.datastream.codec.ValueOps.Type;
 import com.gto.datasynclib.remote.RemoteInvoker;
@@ -76,6 +80,7 @@ public final class TestBlockEntityTests {
         section("codecLookupPolicy", this::codecLookupPolicy);
         section("diskRoundTrip", this::diskRoundTrip);
         section("nbtRoundTrip", this::nbtRoundTrip);
+        section("saveToItem", this::saveToItem);
         section("chunkLoadSync", this::chunkLoadSync);
         section("networkFull", this::networkFull);
         section("networkIncremental", this::networkIncremental);
@@ -113,7 +118,8 @@ public final class TestBlockEntityTests {
         // Keys come from the field name unless @SaveToDisk(key = ...) overrides it.
         for (var key : List.of("i", "uuids", "stacks", "stack", "fluid", "tanks", "directions", "uuidSet", "map", "aabb", "a",
                 "b", "ints", "floats", "intList", "object2IntMap", "handler", "handlerArray", "module",
-                "globalPos", "sectionPos", "vec3i", "withDefault", "skipped", "loaded", "tagData")) {
+                "globalPos", "sectionPos", "vec3i", "withDefault", "skipped", "loaded", "tagData", "itemOnly",
+                "itemConditional")) {
             expect("definitions.key." + key, manager.getFieldDefinition(key) != null, true);
         }
 
@@ -523,6 +529,88 @@ public final class TestBlockEntityTests {
         } else {
             expect("nbt.nonDefaultArray", true, false);
         }
+    }
+
+    /**
+     * The item payload: {@code @SaveToItem} fields travel in the dropped item's root tag and come
+     * back on placement through {@link IDropSave}.
+     *
+     * <p><b>Usage:</b> {@code be.saveToItem(tag, clone)} writes exactly the marked fields into the
+     * item tag, the GregTech Modern {@code IDropSaveMachine} shape; {@link FieldDataHolderBlock}
+     * calls it from {@code getDrops} and {@code getCloneItemStack}, and
+     * {@code be.loadFromItem(tag)} from {@code setPlacedBy}. The suite drives those two calls
+     * directly — the block hooks themselves need a {@code Level} — and covers the two attributes:
+     * {@code skipWhen} removes a field whose predicate says so, {@code clone = false} keeps a field
+     * out of the pick-block copy, and unmarked fields never reach the item at all.</p>
+     */
+    private void saveToItem() {
+        TestBlockEntity src = newEntity();
+        src.itemOnly = 42;
+        src.i = 7;
+
+        // skipWhen = "skipItemSave" → a negative value is left out of the item.
+        src.itemConditional = -1;
+        var skippedTag = new CompoundTag();
+        src.saveToItem(skippedTag, false);
+        expect("item.payloadPresent",
+                skippedTag.get(FieldDataHolderBlockEntity.ITEM_DATA_KEY) instanceof ByteArrayTag, true);
+        expect("item.versionWritten", FieldDataHolderBlockEntity.VERSION,
+                skippedTag.getInt(FieldDataHolderBlockEntity.ITEM_DATA_VERSION_KEY));
+        expect("item.skipWhenFilters", Set.of("itemOnly"), payloadKeys(skippedTag));
+
+        // A value the predicate accepts is carried.
+        src.itemConditional = 5;
+        var tag = new CompoundTag();
+        src.saveToItem(tag, false);
+        expect("item.conditionalCarried", Set.of("itemOnly", "itemConditional"), payloadKeys(tag));
+
+        // clone = false → the pick-block copy starts without that field.
+        var cloneTag = new CompoundTag();
+        src.saveToItem(cloneTag, true);
+        expect("item.cloneFilters", Set.of("itemOnly"), payloadKeys(cloneTag));
+
+        // The attributes are parsed once into the annotation's metadata, carried by AnnotatedField.
+        for (var annotated : FieldDefinitionStorage.get(TestBlockEntity.class).getAnnotatedFields(SaveToItem.class)) {
+            var name = annotated.field().getName();
+            if (!(annotated.metadata() instanceof SaveToItemMetadata metadata)) {
+                expect("item.metadata." + name, true, false);
+                continue;
+            }
+            expect("item.metadata." + name + ".saveOnClone", !name.equals("itemConditional"), metadata.saveOnClone());
+        }
+
+        // Reading the tag back applies the fields the payload carries.
+        TestBlockEntity dst = newEntity();
+        dst.loadFromItem(tag);
+        expect("item.loaded", 42, dst.itemOnly);
+        expect("item.conditionalLoaded", 5, dst.itemConditional);
+        expect("item.unmarkedUntouched", 0, dst.i);
+        // The clone payload leaves the conditional field alone.
+        TestBlockEntity cloneDst = newEntity();
+        cloneDst.loadFromItem(cloneTag);
+        expect("item.cloneLoaded", 42, cloneDst.itemOnly);
+        expect("item.cloneConditionalUntouched", 0, cloneDst.itemConditional);
+
+        // A holder that marks no field writes nothing, so the block base can drop an empty tag.
+        var plainHolder = new FieldDataHolderBlockEntity(ModBlockEntities.TEST_BLOCK_ENTITY.get(), POS,
+                Blocks.IRON_BLOCK.defaultBlockState());
+        expect("item.holderWithoutFields", plainHolder.hasItemFields(), false);
+        var plainTag = new CompoundTag();
+        plainHolder.saveToItem(plainTag, false);
+        expect("item.emptyTagStaysEmpty", true, plainTag.isEmpty());
+        plainHolder.loadFromItem(new CompoundTag()); // absent payload: no-op
+        expect("item.loadAbsentNoop", true, true);
+        expect("item.testHolderHasFields", newEntity().hasItemFields(), true);
+    }
+
+    /**
+     * Decodes the keys of an item payload tag, so a test can assert which fields it carries.
+     */
+    private Set<String> payloadKeys(CompoundTag tag) {
+        if (!(tag.get(FieldDataHolderBlockEntity.ITEM_DATA_KEY) instanceof ByteArrayTag payload)) return Set.of();
+        var data = JavaValueOps.INSTANCE.fromBytes(payload.getAsByteArray());
+        return JavaValueOps.INSTANCE.isStringMap(data)
+                ? new HashSet<>(JavaValueOps.INSTANCE.getStringMap(data).keySet()) : Set.<String>of();
     }
 
     /**

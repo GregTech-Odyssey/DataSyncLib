@@ -1,11 +1,14 @@
 package com.gto.datasynclib;
 
+import com.gto.datasynclib.blockentity.SaveToItem;
+import com.gto.datasynclib.blockentity.SaveToItemMetadata;
 import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.field.*;
 import com.gto.datasynclib.field.access.*;
 import com.gto.datasynclib.field.access.array.*;
 import com.gto.datasynclib.field.object.CustomObjCodecField;
 import com.gto.datasynclib.field.object.ObjCodecField;
+import com.gto.datasynclib.forge.DataSyncEvent;
 import com.gto.datasynclib.forge.TagSerializableAccess;
 import com.gto.datasynclib.forge.TagSerializableArrayAccess;
 import com.gto.datasynclib.network.DataSyncNetwork;
@@ -77,9 +80,10 @@ import static com.gto.datasynclib.FieldDefinitionStorage.*;
  *
  * <h3>Extending with custom types:</h3>
  * <p>Downstream mods can register additional factories, access factories, codecs,
- * and strategies by calling the static registration methods in
- * {@link FieldDefinitionStorage} and {@link DataSyncCodec} during their own mod
- * initialization.</p>
+ * strategies, and their own field annotations by calling the static registration methods in
+ * {@link FieldDefinitionStorage} ({@link FieldDefinitionStorage#registerAnnotation(Class)} makes
+ * the library record the fields a custom annotation marks) and {@link DataSyncCodec} during
+ * their own mod initialization.</p>
  *
  * <p><strong>Register before first use:</strong> the registration methods synchronize on
  * their backing table, but lookups are lock-free and the resolved factory/codec is cached
@@ -101,12 +105,17 @@ public final class DataSyncLib {
 
 
     public DataSyncLib(FMLJavaModLoadingContext context) {
+        DataSyncEvent.init();
         DataSyncCodec.init();
         DataSyncNetwork.init();
         // Built-in registration below: all of it must happen here, in mod construction, because
         // FieldDefinitionStorage caches the resolved factory per field type on first scan — a
         // registration that arrives later is ignored. Downstream mods extend the same tables
         // from their own constructor (see FieldDefinitionStorage's registration methods).
+        // The library's own extension annotation: @SaveToItem fields travel with the block item.
+        // Its attributes are parsed once per field by the annotation's metadata factory, the same
+        // entry point a downstream annotation uses.
+        registerAnnotation(SaveToItem.class, SaveToItemMetadata::create);
         // Primitive field factories (exact-type match)
         registerFactory(boolean.class, BooleanField::new);
         registerFactory(byte.class, ByteField::new);

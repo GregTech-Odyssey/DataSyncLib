@@ -10,6 +10,45 @@
 - **Versioned files**: `VersionedFriendlyByteBuf` and `FileUtil.writeVersioned`/`readVersioned` put a VarInt
   version at the head of the file (`0` is not a version the library writes, so a plain read is the fallback);
   `DiskByteBufCodecs` is the disk half of the codec set.
+- **Extension annotations**: `FieldDefinitionStorage.registerAnnotation(Class)` lets a mod hand its own field
+  annotation to the library. Scanning a class then records every field carrying it as
+  `annotation type → (definition, annotation instance, metadata)` — `FieldDefinitionStorage.AnnotatedField`,
+  read back with `getAnnotatedFields` (the storage's own read-only array, so a lookup allocates nothing),
+  `hasAnnotatedFields` and `getAnnotationTypes`. `registerAnnotation(Class, AnnotationMetadataFactory)` also
+  takes an optional factory that runs once per annotated field — `(lookup, definition, managedType, annotation)` —
+  and stores whatever it returns as `AnnotatedField#metadata()`, which is where an annotation's attributes
+  belong instead of the scan's field metadata. A registered annotation manages
+  its field on its own, like `@AddToManager`: resolved through the normal factory chain and part of the bulk
+  `writeAllToValue`/`readAllFromValue` paths, but not of automatic sync or incremental save. The annotation
+  must be runtime-retained and `FIELD`-targeted (validated at registration), and must be registered before
+  the class is first scanned — a class's storage is cached for its lifetime.
+- **`@SaveToItem` (fields that travel with the block item)**: the library registers this field annotation
+  itself through the extension-annotation entry point. The block entity side is a new `IDropSave`
+  interface (implemented by `FieldDataHolderBlockEntity`): `saveToItem(CompoundTag tag, boolean clone)`
+  writes exactly the marked fields into the item's root tag (`field_item` bytes plus the version, the same
+  carrier format a save file holds), `loadFromItem(CompoundTag tag)` reads them back, and `clone`
+  distinguishes creative pick-block from a real drop. The block side is the new `FieldDataHolderBlock`:
+  `getDrops` attaches the payload to the block's own drop (the loot table result itself is unchanged),
+  `setPlacedBy` loads it into the new block entity, and `getCloneItemStack` copies it for pick-block. A
+  marked field needs no `@SaveToDisk` — the annotation manages it — and unmarked `@SaveToDisk` fields stay
+  out of the item. Two attributes narrow the payload per field: `skipWhen` (a `(T) -> boolean` predicate
+  evaluated with the field's current value on every write, same rule as `@SaveToDisk`'s) and
+  `saveOnClone = false` (the field is left out of a creative pick-block clone but still carried by a real
+  drop; the attribute is not named `clone`, which an annotation element may not be). The attributes are
+  parsed once at scan time by the annotation's metadata factory into a `SaveToItemMetadata`, kept in
+  `AnnotatedField#metadata()` — no annotation parsing on the item path.
+- **Background sync**: `FieldDataHolderBlockEntity` no longer needs a
+  `DataSyncNetwork.syncBlockEntityToClient()` call in `tick` — `clearRemoved` registers the holder on a
+  per-side `AsyncExecutor` (new, `com.gto.datasynclib.util`, 50 ms period) that `forge.DataSyncEvent` starts
+  and stops with the server (`ServerAboutToStartEvent`/`ServerStoppedEvent`) and, on the client, with the
+  connection (login/logout). `autoSync()` then tries a sync every `getMinSyncCycle()` periods and at most once
+  per `getMaxSyncCycle()`; a failing task is logged and does not stop the others. The executor is modelled on
+  GregTech Modern's `TaskHandler` (the GTO fork's per-level handler): an intrusive linked queue so a
+  registration is one object link and no scan (no key map, no id lookup), a two-queue splice so the lock is
+  never held while a task runs, O(1) unlinking for removal, and a `TaskSubscription` handle that the holder
+  keeps so re-registering reuses the live entry instead of stacking a second loop. The holder unsubscribes in
+  `setRemoved` and `onChunkUnloaded`, so an unloaded chunk does not leave a task behind. Explicit
+  `syncBlockEntityToClient` remains supported, and is still what a plain `IFieldDataHolder` uses.
 - **Ops**: container element accessors (`ops.getInt(list, i)`, `ops.putInt(map, k, v)`, …); JSON as a
   registered custom type, with an untyped number narrowed from the literal's own digits.
 - **`ValueConverters`**: converters for `SELF` values — `builder(id, type).write(encoder).read(decoder)`, the

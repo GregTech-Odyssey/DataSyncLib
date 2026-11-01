@@ -41,6 +41,8 @@ IFieldDataHolder → LazyFieldDataManager → FieldDataManager → DataField[]
 - **🧬 泛型层级解析** — `ReflectUtil` 沿父类/接口解析完整泛型实参（如 `A<T> extends HashMap<String,T>` 可取得 `[String, T]`）
 - **♻️ Registry 全局 codec** — `Registry` 冻结时自动把流式+持久化 codec 注册进全局 `DataSyncCodec`
 - **🎯 自定义策略** — `@Strategy` 为复杂类型自定义哈希/相等性变更检测
+- **🧷 扩展注解** — 外部模组注册自己的字段注解，扫描时按注解类收集「注解 + 字段定义」配对
+- **🧳 物品携带数据** — `@SaveToItem` 字段随方块掉落物走，放置时自动读回
 
 ## 快速开始
 
@@ -170,7 +172,7 @@ public class MyEntity extends Entity implements IFieldDataHolder {
 ```
 
 > **关键要点：**
-> - 同步需要显式调用 `DataSyncNetwork.syncBlockEntityToClient()`（异步安全，可跨线程调用）
+> - `FieldDataHolderBlockEntity` 自己就会同步：它在服务端（客户端）的异步执行器上注册一个后台任务，每 `getMinSyncCycle()` 个周期尝试一次，最长 `getMaxSyncCycle()` 个周期一次。显式调用 `DataSyncNetwork.syncBlockEntityToClient()` 仍然支持（异步安全），也是普通 `IFieldDataHolder` 需要的方式
 > - `autoDetect = false` 的字段需要手动调用 `markFieldsForSync()` 才会同步
 > - 磁盘持久化需要手动调用 BlockEntity 的 `setChanged()`
 > - `syncBlockEntityToClient(be, false, true)` 中：`false`=增量同步（仅变更字段），`true`=仅检查 `autoDetect=true` 的字段
@@ -266,6 +268,95 @@ Class<?>[] args = ReflectUtil.getResolvedGenericArguments(fieldType, HashMap.cla
 
 支持父类、泛型接口（`List<T>`）、多层继承、泛型接口等任意祖先形态。
 
+### 高级用法：扩展注解
+
+外部模组可以把自己的字段注解交给库收集。注解注册之后，它就和 `@AddToManager` 一样成为字段被管理的原因；扫描类时，库会把每个带该注解的字段按注解类存起来 —— 字段上的注解实例，配对该字段的 `DataFieldDefinition`。可以再给注册传一个可选的 metadata 工厂，把注解属性的解析结果一并存在该字段的记录里。
+
+```java
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.FIELD)
+public @interface DirtyTracked {
+    String channel() default "default";
+}
+
+// 模组构造期，和工厂注册放在一起
+FieldDefinitionStorage.registerAnnotation(DirtyTracked.class,
+        (lookup, definition, type, annotation) -> annotation.channel());   // 可选：自定义 metadata
+
+public class MyBlockEntity extends FieldDataHolderBlockEntity {
+
+    @SaveToDisk
+    @DirtyTracked(channel = "energy")
+    private int energy;
+
+    @DirtyTracked(channel = "status")   // 只靠自定义注解也会被管理
+    private int status;
+}
+```
+
+读回来：
+
+```java
+var storage = FieldDefinitionStorage.get(MyBlockEntity.class);
+for (var annotated : storage.getAnnotatedFields(DirtyTracked.class)) {
+    var channel = annotated.annotation().channel();   // 注解实例
+    var parsed = (String) annotated.metadata();       // 工厂产出，扫描期算一次
+    var definition = annotated.definition();          // 该字段的定义，可直接读写
+    definition.get(blockEntity);
+}
+```
+
+* `FieldDefinitionStorage.AnnotatedField` 是 `(definition, annotation, metadata)` 三元组。一个注解可以标多个字段，一个字段也可以带多个已注册的注解。
+* metadata 工厂签名 `(lookup, definition, managedType, annotation) -> Object`：`lookup` 是字段声明类的私有访问 `Lookup`（可直接配 `ReflectUtil.createAdaptedMethodHandle` 建方法句柄），`definition` 是该字段的 `DataFieldDefinition`（`definition.field` 就是反射字段），`managedType` 是字段的管理类型（`@Conversion` 时是 `toManaged` 类型），返回值随便是什么都行，扫描时算一次就固定下来；不传工厂或返回 `null` 时 `metadata()` 为 `null`。
+* `getAnnotatedFields(...)` 直接返回类存储持有的数组 —— 不复制、只读，查询本身不构造新对象；没有匹配字段时返回共享的空数组。
+* 注册时会校验注解：必须是 `@Retention(RetentionPolicy.RUNTIME)` 且 `@Target(ElementType.FIELD)`，否则抛 `IllegalArgumentException`。重复注册是空操作。
+* 注册必须发生在目标类第一次被扫描之前（模组构造期）：类的存储是永久缓存的，后注册的注解不会回溯生效。
+* 只靠自定义注解被管理的字段只参与 `writeAllToValue`/`readAllFromValue` 这类全量路径 —— 不会自动同步，也不进增量存档，和 `@AddToManager` 完全一致。
+
+### 高级用法：随物品保存（`@SaveToItem`）
+
+方块实体被破坏时，掉落物默认不带方块数据。给字段打上 `@SaveToItem`，这些字段就随掉落物走，重新放置时读回来（实现方式对齐 GregTech Modern 的 `IDropSave`）：
+
+```java
+public class MyMachineBlockEntity extends FieldDataHolderBlockEntity {
+
+    @SaveToItem
+    private int mode;          // 破坏时写进物品，放置时恢复
+
+    @SaveToItem(skipWhen = "isUpgradeInactive", saveOnClone = false)
+    private int upgradeMode;   // 升级未生效就不进物品；创造模式克隆的物品不带
+
+    private boolean isUpgradeInactive(int mode) {
+        return mode < 0;
+    }
+
+    @SaveToDisk
+    private int energy;        // 只进世界存档，不随物品走
+}
+
+// 方块侧：三个钩子，基类全做了
+public class MyMachineBlock extends FieldDataHolderBlock {
+    public MyMachineBlock(Properties properties) { super(properties); }
+
+    @Override
+    public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
+        return new MyMachineBlockEntity(pos, state);
+    }
+}
+```
+
+* 只有被标记的字段进物品。`@SaveToItem` 自己就会管理字段（等价 `@AddToManager`），所以不必同时写 `@SaveToDisk`；两者都写时两个地方都存。
+* 物品载荷放在物品**根 tag** 的 `field_item`（字节数组）和 `field_item_dataVersion` 里，格式和存档载荷一致；物品仍是普通方块物品，不碰 `BlockEntityTag`。
+* 两个注解属性：
+  - `skipWhen = "方法名"`：每次写入物品前用字段当前值判断，返回 `true` 就不把这个字段写进物品。规则和 `@SaveToDisk(skipWhen = ...)` 相同：签名 `(T) -> boolean`，`T` 是字段的管理类型（`@Conversion` 时是 `toManaged` 后的类型），方法声明在字段所在类上。
+  - `saveOnClone = false`：只在真实掉落时携带；创造模式中键取方块的克隆物品不带它（属性不能叫 `clone`，与 `Object#clone` 重名）。
+* 方块实体实现 `IDropSave`（`FieldDataHolderBlockEntity` 已实现）：
+  - `getDrops` → `saveToItem(tag, false)`，只写本方块自己的那一个掉落物，战利品表结果本身不改；
+  - `setPlacedBy` → `loadFromItem(tag)`，放置时读回；
+  - `getCloneItemStack` → `saveToItem(tag, true)`，创造模式中键取方块也带上支持克隆的字段。
+* 继承 `FieldDataHolderBlock` 就自动有这三个钩子；方块已有自己的基类时，直接调用 `IDropSave` 的静态工具方法即可：`IDropSave.getDrops(this, super.getDrops(state, params), params)`、`IDropSave.setPlacedBy(level, pos, stack)`、`IDropSave.getCloneItemStack(stack, level, pos)`，方块实体侧完全不变。
+* 方块基类在方块实体什么都没写时会把空 tag 清掉，所以普通掉落物不会有空 NBT；一个掉落物只写一次，不会复制多份状态。
+
 ## 注解速查表
 
 | 注解 | 作用 | 常用属性 |
@@ -280,6 +371,10 @@ Class<?>[] args = ReflectUtil.getResolvedGenericArguments(fieldType, HashMap.cla
 | `@Strategy` | 自定义变更检测策略 | `value`（static 字段名） |
 | `@Generic` | 强制使用泛型工厂链 | — |
 | `@AddToManager` | 加入管理但不自动同步/持久化 | — |
+| `@SaveToItem` | 字段随方块掉落物保存，放置时恢复 | — |
+
+外部模组自己定义的注解用 `FieldDefinitionStorage.registerAnnotation(...)` 注册，再用
+`getAnnotatedFields(...)` 读回来 —— 见[高级用法：扩展注解](#高级用法扩展注解)。
 
 ## 数据流
 

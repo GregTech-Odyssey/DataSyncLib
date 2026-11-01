@@ -131,6 +131,8 @@ li { margin: 4px 0; }
             <a href="#an-synctoserver">@SyncToServer</a>
             <a href="#an-savetodisk">@SaveToDisk</a>
             <a href="#an-other">其他注解</a>
+            <a href="#an-extension">扩展注解</a>
+            <a href="#an-save-to-item">@SaveToItem</a>
         </div>
         <div class="nav-section"><div class="nav-section-title">使用指南</div>
             <a href="#field-data-holder-be">FieldDataHolderBlockEntity</a>
@@ -526,6 +528,7 @@ li { margin: 4px 0; }
         <tr><td>registerCustomGenericFactory(predicate, factory, priority)</td><td>自定义泛型谓词匹配</td></tr>
         <tr><td>registerAccessFactory / registerAccessInterfaceFactory</td><td>注册 final 字段的 Access 代理工厂</td></tr>
         <tr><td>registerStrategy(type, strategy)</td><td>注册类型的 Hash.Strategy 用于变化检测</td></tr>
+        <tr><td>registerAnnotation(annotationType)</td><td>注册外部模组自己的字段注解，扫描时按注解类收集「注解 + 字段定义」配对（见<a href="#an-extension">扩展注解</a>）</td></tr>
     </tbody>
 </table>
 
@@ -900,6 +903,75 @@ CustomTypes 直接包装原始 NBT 对象（零拷贝），而 <code>convertToDa
         <tr><td>@Strategy</td><td>FIELD</td><td>指定变化检测的 Hash.Strategy，值为静态字段名。用于自定义类型的变化比较逻辑</td></tr>
         <tr><td>@Generic</td><td>FIELD</td><td>标记字段使用泛型类型处理。当字段为泛型类型但自动检测失败时使用</td></tr>
         <tr><td>@AdditionalHolder</td><td>FIELD</td><td>标记嵌套字段：默认将其内部被注解的字段合并（拍平）到当前类的 FieldDataManager 管理；<code>childManager=true</code> 时为该子对象生成独立的 FieldDataManager 子管理器，不再拍平</td></tr>
+        <tr><td>@SaveToItem</td><td>FIELD</td><td>字段值随方块掉落物保存、放置时恢复。库已通过 <code>registerAnnotation</code> 注册；方块实体侧走 <code>IDropSave</code>，方块继承 <code>FieldDataHolderBlock</code> 即自动处理掉落/放置/创造模式取方块，战利品表不改。属性：<code>skipWhen</code>（跳过判断方法）、<code>saveOnClone</code>（是否写进克隆物品，默认 true）</td></tr>
+    </tbody>
+</table>
+
+<h3 id="an-extension">扩展注解（外部注册）</h3>
+<p>外部模组可以注册自己的字段注解：注册之后，扫描类时库会把每个带该注解的字段按注解类收集起来 —— 字段上的注解实例，配对该字段的 <code>DataFieldDefinition</code>。注册时还可以传一个可选的 metadata 工厂，把注解属性的解析结果一起存进这条记录。</p>
+<pre><code><span class="kw">@Retention</span>(RetentionPolicy.RUNTIME)
+<span class="kw">@Target</span>(ElementType.FIELD)
+<span class="kw">public @interface</span> <span class="typ">DirtyTracked</span> {
+    String channel() <span class="kw">default</span> <span class="str">"default"</span>;
+}
+
+<span class="cmt">// 模组构造期，和工厂注册放在一起；工厂可选</span>
+FieldDefinitionStorage.registerAnnotation(DirtyTracked.<span class="kw">class</span>,
+        (lookup, definition, type, annotation) -&gt; annotation.channel());
+
+<span class="cmt">// 查询某个类的字段</span>
+<span class="kw">var</span> storage = FieldDefinitionStorage.get(MyBlockEntity.<span class="kw">class</span>);
+<span class="kw">for</span> (<span class="kw">var</span> annotated : storage.getAnnotatedFields(DirtyTracked.<span class="kw">class</span>)) {
+    DirtyTracked annotation = annotated.annotation();   <span class="cmt">// 注解实例</span>
+    String parsed = (String) annotated.metadata();       <span class="cmt">// 工厂产出，扫描期算一次</span>
+    DataFieldDefinition&lt;?&gt; definition = annotated.definition(); <span class="cmt">// 该字段的定义，可直接读写</span>
+}
+</code></pre>
+<table>
+    <thead><tr><th>方法</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>registerAnnotation(annotationType)</td><td>注册一个外部注解。要求 <code>@Retention(RetentionPolicy.RUNTIME)</code> 且 <code>@Target(ElementType.FIELD)</code>，否则抛 <code>IllegalArgumentException</code>；重复注册是空操作。必须在目标类首次被扫描前调用（类存储永久缓存，后注册不回溯）</td></tr>
+        <tr><td>registerAnnotation(annotationType, metadataFactory)</td><td>同时注册一个 metadata 工厂：签名 <code>(lookup, definition, managedType, annotation) -&gt; Object</code>，每个带该注解的字段在扫描期调用一次，结果存进 <code>AnnotatedField#metadata()</code>。<code>lookup</code> 是声明类的私有访问 Lookup（可直接配 <code>ReflectUtil.createAdaptedMethodHandle</code> 建方法句柄），<code>definition</code> 是该字段的 <code>DataFieldDefinition</code>（<code>definition.field</code> 即反射字段），<code>managedType</code> 是字段管理类型（<code>@Conversion</code> 后）。不传工厂或返回 <code>null</code> 时 <code>metadata()</code> 为 <code>null</code></td></tr>
+        <tr><td>getAnnotatedFields(annotationType)</td><td>返回 <code>AnnotatedField&lt;A&gt;[]</code>，每项含 <code>annotation()</code>（注解实例）、<code>definition()</code>（该字段的定义）和 <code>metadata()</code>（工厂产出）。返回的是类存储持有的数组本身（不复制、只读），一个注解可以标多个字段，一个字段也可以带多个已注册注解；顺序为本类字段在前、父类字段在后</td></tr>
+        <tr><td>hasAnnotatedFields(annotationType)</td><td>该类的字段上是否出现某个扩展注解</td></tr>
+        <tr><td>getAnnotationTypes()</td><td>该类字段上出现过的全部扩展注解类型</td></tr>
+    </tbody>
+</table>
+<p>被扩展注解单独管理的字段（没有 <code>@SaveToDisk</code>/<code>@SyncToClient</code>/<code>@SyncToServer</code>）和 <code>@AddToManager</code> 完全一致：走正常的工厂解析，参与 <code>writeAllToValue</code>/<code>readAllFromValue</code> 这类全量路径，但不自动同步、也不进增量存档。库自己的 <code>@SaveToItem</code> 就是这么做的：它的属性由 <code>SaveToItemMetadata::create</code> 这个工厂解析成 <code>SaveToItemMetadata</code>，存在 <code>metadata()</code> 里。</p>
+
+<h3 id="an-save-to-item">@SaveToItem（随物品保存）</h3>
+<p>给字段打上 <code>@SaveToItem</code>，它的值就随方块掉落物走，重新放置时读回来；没有标记的字段（即使是 <code>@SaveToDisk</code>）不会进物品。物品载荷放在物品<strong>根 tag</strong> 的 <code>field_item</code>（字节数组）与 <code>field_item_dataVersion</code> 中，物品仍是普通方块物品。方块实体实现 <code>IDropSave</code>，方块在 <code>getDrops</code>/<code>setPlacedBy</code>/<code>getCloneItemStack</code> 里调用它（对齐 GregTech Modern 的 <code>IDropSaveMachine</code>）；继承 <code>FieldDataHolderBlock</code> 就自动拥有这三个钩子，战利品表本身不改。注解还有 <code>skipWhen</code>（每次写入前按字段当前值判断是否跳过）和 <code>saveOnClone</code>（是否写进创造模式克隆物品）两个属性。</p>
+<pre><code><span class="kw">public class</span> <span class="typ">MyMachineBlockEntity</span> <span class="kw">extends</span> <span class="typ">FieldDataHolderBlockEntity</span> {
+
+    <span class="kw">@SaveToItem</span>
+    <span class="kw">private int</span> mode;       <span class="cmt">// 破坏时写进物品，放置时恢复</span>
+
+    <span class="kw">@SaveToItem</span>(skipWhen = <span class="str">"isUpgradeInactive"</span>, saveOnClone = <span class="kw">false</span>)
+    <span class="kw">private int</span> upgradeMode; <span class="cmt">// 升级未生效不进物品；克隆物品不带</span>
+
+    <span class="kw">private boolean</span> isUpgradeInactive(<span class="kw">int</span> mode) { <span class="kw">return</span> mode &lt; <span class="num">0</span>; }
+
+    <span class="kw">@SaveToDisk</span>
+    <span class="kw">private int</span> energy;     <span class="cmt">// 只进世界存档，不随物品走</span>
+}
+
+<span class="cmt">// 方块侧：三个钩子由基类实现，方块只需提供方块实体</span>
+<span class="kw">public class</span> <span class="typ">MyMachineBlock</span> <span class="kw">extends</span> <span class="typ">FieldDataHolderBlock</span> {
+    <span class="kw">@Override</span>
+    <span class="kw">public</span> BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
+        <span class="kw">return new</span> <span class="typ">MyMachineBlockEntity</span>(pos, state);
+    }
+}
+</code></pre>
+<table>
+    <thead><tr><th>成员</th><th>说明</th></tr></thead>
+    <tbody>
+        <tr><td>@SaveToItem</td><td>字段注解。本身就是管理标记（等价 <code>@AddToManager</code>），不需要再写 <code>@SaveToDisk</code>；两者都写时两个地方都存。库在模组构造期通过 <code>FieldDefinitionStorage.registerAnnotation</code> 注册它</td></tr>
+        <tr><td>@SaveToItem#skipWhen</td><td>跳过判断方法名，签名 <code>(T) -&gt; boolean</code>（<code>T</code> 为字段的管理类型，<code>@Conversion</code> 时为 <code>toManaged</code> 类型），方法声明在字段所在类上；返回 <code>true</code> 时该字段本次不写进物品。规则与 <code>@SaveToDisk#skipWhen</code> 一致，但只影响物品载荷</td></tr>
+        <tr><td>@SaveToItem#saveOnClone</td><td>默认 <code>true</code>；设为 <code>false</code> 时真实掉落仍携带，但创造模式中键取方块的克隆物品不带这个字段（属性名不能是 <code>clone</code>，与 <code>Object#clone</code> 重名）</td></tr>
+        <tr><td>IDropSave（方块实体侧）</td><td><code>saveToItem(tag, clone)</code> 把状态写进物品根 tag；<code>loadFromItem(tag)</code> 读回；<code>modifyDrops(drops)</code> 在附加前增删掉落物；<code>clone</code> 区分创造模式取方块与真实掉落。<code>FieldDataHolderBlockEntity</code> 已实现</td></tr>
+        <tr><td>FieldDataHolderBlock（方块侧）</td><td><code>getDrops</code> → 只给本方块自己的那一个掉落物 <code>saveToItem(tag, false)</code>，写空则清掉 tag；<code>setPlacedBy</code> → 服务端 <code>loadFromItem(tag)</code>；<code>getCloneItemStack</code> → <code>saveToItem(tag, true)</code>。方块已有自己的基类时直接调 <code>IDropSave.getDrops(...)</code> / <code>IDropSave.setPlacedBy(...)</code> / <code>IDropSave.getCloneItemStack(...)</code> 这些静态方法</td></tr>
+        <tr><td>FieldDataHolderBlockEntity#hasItemFields()</td><td>该类是否有 <code>@SaveToItem</code> 标记的字段</td></tr>
     </tbody>
 </table>
 
@@ -913,6 +985,8 @@ CustomTypes 直接包装原始 NBT 对象（零拷贝），而 <code>convertToDa
         <tr><td><code>getUpdateTag()</code></td><td>覆写原版方法，将 <code>@SyncToClient</code> 字段写入 <code>"field_sync"</code> NBT 数据。新玩家进入区块时自动接收当前状态</td></tr>
         <tr><td><code>saveAdditional(tag)</code></td><td>写入 <code>VERSION</code> 和 <code>"field_save"</code> — 所有 <code>@SaveToDisk</code> 字段的序列化数据</td></tr>
         <tr><td><code>load(tag)</code></td><td>优先读取 <code>"field_sync"</code>（区块同步），否则读取 <code>"field_save"</code>（磁盘恢复）。<code>"field_sync"</code> 优先确保新玩家获取最新状态</td></tr>
+        <tr><td><code>saveToItem(tag, clone)</code></td><td>把 <code>@SaveToItem</code> 字段写进物品根 tag（<code>field_item</code> + 版本）；由 <code>FieldDataHolderBlock</code> 在掉落与创造模式取方块时调用</td></tr>
+        <tr><td><code>loadFromItem(tag)</code></td><td>从物品根 tag 读回 <code>@SaveToItem</code> 字段；由 <code>FieldDataHolderBlock#setPlacedBy</code> 在放置时调用</td></tr>
     </tbody>
 </table>
 
@@ -1042,7 +1116,7 @@ CustomTypes 直接包装原始 NBT 对象（零拷贝），而 <code>convertToDa
 <p>网络同步需要两步配合：</p>
 <ol>
     <li><strong>注解配置</strong> — 字段上设置 <code>autoDetect = true</code>（默认）时，框架自动对比新旧值检测变化；设为 <code>false</code> 时需要手动 <code>markFieldsForSync("fieldName")</code></li>
-    <li><strong>主动触发同步</strong> — 调用 <code>DataSyncNetwork.syncBlockEntityToClient(be, writeAll, autoDetectOnly)</code> 方法触发实际的网络发送</li>
+    <li><strong>触发同步</strong> — 继承 <code>FieldDataHolderBlockEntity</code> 时它已经注册了后台任务：每 <code>getMinSyncCycle()</code> 个周期尝试一次、最长 <code>getMaxSyncCycle()</code> 个周期一次，由 <code>DataSyncEvent</code> 的异步执行器驱动；也可以在 tick 里显式调用 <code>DataSyncNetwork.syncBlockEntityToClient(be, writeAll, autoDetectOnly)</code> 立即触发（普通 <code>IFieldDataHolder</code> 必须这么做）</li>
 </ol>
 <pre><code><span class="cmt">// autoDetect = true（默认）—— 自动检测变化</span>
 <span class="an">@SyncToClient</span>
