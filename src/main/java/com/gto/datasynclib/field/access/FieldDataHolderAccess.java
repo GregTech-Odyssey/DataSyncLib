@@ -4,6 +4,7 @@ import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.datastream.codec.ValueOps;
+import com.gto.datasynclib.util.ByteBufUtil;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 
@@ -53,12 +54,12 @@ public final class FieldDataHolderAccess extends AbstractFieldAccess<IFieldDataH
 
     @Override
     protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull IFieldDataHolder instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
-        data.writeByteArray(instance.getFieldDataManager().writeToNetworkBuffer(side, writeAll));
+        ByteBufUtil.writeBigPayload(data, buf -> instance.getFieldDataManager().writeToNetworkBuffer(side, buf, writeAll));
     }
 
     @Override
     protected void doReadBuffer(@NotNull LogicalSide side, @NotNull IFieldDataHolder instance, @NotNull FriendlyByteBuf data) {
-        instance.getFieldDataManager().readFromNetworkBuffer(side, data.readByteArray());
+        ByteBufUtil.readBigPayload(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, data, buf -> instance.getFieldDataManager().readFromNetworkBuffer(side, buf));
     }
 
     @Override

@@ -8,6 +8,7 @@ import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.remote.RemoteInvoker;
 import com.gto.datasynclib.remote.RemoteMethod;
 import com.gto.datasynclib.remote.RemoteRouting;
+import com.gto.datasynclib.util.ByteBufUtil;
 import com.gto.datasynclib.util.FieldDataCodec;
 import com.gto.datasynclib.util.ReflectUtil;
 import io.netty.buffer.Unpooled;
@@ -37,9 +38,18 @@ import java.util.function.Supplier;
  *       implementation for each managed field</li>
  *   <li><strong>Detects changes</strong> — via {@link #updateFieldDirtyFlags(LogicalSide, boolean)},
  *       which iterates sync fields and calls {@link DataField#detectChange} on each</li>
- *   <li><strong>Serializes for network</strong> — via {@link #writeToNetworkBuffer(LogicalSide, boolean)}
- *       and {@link #readFromNetworkBuffer(LogicalSide, byte[])}, using an index-addressing protocol
- *       where only changed fields are written (each prefixed by a VarInt field index)</li>
+ *   <li><strong>Serializes for network</strong> — via
+ *       {@link #writeToNetworkBuffer(LogicalSide, FriendlyByteBuf, boolean)} and
+ *       {@link #readFromNetworkBuffer(LogicalSide, FriendlyByteBuf)}, using an index-addressing protocol
+ *       where only changed fields are written (each prefixed by a VarInt field index). Both take the
+ *       buffer to write into / read from, so the payload goes straight into a packet (or a slice of
+ *       one) and no intermediate {@code byte[]} is built; {@link com.gto.datasynclib.util.ByteBufUtil}
+ *       covers the boundaries where an array is unavoidable</li>
+ *   <li><strong>Sends a field subset</strong> — {@link #writeFieldsToBuffer(LogicalSide,
+ *       FriendlyByteBuf, DataFieldDefinition[])} / {@link #readFieldsFromBuffer(LogicalSide,
+ *       FriendlyByteBuf, DataFieldDefinition[])} (also with field names) write and apply just the
+ *       fields the caller names, back to back: no field index and no custom sync data, so the payload
+ *       is only those values and both sides must name them in the same order</li>
  *   <li><strong>Serializes for disk</strong> — via {@link #writeToValue(ValueOps)} and
  *       {@link #readFromValue(Object, ValueOps)}, building one carrier string map that
  *       {@link JavaValueOps#toBytes(Object)} turns into the bytes of a save file</li>
@@ -193,8 +203,8 @@ public class FieldDataManager {
 
     /**
      * Encodes a remote call and returns the payload a packet carries — the remote call counterpart of
-     * {@link #writeToNetworkBuffer(LogicalSide, boolean)}. Like the sync path, this class only produces
-     * the bytes: addressing and sending them is the packet layer's job (see
+     * {@link #writeToNetworkBuffer(LogicalSide, FriendlyByteBuf, boolean)}. Like the sync path, this
+     * class only produces the bytes: addressing and sending them is the packet layer's job (see
      * {@link com.gto.datasynclib.remote.RemoteNetwork}, or a packet of your own).
      *
      * <p>Both objects are given explicitly: {@code root} is the object the packet will address (so the
@@ -386,76 +396,187 @@ public class FieldDataManager {
     }
 
     /**
-     * Writes field data to network buffer.
+     * Writes the sync payload into {@code buf} — the buffer the caller already owns, typically the packet
+     * being encoded, so the bytes are never copied through a {@code byte[]}.
      *
-     * @param side     the logical side determining which fields to serialize
-     * @param writeAll if {@code true}, all managed fields are written regardless of
-     *                 dirty state (full sync); if {@code false}, only changed fields
-     *                 that have been marked dirty are written (incremental sync)
-     * @return byte array containing the serialized data, empty if re-entrant call
+     * <p>The payload is a {@code VarInt} field index followed by that field's bytes, repeated; the
+     * caller frames it however the packet needs (see
+     * {@link com.gto.datasynclib.util.ByteBufUtil#writePayload(io.netty.buffer.ByteBuf,
+     * java.util.function.Consumer)} and its {@code writeBigPayload} sibling). A re-entrant call writes
+     * nothing, so a field codec may ask its holder for a nested payload without recursion problems.</p>
+     *
+     * @param side     the logical side deciding which field set is serialized ({@code SERVER} writes the
+     *                 {@code @SyncToClient} fields, {@code CLIENT} the {@code @SyncToServer} ones)
+     * @param buf      the buffer to write into
+     * @param writeAll {@code true} to write every field of that set, {@code false} to write only the
+     *                 fields detected as changed (incremental sync); the dirty flags of the written
+     *                 fields are cleared afterwards
      */
-    public byte @NotNull [] writeToNetworkBuffer(LogicalSide side, boolean writeAll) {
-        if (writing) return ArrayUtils.EMPTY_BYTE_ARRAY;
+    public void writeToNetworkBuffer(LogicalSide side, FriendlyByteBuf buf, boolean writeAll) {
+        if (writing) return;
         writing = true;
-        var buf = Unpooled.buffer();
-        var wrapper = new FriendlyByteBuf(buf);
         try {
             final var fields = side.isBoth() ? allFields : side.isServer() ? syncToClientFields : syncToServerFields;
-            holder.writeCustomSyncData(wrapper, writeAll);
+            holder.writeCustomSyncData(buf, writeAll);
             for (int i = 0; i < fields.length; i++) {
                 var field = fields[i];
                 var d = field.getDefinition();
                 var source = holder.getSource(d);
                 if (writeAll || field.isChanged(source)) {
-                    wrapper.writeVarInt(i);
-                    field.writeToBuffer(side, source, wrapper, writeAll);
+                    buf.writeVarInt(i);
+                    field.writeToBuffer(side, source, buf, writeAll);
                     field.clearChanged(source);
                 }
             }
-            buf.readerIndex(0);
-            byte[] data = new byte[buf.readableBytes()];
-            buf.readBytes(data);
             changed = false; // Only clear after successful serialization
-            return data;
         } finally {
-            buf.release();
             writing = false;
         }
     }
 
     /**
-     * Reads field data from network buffer
+     * Reads the sync payload written by
+     * {@link #writeToNetworkBuffer(LogicalSide, FriendlyByteBuf, boolean)} from {@code buf} and applies it.
      *
-     * @param side the logical side
-     * @param data the byte array to read from
+     * <p>The method consumes the payload to the end of the buffer's readable region, so hand it a buffer
+     * — a packet buffer, or a
+     * {@link io.netty.buffer.ByteBuf#readSlice(int) slice} of one, which shares the parent's
+     * {@code byte[]} — that holds exactly this payload. A field whose {@code scheduleUpdate = true} asks
+     * the holder for a {@link IFieldDataHolder#scheduleUpdate(LogicalSide) scheduleUpdate} once the
+     * payload has been applied.</p>
+     *
+     * @param side the logical side being read ({@code CLIENT} reads the {@code @SyncToClient} fields,
+     *             {@code SERVER} the {@code @SyncToServer} ones)
+     * @param buf  the buffer to read from
+     * @throws IndexOutOfBoundsException when a field index does not belong to that side's field set
      */
-    public void readFromNetworkBuffer(LogicalSide side, byte @NotNull [] data) {
-        if (data.length > 0) {
-            var buf = Unpooled.wrappedBuffer(data);
-            var wrapper = new FriendlyByteBuf(buf);
-            try {
-                final var fields = side.isBoth() ? allFields : side.isClient() ? syncToClientFields : syncToServerFields;
-                holder.readCustomSyncData(wrapper);
-                boolean update = false;
-                while (buf.readableBytes() > 0) {
-                    var index = wrapper.readVarInt();
-                    if (index < 0 || index >= fields.length) {
-                        throw new IndexOutOfBoundsException("Field index " + index + " out of bounds. Expected 0-" + (fields.length - 1) + " for holder " + holder.getClass().getName());
-                    }
-                    var f = fields[index];
-                    var d = f.getDefinition();
-                    f.readFromBuffer(side, holder.getSource(d), wrapper);
-                    if (d.scheduleUpdate(side)) {
-                        update = true;
-                    }
-                }
-                if (update) holder.scheduleUpdate(side);
-            } finally {
-                buf.release();
+    public void readFromNetworkBuffer(LogicalSide side, FriendlyByteBuf buf) {
+        final var fields = side.isBoth() ? allFields : side.isClient() ? syncToClientFields : syncToServerFields;
+        holder.readCustomSyncData(buf);
+        boolean update = false;
+        while (buf.readableBytes() > 0) {
+            var index = buf.readVarInt();
+            if (index < 0 || index >= fields.length) {
+                throw new IndexOutOfBoundsException("Field index " + index + " out of bounds. Expected 0-" + (fields.length - 1) + " for holder " + holder.getClass().getName());
             }
+            var f = fields[index];
+            var d = f.getDefinition();
+            f.readFromBuffer(side, holder.getSource(d), buf);
+            if (d.scheduleUpdate(side)) {
+                update = true;
+            }
+        }
+        if (update) holder.scheduleUpdate(side);
+    }
+
+    /**
+     * Writes only the given fields into {@code buf}, back to back — the "send these fields now" entry
+     * point next to the full {@link #writeToNetworkBuffer(LogicalSide, FriendlyByteBuf, boolean)}.
+     *
+     * <p>Unlike the full payload this carries no {@code VarInt} field index and no custom sync data:
+     * both sides name the same fields in the same order, so the payload is just their values. That
+     * makes it the compact form for a caller that knows exactly what it wants to push (a progress
+     * value, a GUI field) — and it means the field lists have to match: a different list on the
+     * receiving side reads the values into the wrong fields instead of failing.</p>
+     *
+     * <p>Change tracking is not involved: the listed fields are written whether or not they are
+     * flagged as changed, and no flag is cleared, so the incremental path can still send them to its
+     * own audience. Nothing is written for a field whose value is absent (a null nested holder), on
+     * either side, so the payload stays symmetric as long as both sides agree on which of the listed
+     * fields are null.</p>
+     *
+     * <p>A re-entrant call writes nothing, exactly like the full-payload method, so a field codec may
+     * ask its holder for a nested payload without recursion problems. The caller frames the payload:
+     * hand the receiver a slice of this buffer (see
+     * {@link com.gto.datasynclib.util.ByteBufUtil#writePayload(io.netty.buffer.ByteBuf,
+     * java.util.function.Consumer)} for a {@code short} length prefix, {@code writeBigPayload} for an
+     * {@code int} one) rather than copying it into a {@code byte[]}.</p>
+     *
+     * @param side   the logical side the values are written for
+     * @param buf    the buffer to write into
+     * @param fields the definitions of the fields to write, in payload order
+     * @throws IllegalArgumentException when a definition is not managed by this manager
+     */
+    public void writeFieldsToBuffer(LogicalSide side, FriendlyByteBuf buf, DataFieldDefinition<?>... fields) {
+        if (writing) return;
+        writing = true;
+        try {
+            for (var field : fields) {
+                var f = allFieldMap.get(field);
+                if (f == null) throw ReflectUtil.createFieldNotFoundException(field.key);
+                var source =  holder.getSource(field);
+                f.writeToBuffer(side, source, buf, true);
+                f.clearChanged(source);
+            }
+        } finally {
+            writing = false;
         }
     }
 
+    /**
+     * The field-name form of {@link #writeFieldsToBuffer(LogicalSide, FriendlyByteBuf,
+     * DataFieldDefinition[])}.
+     *
+     * @param fields the field names (as declared, or their {@code @SaveToDisk(key = ...)} overrides)
+     * @throws IllegalArgumentException when the class has no managed field of one of those names
+     */
+    public void writeFieldsToBuffer(LogicalSide side, FriendlyByteBuf buf, String... fields) {
+        var definitions = new DataFieldDefinition<?>[fields.length];
+        for (int i = 0; i < fields.length; i++) {
+            var definition = getFieldDefinition(fields[i]);
+            if (definition == null) throw ReflectUtil.createFieldNotFoundException(fields[i]);
+            definitions[i] = definition;
+        }
+        writeFieldsToBuffer(side, buf, definitions);
+    }
+
+    /**
+     * Reads and applies a payload written by {@link #writeFieldsToBuffer(LogicalSide, FriendlyByteBuf,
+     * DataFieldDefinition[])}.
+     *
+     * <p>The values are positional: the fields are read in the given order, so that order must be the
+     * write side's. Hand this method a buffer — the packet's own, or a
+     * {@link io.netty.buffer.ByteBuf#readSlice(int) slice} of one, which shares the parent's
+     * {@code byte[]} — holding exactly this payload. Listeners fire as they do on the full path, and a
+     * field with {@code scheduleUpdate = true} asks the holder for one
+     * {@link IFieldDataHolder#scheduleUpdate(LogicalSide) scheduleUpdate} once the payload has been
+     * applied.</p>
+     *
+     * @param side   the logical side being read ({@code CLIENT} reads the {@code @SyncToClient}
+     *               fields, {@code SERVER} the {@code @SyncToServer} ones)
+     * @param buf    the buffer to read from
+     * @param fields the definitions of the fields to read, in the order they were written
+     * @throws IllegalArgumentException when a definition is not managed by this manager
+     */
+    public void readFieldsFromBuffer(LogicalSide side, FriendlyByteBuf buf, DataFieldDefinition<?>... fields) {
+        boolean update = false;
+        for (var field : fields) {
+            var f = allFieldMap.get(field);
+            if (f == null) throw ReflectUtil.createFieldNotFoundException(field.key);
+            f.readFromBuffer(side, holder.getSource(field), buf);
+            if (field.scheduleUpdate(side)) {
+                update = true;
+            }
+        }
+        if (update) holder.scheduleUpdate(side);
+    }
+
+    /**
+     * The field-name form of {@link #readFieldsFromBuffer(LogicalSide, FriendlyByteBuf,
+     * DataFieldDefinition[])}.
+     *
+     * @param fields the field names (as declared, or their {@code @SaveToDisk(key = ...)} overrides)
+     * @throws IllegalArgumentException when the class has no managed field of one of those names
+     */
+    public void readFieldsFromBuffer(LogicalSide side, FriendlyByteBuf buf, String... fields) {
+        var definitions = new DataFieldDefinition<?>[fields.length];
+        for (int i = 0; i < fields.length; i++) {
+            var definition = getFieldDefinition(fields[i]);
+            if (definition == null) throw ReflectUtil.createFieldNotFoundException(fields[i]);
+            definitions[i] = definition;
+        }
+        readFieldsFromBuffer(side, buf, definitions);
+    }
 
     /**
      * Serializes one field for disk persistence, on the native carrier.

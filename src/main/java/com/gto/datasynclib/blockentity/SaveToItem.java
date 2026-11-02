@@ -25,15 +25,15 @@ import java.lang.annotation.Target;
  *
  * <p>The payload follows the usual field rules: the field's codec, plus the filters the write path
  * already applies — a field that also carries {@code @SaveToDisk} keeps that annotation's
- * {@code skipWhen} predicate and default-value filter, and {@link #skipWhen()} adds the item's own.
- * Fields are written
+ * {@code skipWhen} predicate and default-value filter, which is why a skip condition is written there
+ * rather than here. Fields are written
  * through {@link com.gto.datasynclib.FieldDataManager#writeFieldsToValue} and read back with
  * {@link com.gto.datasynclib.FieldDataManager#readFieldsFromValue}, i.e. the same carrier format a
  * save file holds.</p>
  *
  * <h3>Where the payload lives</h3>
- * <p>In the item's <strong>root tag</strong>, under {@code "field_item"} (a byte array) and
- * {@code "field_item_dataVersion"} (the
+ * <p>In the item's <strong>root tag</strong>, under {@code "fields"} (a byte array) and
+ * {@code "fields_dataVersion"} (the
  * {@link com.gto.datasynclib.blockentity.FieldDataHolderBlockEntity#VERSION} it was written with).
  * The item stays a plain block item — nothing goes under {@code "BlockEntityTag"} — and the block
  * reads the tag back when it is placed.</p>
@@ -62,13 +62,27 @@ import java.lang.annotation.Target;
  * always carries the real values.</p>
  *
  * <h3>Conditions and clone support</h3>
- * <p>{@link #skipWhen()} names a method evaluated every time the item is written, so a field only
- * travels while it is worth carrying; {@link #saveOnClone()} decides whether the field is also
- * written into a creative pick-block clone (the {@code clone} flag of
- * {@link IDropSave#saveToItem(net.minecraft.nbt.CompoundTag, boolean)}) or only into a real drop.
- * Both are parsed once at scan time by the annotation's metadata factory into a
+ * <p>{@link #saveOnClone()} decides whether the field is also written into a creative pick-block
+ * clone (the {@code clone} flag of
+ * {@link IDropSave#saveToItem(net.minecraft.nbt.CompoundTag, boolean)}) or only into a real drop. It
+ * is parsed once at scan time by the annotation's metadata factory into a
  * {@link SaveToItemMetadata}, stored as
  * {@link com.gto.datasynclib.FieldDefinitionStorage.AnnotatedField#metadata()}.</p>
+ *
+ * <p>A skip condition is the one of {@code @SaveToDisk}: the payload is written through
+ * {@link com.gto.datasynclib.FieldDataManager#writeFieldsToValue}, so the field's
+ * {@link SaveToDisk#skipWhen()} predicate, its default value and its {@code saveEmpty} rule apply to
+ * the item exactly as they do to a save file. Put {@code @SaveToDisk(enabled = false, skipWhen = "...")}
+ * on the field when the predicate should only gate the item:</p>
+ *
+ * <pre>{@code
+ * @SaveToItem(saveOnClone = false)
+ * @SaveToDisk(enabled = false, skipWhen = "isUpgradeInactive")
+ * private int upgradeTier;
+ * }</pre>
+ *
+ * <p>(There is no {@code skipWhen} on this annotation itself: it would duplicate the rule above while
+ * the field can only have one predicate.)</p>
  *
  * @see SaveToDisk
  * @see SaveToItemMetadata
@@ -79,20 +93,6 @@ import java.lang.annotation.Target;
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.FIELD)
 public @interface SaveToItem {
-
-    /**
-     * Name of a method that decides whether this field is skipped when the state is written into
-     * the item.
-     *
-     * <p>Method signature: {@code (T) -> boolean}, where {@code T} is the field's managed type (the
-     * {@code toManaged} type for a {@code @Conversion} field), resolved on the field's declaring
-     * class — the same rule as {@link SaveToDisk#skipWhen()}. Returning {@code true} means "do not
-     * put this field into the item". The predicate is checked on every write, so a field can travel
-     * only while it matters (e.g. while an upgrade is installed).</p>
-     *
-     * @return the name of the skip-predicate method, or an empty string for none
-     */
-    String skipWhen() default "";
 
     /**
      * Whether this field is written when the item is a <strong>clone</strong> — creative

@@ -5,10 +5,12 @@ import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.forge.DataSyncEvent;
 import com.gto.datasynclib.network.DataSyncNetwork;
+import com.gto.datasynclib.util.ByteBufUtil;
 import com.gto.datasynclib.util.TaskSubscription;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.ByteArrayTag;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -183,8 +185,10 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
      * key, newly-arriving players receive the current state without needing a separate
      * sync packet.</p>
      *
-     * <p>The data is encoded via {@link FieldDataManager#writeToNetworkBuffer(LogicalSide, boolean)}
-     * with {@code writeAll = true} (full sync).</p>
+     * <p>The data is encoded via
+     * {@link FieldDataManager#writeToNetworkBuffer(LogicalSide, FriendlyByteBuf, boolean)}
+     * with {@code writeAll = true} (full sync) into a temporary buffer, then stored as a
+     * {@code byte[]} because NBT has no buffer type.</p>
      *
      * @return the compound tag containing vanilla data plus {@code "field_sync"} byte array
      */
@@ -192,7 +196,7 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
     public @NotNull CompoundTag getUpdateTag() {
         var tag = super.getUpdateTag();
         if (getFieldDataManager().hasSyncFields(LogicalSide.SERVER)) {
-            tag.putByteArray("field_sync", getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true));
+            tag.putByteArray("field_sync", ByteBufUtil.writeToBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, buf -> getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, buf, true)));
         }
         return tag;
     }
@@ -217,7 +221,7 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
     public void load(@NotNull CompoundTag tag) {
         super.load(tag);
         if (tag.get("field_sync") instanceof ByteArrayTag byteArrayTag) {
-            getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, byteArrayTag.getAsByteArray());
+            ByteBufUtil.readFromBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, byteArrayTag.getAsByteArray(), buf -> getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, buf));
         } else {
             if (tag.get("field_save") instanceof ByteArrayTag byteArrayTag) {
                 getFieldDataManager().readFromValue(JavaValueOps.INSTANCE.fromBytes(byteArrayTag.getAsByteArray()),
@@ -253,7 +257,7 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
      * {@link SaveToItem @SaveToItem}
      */
     public boolean hasItemFields() {
-        return FieldDefinitionStorage.get(getClass()).getAnnotatedFields(SaveToItem.class).length > 0;
+        return FieldDefinitionStorage.get(getClass()).getAnnotatedFieldDefinitions(SaveToItem.class).length > 0;
     }
 
     /**
@@ -263,20 +267,15 @@ public class FieldDataHolderBlockEntity extends BlockEntity implements IFieldDat
      * fields — the same carrier format a save file holds — stored under {@link #ITEM_DATA_KEY}
      * with the {@link #VERSION} it was written with under {@link #ITEM_DATA_VERSION_KEY}.</p>
      *
-     * <p>Two per-field attributes narrow the payload here:</p>
-     * <ul>
-     *   <li>{@code @SaveToItem(saveOnClone = false)} — left out when {@code clone} is {@code true}
-     *       (creative pick-block); breaking the block still carries the field.</li>
-     *   <li>{@code @SaveToItem(skipWhen = "...")} — evaluated with the field's current value on
-     *       every write, so a value that is not worth carrying stays out.</li>
-     * </ul>
-     * <p>Both are read from the parsed {@link SaveToItemMetadata} the annotation's metadata factory
-     * stored in {@link FieldDefinitionStorage.AnnotatedField#metadata()} during the scan, not from
-     * the annotation instance itself.</p>
+     * <p>{@code @SaveToItem(saveOnClone = false)} leaves a field out when {@code clone} is
+     * {@code true} (creative pick-block); breaking the block still carries the field. It is read
+     * from the parsed {@link SaveToItemMetadata} the annotation's metadata factory stored in
+     * {@link FieldDefinitionStorage.AnnotatedField#metadata()} during the scan, not from the
+     * annotation instance itself.</p>
      *
-     * <p>Nothing is written when no field survives those filters or when every surviving field had
-     * nothing to store (skipped by its {@code skipWhen} predicate or equal to its default), so the
-     * caller can clean an empty tag off the stack afterwards.</p>
+     * <p>Nothing is written when no field survives that filter or when every surviving field had
+     * nothing to store (skipped by the {@code @SaveToDisk} predicate it also carries, or equal to
+     * its default value), so the caller can clean an empty tag off the stack afterwards.</p>
      *
      * <p>Called by {@link com.gto.datasynclib.block.FieldDataHolderBlock} when the block drops
      * ({@code clone = false}) and when creative pick-block clones it ({@code clone = true}). Called

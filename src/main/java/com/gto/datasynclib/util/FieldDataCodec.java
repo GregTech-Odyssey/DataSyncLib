@@ -103,7 +103,7 @@ public class FieldDataCodec<T> implements CombinedCodec<T>, IFieldDataHolder {
         var obj = constructor.get();
         currentInstance.set(obj);
         try {
-            fieldDataManager.get().readFromNetworkBuffer(LogicalSide.BOTH, buf.readByteArray());
+            ByteBufUtil.readBigPayload(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, buf, b -> fieldDataManager.get().readFromNetworkBuffer(LogicalSide.BOTH, b));
         } finally {
             currentInstance.remove();
         }
@@ -114,7 +114,7 @@ public class FieldDataCodec<T> implements CombinedCodec<T>, IFieldDataHolder {
     public void encode(FriendlyByteBuf buf, T obj) {
         currentInstance.set(obj);
         try {
-            buf.writeByteArray(fieldDataManager.get().writeToNetworkBuffer(LogicalSide.BOTH, true));
+            ByteBufUtil.writeBigPayload(buf, b -> fieldDataManager.get().writeToNetworkBuffer(LogicalSide.BOTH, b, true));
         } finally {
             currentInstance.remove();
         }

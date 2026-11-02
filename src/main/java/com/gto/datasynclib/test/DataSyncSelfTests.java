@@ -11,6 +11,7 @@ import com.gto.datasynclib.listener.ObjNotifiableHolder;
 import com.gto.datasynclib.remote.RemoteBlockEntityPacket;
 import com.gto.datasynclib.remote.RemoteEntityPacket;
 import com.gto.datasynclib.remote.RemoteInvoker;
+import com.gto.datasynclib.util.ByteBufUtil;
 import com.gto.datasynclib.util.ReflectUtil;
 import com.gto.datasynclib.util.Registry;
 import io.netty.buffer.Unpooled;
@@ -34,7 +35,7 @@ import java.util.function.Supplier;
  * <p>Unlike the network-driven {@link TestBlockEntity}, this harness drives the managers
  * <em>directly</em>: each test builds a fresh holder, mutates fields, serializes to disk
  * ({@code writeToValue}/{@code readFromValue}) and to the network buffer
- * ({@code writeToNetworkBuffer}/{@code readFromNetworkBuffer}), then deserializes into a new
+ * ({@code writeToNetworkBuffer}/{@code readFromNetworkBuffer}, through a buffer), then deserializes into a new
  * holder and compares field-by-field. It covers both long-standing features (primitives,
  * defaults, enum/array/collection, conversion, sync) and the newer
  * {@code @AdditionalHolder(childManager = true)} sub-manager feature.</p>
@@ -257,6 +258,39 @@ public final class DataSyncSelfTests {
         @Override
         public FieldDataManager getFieldDataManager() {
             return manager;
+        }
+    }
+
+    /**
+     * A holder for {@code enabled = false}: the annotations are present for their attributes only.
+     *
+     * <p>{@code onlyBulk} carries {@code @SaveToDisk(enabled = false)} with a default value and a
+     * load listener — it is managed (so the bulk paths carry it) and the attributes still apply, but
+     * the field never reaches the incremental save. {@code hiddenToClient}/{@code hiddenToServer}
+     * are managed but not part of either sync direction.</p>
+     */
+    static class DisabledAnnotationHolder implements IFieldDataHolder {
+
+        private final FieldDataManager manager = new FieldDataManager(this);
+
+        @SaveToDisk(enabled = false, defaultValue = "5", listener = "onSaved")
+        int onlyBulk;
+
+        @SyncToClient(enabled = false)
+        int hiddenToClient;
+
+        @SyncToServer(enabled = false)
+        int hiddenToServer;
+
+        int savedCallback = -1;
+
+        @Override
+        public FieldDataManager getFieldDataManager() {
+            return manager;
+        }
+
+        void onSaved(int value) {
+            savedCallback = value;
         }
     }
 
@@ -510,11 +544,14 @@ public final class DataSyncSelfTests {
     public void run() {
         testDiskRoundTrip();
         testNetworkRoundTrip();
+        testSubsetBufferSync();
         testNullAndDefaultSkipping();
         testOptionalCodecs();
         testRemoteCalls();
         testGenericResolution();
         testRegistryGlobalCodec();
+        testByteBufUtil();
+        testDisabledAnnotations();
         // Last: it registers an annotation, which applies to classes scanned from here on.
         testExtensionAnnotations();
         report();
@@ -568,16 +605,99 @@ public final class DataSyncSelfTests {
         src.child.ticks = 321;
         src.child.facing = Direction.SOUTH;
 
-        byte[] bytes = src.manager.writeToNetworkBuffer(LogicalSide.SERVER, true);
+        byte[] bytes = syncBytes(src.manager, LogicalSide.SERVER, true);
 
         SyncHolder dst = new SyncHolder();
-        dst.manager.readFromNetworkBuffer(LogicalSide.CLIENT, bytes);
+        readSyncBytes(dst.manager, LogicalSide.CLIENT, bytes);
 
         expect("net.counter", src.counter, dst.counter);
         expect("net.name", src.name, dst.name);
         expect("net.facing", src.facing, dst.facing);
         expect("net.child.ticks", src.child.ticks, dst.child.ticks);
         expect("net.child.facing", src.child.facing, dst.child.facing);
+    }
+
+    /**
+     * Covers the field-subset sync API: writing named fields into a caller-owned buffer (by definition
+     * and by name), reading them back through a {@link ByteBufUtil} boundary, the fact that only the
+     * listed fields travel and in the listed order, the round trip of an unmanaged name being an error,
+     * and the positionality of the payload (the same fields in another order are not the same payload).
+     */
+    private void testSubsetBufferSync() {
+        SyncHolder src = new SyncHolder();
+        src.counter = 5;
+        src.name = "subset";
+        src.facing = Direction.UP;
+
+        // Definition form: one field.
+        byte[] single = ByteBufUtil.writeToBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER,
+                buf -> src.manager.writeFieldsToBuffer(LogicalSide.SERVER, buf, src.manager.getFieldDefinition("counter")));
+
+        SyncHolder dst = new SyncHolder();
+        ByteBufUtil.readFromBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, single,
+                buf -> dst.manager.readFieldsFromBuffer(LogicalSide.CLIENT, buf, dst.manager.getFieldDefinition("counter")));
+        expect("subset.singleValue", 5, dst.counter);
+        expect("subset.singleLeavesOthers", "", dst.name);
+        expect("subset.singleLeavesFacing", Direction.WEST, dst.facing);
+
+        // Name form: several fields, in the order they are listed.
+        byte[] multi = ByteBufUtil.writeToBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER,
+                buf -> src.manager.writeFieldsToBuffer(LogicalSide.SERVER, buf, "name", "counter", "facing"));
+
+        SyncHolder multiDst = new SyncHolder();
+        ByteBufUtil.readFromBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, multi,
+                buf -> multiDst.manager.readFieldsFromBuffer(LogicalSide.CLIENT, buf, "name", "counter", "facing"));
+        expect("subset.multiName", "subset", multiDst.name);
+        expect("subset.multiCounter", 5, multiDst.counter);
+        expect("subset.multiFacing", Direction.UP, multiDst.facing);
+
+        // The payload is positional: the values are read into whatever the receiver lists, so a
+        // different order applies wrong (but not loud) values — both sides must name the same fields
+        // in the same order. Here "counter" (VarInt 5) and "enabled" (boolean false) arrive, and the
+        // receiver asks for them the other way round: the 5 is read as the boolean and the 0 byte as
+        // the VarInt, so the target ends up with the values swapped rather than with an error.
+        byte[] pair = ByteBufUtil.writeToBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER,
+                buf -> src.manager.writeFieldsToBuffer(LogicalSide.SERVER, buf, "counter", "enabled"));
+
+        SyncHolder swappedDst = new SyncHolder();
+        ByteBufUtil.readFromBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, pair,
+                buf -> swappedDst.manager.readFieldsFromBuffer(LogicalSide.CLIENT, buf, "enabled", "counter"));
+        expect("subset.orderMatters", true, swappedDst.enabled && swappedDst.counter == 0);
+
+        // A name the class does not manage is rejected on both directions.
+        boolean writeRejected = false;
+        try {
+            ByteBufUtil.writeToBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER,
+                    buf -> src.manager.writeFieldsToBuffer(LogicalSide.SERVER, buf, "nope"));
+        } catch (IllegalArgumentException e) {
+            writeRejected = true;
+        }
+        expect("subset.unknownNameWriteRejected", true, writeRejected);
+
+        boolean readRejected = false;
+        try {
+            ByteBufUtil.readFromBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, multi,
+                    buf -> multiDst.manager.readFieldsFromBuffer(LogicalSide.CLIENT, buf, "nope"));
+        } catch (IllegalArgumentException e) {
+            readRejected = true;
+        }
+        expect("subset.unknownNameReadRejected", true, readRejected);
+
+        // The subset payload is framed and read like any other nested payload: a slice from the parent
+        // buffer, no byte[] copy, and the parent's reader index lands right after it.
+        var framed = Unpooled.buffer();
+        try {
+            ByteBufUtil.writePayload(framed, buf -> src.manager.writeFieldsToBuffer(
+                    LogicalSide.SERVER, ByteBufUtil.toFriendlyByteBuf(buf), "counter"));
+            framed.writeByte(7);
+            SyncHolder framedDst = new SyncHolder();
+            ByteBufUtil.readPayload(framed, buf -> framedDst.manager.readFieldsFromBuffer(
+                    LogicalSide.CLIENT, ByteBufUtil.toFriendlyByteBuf(buf), "counter"));
+            expect("subset.framedValue", 5, framedDst.counter);
+            expect("subset.framedTail", 7, (int) framed.readByte());
+        } finally {
+            framed.release();
+        }
     }
 
     private void testNullAndDefaultSkipping() {
@@ -982,6 +1102,166 @@ public final class DataSyncSelfTests {
             expect("extensions.noThrow", true, false);
             System.err.println(LOG + "extensions exception: " + t);
         }
+    }
+
+    /**
+    /**
+     * Covers {@link ByteBufUtil}: the {@code byte[]} boundaries and the framed payloads.
+     *
+     * <p>A payload written with {@link ByteBufUtil#writeToBytes} comes back through
+     * {@link ByteBufUtil#readFromBytes} without a copy (the array is wrapped), an empty array skips the
+     * consumer; a nested payload written with {@link ByteBufUtil#writePayload} (a {@code short} prefix) or
+     * {@link ByteBufUtil#writeBigPayload} (an {@code int} prefix) is read back as a slice of the outer
+     * buffer, the outer reader index lands right after it, an empty payload skips the consumer, and a
+     * prefix that claims more bytes than are readable is rejected.</p>
+     */
+    private void testByteBufUtil() {
+        // the byte[] boundary
+        var bytes = ByteBufUtil.writeToBytes(FriendlyByteBuf::new, buf -> buf.writeVarInt(42));
+        expect("byteBuf.bytesLength", 1, bytes.length);
+        var written = new int[1];
+        ByteBufUtil.readFromBytes(FriendlyByteBuf::new, bytes, buf -> written[0] = buf.readVarInt());
+        expect("byteBuf.bytesRoundTrip", 42, written[0]);
+        var called = new boolean[1];
+        ByteBufUtil.readFromBytes(FriendlyByteBuf::new, new byte[0], buf -> called[0] = true);
+        expect("byteBuf.emptyArraySkipsConsumer", false, called[0]);
+        expect("byteBuf.getBytesEmpty", 0, ByteBufUtil.getBytes(Unpooled.buffer()).length);
+
+        // a plain buffer gets a FriendlyByteBuf view over the very same bytes, an existing view is kept
+        var underlying = Unpooled.buffer();
+        try {
+            ByteBufUtil.toFriendlyByteBuf(underlying).writeVarInt(7);
+            expect("byteBuf.viewSharesBuffer", 7, (int) underlying.readByte());
+        } finally {
+            underlying.release();
+        }
+        var friendly = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            expect("byteBuf.viewIsItself", true, ByteBufUtil.toFriendlyByteBuf(friendly) == friendly);
+        } finally {
+            friendly.release();
+        }
+
+        // a short-framed payload: the consumer reads a slice, and the buffer continues after it
+        var framed = Unpooled.buffer();
+        try {
+            ByteBufUtil.writePayload(framed, buf -> buf.writeInt(11));
+            expect("byteBuf.payloadWireLength", 6, framed.readableBytes());
+            framed.writeByte(5);
+            ByteBufUtil.readPayload(framed, buf -> expect("byteBuf.payloadValue", 11, buf.readInt()));
+            expect("byteBuf.payloadFollowedBy", 5, (int) framed.readByte());
+        } finally {
+            framed.release();
+        }
+
+        // an int prefix for a payload that may exceed the short one
+        var big = Unpooled.buffer();
+        try {
+            ByteBufUtil.writeBigPayload(big, buf -> buf.writeLong(1L << 40));
+            expect("byteBuf.bigPayloadWireLength", 12, big.readableBytes());
+            ByteBufUtil.readBigPayload(big, buf -> expect("byteBuf.bigPayloadValue", 1L << 40, buf.readLong()));
+            expect("byteBuf.bigPayloadConsumed", 0, big.readableBytes());
+        } finally {
+            big.release();
+        }
+
+        // an empty payload skips the consumer but is still consumed
+        var empty = Unpooled.buffer();
+        try {
+            ByteBufUtil.writePayload(empty, buf -> {
+            });
+            var skipped = new boolean[1];
+            ByteBufUtil.readPayload(empty, buf -> skipped[0] = true);
+            expect("byteBuf.emptyPayloadSkipped", false, skipped[0]);
+            expect("byteBuf.emptyPayloadConsumed", 0, empty.readableBytes());
+        } finally {
+            empty.release();
+        }
+
+        // a prefix claiming more bytes than are readable is rejected
+        var bad = Unpooled.buffer();
+        try {
+            bad.writeInt(8);
+            bad.writeInt(1);
+            boolean rejected = false;
+            try {
+                ByteBufUtil.readBigPayload(bad, buf -> {
+                });
+            } catch (IndexOutOfBoundsException e) {
+                rejected = true;
+            }
+            expect("byteBuf.badLengthRejected", true, rejected);
+        } finally {
+            bad.release();
+        }
+    }
+
+    /**
+     * Covers {@code enabled = false} on {@code @SaveToDisk}, {@code @SyncToClient} and
+     * {@code @SyncToServer}: the annotation keeps the field managed and keeps its attributes — key,
+     * default value, listener, skip predicate — but its own path is switched off, so the field is
+     * neither saved incrementally nor synchronized in either direction. The bulk paths still carry
+     * it, a read through them fires the disabled annotation's listener, and its default-value filter
+     * still applies to the write.
+     */
+    private void testDisabledAnnotations() {
+        DisabledAnnotationHolder holder = new DisabledAnnotationHolder();
+        var ops = JavaValueOps.INSTANCE;
+        holder.onlyBulk = 6;
+        holder.hiddenToClient = 1;
+        holder.hiddenToServer = 2;
+
+        // the incremental save path knows nothing about the field...
+        var manager = holder.getFieldDataManager();
+        expect("disabled.saveFields", false, manager.hasSaveFields());
+        expect("disabled.savePayloadEmpty", true, ops.isNull(manager.writeToValue(ops)));
+
+        // ...while the bulk path carries it, and reading it back fires the listener
+        var all = manager.writeAllToValue(ops);
+        expect("disabled.bulkCarried", true, ops.getStringMap(all).containsKey("onlyBulk"));
+        var dst = new DisabledAnnotationHolder();
+        dst.getFieldDataManager().readAllFromValue(all, ops);
+        expect("disabled.bulkRead", 6, dst.onlyBulk);
+        expect("disabled.listenerFired", 6, dst.savedCallback);
+
+        // the default-value filter of the disabled annotation still applies to that write
+        holder.onlyBulk = 5;
+        expect("disabled.defaultSkipped", false,
+                ops.getStringMap(manager.writeAllToValue(ops)).containsKey("onlyBulk"));
+
+        // neither sync direction knows the field
+        expect("disabled.syncToClient", false, manager.hasSyncFields(LogicalSide.SERVER));
+        expect("disabled.syncToServer", false, manager.hasSyncFields(LogicalSide.CLIENT));
+        expect("disabled.clientBufferEmpty", 0,
+                syncBytes(manager, LogicalSide.SERVER, true).length);
+        expect("disabled.serverBufferEmpty", 0,
+                syncBytes(manager, LogicalSide.CLIENT, true).length);
+    }
+
+    /**
+     * Serializes a holder's sync payload into a {@code byte[]} through
+     * {@link ByteBufUtil#writeToBytes(java.util.function.Function, java.util.function.Consumer)} — the shape a
+     * packet carries.
+     *
+     * @param manager  the holder's manager
+     * @param side     the direction to serialize
+     * @param writeAll {@code true} for a full write, {@code false} for an incremental one
+     * @return the payload
+     */
+    private static byte[] syncBytes(FieldDataManager manager, LogicalSide side, boolean writeAll) {
+        return ByteBufUtil.writeToBytes(FriendlyByteBuf::new, buf -> manager.writeToNetworkBuffer(side, buf, writeAll));
+    }
+
+    /**
+     * Applies a payload produced by {@link #syncBytes(FieldDataManager, LogicalSide, boolean)}; the array is
+     * wrapped, not copied.
+     *
+     * @param manager the receiving holder's manager
+     * @param side    the direction being read
+     * @param data    the payload
+     */
+    private static void readSyncBytes(FieldDataManager manager, LogicalSide side, byte[] data) {
+        ByteBufUtil.readFromBytes(FriendlyByteBuf::new, data, buf -> manager.readFromNetworkBuffer(side, buf));
     }
 
     private <T> void expect(String name, T expected, T actual) {

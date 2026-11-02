@@ -2,6 +2,7 @@ package com.gto.datasynclib.blockentity;
 
 import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.FieldDataManager;
+import com.gto.datasynclib.FieldDefinitionStorage;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.datastream.codec.JavaValueOps;
 import net.minecraft.core.BlockPos;
@@ -14,7 +15,6 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 
-import javax.swing.*;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -114,37 +114,72 @@ public interface IDropSave {
         return stack;
     }
 
-    static void saveToItem(IFieldDataHolder holder, CompoundTag tag, boolean clone,int version) {
+    /**
+     * Writes the holder's {@code @SaveToItem} fields into {@code tag}, the root tag of its item.
+     *
+     * <p>The payload is what {@link FieldDataManager#writeFieldsToValue} produces for the marked
+     * fields — the same carrier format a save file holds, so the field's {@code @SaveToDisk}
+     * {@code skipWhen} predicate, default value and {@code saveEmpty} rule apply here exactly as they
+     * do to a save — stored under {@link #ITEM_DATA_KEY} with {@code version} under
+     * {@link #ITEM_DATA_VERSION_KEY}.</p>
+     *
+     * <p>{@code @SaveToItem(saveOnClone = false)} leaves a field out when {@code clone} is
+     * {@code true}; the flag comes from the parsed {@link SaveToItemMetadata} the annotation's
+     * metadata factory stored during the scan.</p>
+     *
+     * <p>Nothing is written when no field survives the filters or when every surviving field had
+     * nothing to store, so the caller can clean an empty tag off the stack afterwards.</p>
+     *
+     * @param holder  the block entity whose fields travel with the item
+     * @param tag     the item's root tag, already writable
+     * @param clone   {@code true} for a creative pick-block clone, {@code false} for a real drop
+     * @param version the data version the payload is written with
+     */
+    static void saveToItem(IFieldDataHolder holder, CompoundTag tag, boolean clone, int version) {
         var manager = holder.getFieldDataManager();
-        var annotatedFields = manager.storage.getAnnotatedFields(SaveToItem.class);
-        if (annotatedFields.length == 0) return;
-        var keys = new ArrayList<DataFieldDefinition<?>>(annotatedFields.length);
-        for (var annotated : annotatedFields) {
-            var definition = annotated.definition();
-            // The attributes come from the annotation's metadata factory, resolved once per field at
-            // scan time; a registration without a factory simply has none.
-            var metadata = annotated.metadata() instanceof SaveToItemMetadata saveToItem ? saveToItem : null;
-            if (clone && metadata != null && !metadata.saveOnClone()) continue;
-            var source = holder.getSource(definition);
-            if (metadata != null && metadata.skip(source, definition.get(source))) continue;
-            keys.add(definition);
-        }
-        if (keys.isEmpty()) return;
+        // Both arrays come from a per-class cache: the plain one from the storage (built once with
+        // the class's scan), the clone subset from CLONE_FIELDS, so a write allocates nothing.
+        var fields = clone ? cloneFields(holder.getClass()) : allFields(holder.getClass());
+        if (fields.length == 0) return;
         var ops = JavaValueOps.create(version);
-        var data = manager.writeFieldsToValue(ops, keys.toArray(new DataFieldDefinition[0]));
+        var data = manager.writeFieldsToValue(ops, fields);
         if (ops.isNull(data)) return;
         tag.putByteArray(ITEM_DATA_KEY, ops.toBytes(data));
         tag.putInt(ITEM_DATA_VERSION_KEY, version);
     }
 
+    /**
+     * Reads the {@link #saveToItem(IFieldDataHolder, CompoundTag, boolean, int) saved} fields back
+     * from {@code tag}; a field whose key the payload does not contain is left alone, so a value that
+     * was filtered out on the way out keeps the value the fresh block entity starts with.
+     *
+     * @param holder the block entity being restored
+     * @param tag    the item's root tag; an absent payload is a no-op
+     */
     static void loadFromItem(IFieldDataHolder holder, CompoundTag tag) {
         if (!(tag.get(ITEM_DATA_KEY) instanceof ByteArrayTag bytes)) return;
-        var manager =  holder.getFieldDataManager();
-        var annotatedFields = manager.storage.getAnnotatedFields(SaveToItem.class);
-        if (annotatedFields.length == 0) return;
-        var keys = new DataFieldDefinition[annotatedFields.length];
-        for (var i = 0; i < keys.length; i++) keys[i] = annotatedFields[i].definition();
-        manager.readFieldsFromValue(JavaValueOps.INSTANCE.fromBytes(bytes.getAsByteArray()), JavaValueOps.create(tag.getInt(ITEM_DATA_VERSION_KEY)), keys);
+        var fields = allFields(holder.getClass());
+        if (fields.length == 0) return;
+        holder.getFieldDataManager().readFieldsFromValue(
+                JavaValueOps.INSTANCE.fromBytes(bytes.getAsByteArray()),
+                JavaValueOps.create(tag.getInt(ITEM_DATA_VERSION_KEY)), fields);
+    }
+
+    /**
+     * @param holderClass the block entity class
+     * @return its {@code @SaveToItem} definitions, cached on the storage
+     */
+    private static DataFieldDefinition<?>[] allFields(Class<?> holderClass) {
+        return FieldDefinitionStorage.get(holderClass).getAnnotatedFieldDefinitions(SaveToItem.class);
+    }
+
+    /**
+     * @param holderClass the block entity class
+     * @return the subset of {@link #allFields(Class)} that is also written into a creative pick-block
+     * clone, computed once per class (see {@link SaveToItemMetadata#cloneFields(Class)})
+     */
+    private static DataFieldDefinition<?>[] cloneFields(Class<?> holderClass) {
+        return SaveToItemMetadata.cloneFields(holderClass);
     }
 
 

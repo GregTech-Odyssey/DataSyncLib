@@ -39,6 +39,33 @@ import java.lang.annotation.Target;
 public @interface SaveToDisk {
 
     /**
+     * Whether this annotation's own path is switched on: {@code true} (the default) writes the field
+     * to disk and reads it back; {@code false} keeps the rest of the annotation — {@link #key()},
+     * {@link #defaultValue()}, {@link #defaultValueGetter()}, {@link #saveEmpty()},
+     * {@link #skipWhen()} and {@link #listener()} — but never writes or reads the field through the
+     * disk path.
+     *
+     * <p>This is how a field gets the attribute set without being persisted itself, e.g. a field whose
+     * value should travel with the item only
+     * ({@link com.gto.datasynclib.blockentity.SaveToItem @SaveToItem}) while the item payload keeps
+     * skipping the default value and firing the load listener:</p>
+     *
+     * <pre>{@code
+     * @SaveToItem
+     * @SaveToDisk(enabled = false, defaultValue = "0", listener = "onModeLoaded")
+     * private int mode;
+     * }</pre>
+     *
+     * <p>The field stays <em>managed</em> either way, so it is still part of the bulk
+     * {@code writeAllToValue}/{@code readAllFromValue} paths and of an extension annotation's
+     * payload; only the incremental save path and the annotations it drives are switched off.</p>
+     *
+     * @return {@code true} to persist this field on the disk path, {@code false} to only keep the
+     * annotation's attributes
+     */
+    boolean enabled() default true;
+
+    /**
      * Custom key name for storage.
      * If empty, the field name will be used as the key.
      *

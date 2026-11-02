@@ -203,6 +203,11 @@ public final class FieldDefinitionStorage {
      */
     private static final AnnotatedField<?>[] NO_ANNOTATED_FIELDS = new AnnotatedField[0];
 
+    /**
+     * The shared empty result of {@link #getAnnotatedFieldDefinitions(Class)}, for the same reason.
+     */
+    private static final DataFieldDefinition<?>[] NO_ANNOTATED_DEFINITIONS = new DataFieldDefinition[0];
+
     // ---- per-class storage cache ----
 
     private static final FieldDefinitionStorage EMPTY = new FieldDefinitionStorage();
@@ -611,6 +616,24 @@ public final class FieldDefinitionStorage {
         return annotatedFields.containsKey(annotationType);
     }
 
+    /**
+     * Returns just the definitions of the fields carrying {@code annotationType}, in the same order
+     * {@link #getAnnotatedFields(Class)} gives them.
+     *
+     * <p>This is the array an annotation consumer that only needs the fields — the item payload of
+     * {@link com.gto.datasynclib.blockentity.SaveToItem @SaveToItem}, for instance — should hold on
+     * to: it is built once with the storage and is never rebuilt, so a per-write call allocates
+     * nothing (the {@link AnnotatedField} array would have to be mapped every time).</p>
+     *
+     * @param annotationType a registered extension annotation
+     * @param <A>            the annotation type
+     * @return this class's definitions for that annotation as a read-only array, empty when there are none
+     */
+    public <A extends Annotation> DataFieldDefinition<?>[] getAnnotatedFieldDefinitions(Class<A> annotationType) {
+        var definitions = annotatedDefinitions.get(annotationType);
+        return definitions == null ? NO_ANNOTATED_DEFINITIONS : definitions;
+    }
+
     // ==================================================================================
     // Instance state
     // ==================================================================================
@@ -629,6 +652,13 @@ public final class FieldDefinitionStorage {
     final Reference2ReferenceOpenHashMap<Class<? extends Annotation>, AnnotatedField<?>[]> annotatedFields;
 
     /**
+     * The definitions of {@link #annotatedFields}, in the same order, derived once with the storage
+     * so a consumer that only needs the fields never maps the records: see
+     * {@link #getAnnotatedFieldDefinitions(Class)}.
+     */
+    final Reference2ReferenceOpenHashMap<Class<? extends Annotation>, DataFieldDefinition<?>[]> annotatedDefinitions;
+
+    /**
      * The registered extension annotation types present on this class's fields, as a read-only set
      * built once with the storage.
      */
@@ -642,6 +672,7 @@ public final class FieldDefinitionStorage {
         syncToClientDefinitions = new DataFieldDefinition[0];
         syncToServerDefinitions = new DataFieldDefinition[0];
         annotatedFields = new Reference2ReferenceOpenHashMap<>(0);
+        annotatedDefinitions = new Reference2ReferenceOpenHashMap<>(0);
         annotationTypes = Collections.unmodifiableSet(annotatedFields.keySet());
     }
 
@@ -664,7 +695,25 @@ public final class FieldDefinitionStorage {
         syncToClientDefinitions = syncToClientList.toArray(new DataFieldDefinition[0]);
         syncToServerDefinitions = syncToServerList.toArray(new DataFieldDefinition[0]);
         this.annotatedFields = groupAnnotatedFields(annotatedFields);
+        this.annotatedDefinitions = groupAnnotatedDefinitions(this.annotatedFields);
         this.annotationTypes = Collections.unmodifiableSet(this.annotatedFields.keySet());
+    }
+
+    /**
+     * Derives the definition-only view of {@code grouped}, once, so a consumer such as the item
+     * payload reads the definitions without mapping {@link AnnotatedField} records every write.
+     */
+    private static Reference2ReferenceOpenHashMap<Class<? extends Annotation>, DataFieldDefinition<?>[]> groupAnnotatedDefinitions(
+            Reference2ReferenceOpenHashMap<Class<? extends Annotation>, AnnotatedField<?>[]> grouped) {
+        var result = new Reference2ReferenceOpenHashMap<Class<? extends Annotation>, DataFieldDefinition<?>[]>(grouped.size());
+        for (var it = grouped.reference2ReferenceEntrySet().fastIterator(); it.hasNext(); ) {
+            var entry = it.next();
+            var annotated = entry.getValue();
+            var definitions = new DataFieldDefinition<?>[annotated.length];
+            for (int i = 0; i < annotated.length; i++) definitions[i] = annotated[i].definition();
+            result.put(entry.getKey(), definitions);
+        }
+        return result;
     }
 
     private static Reference2ReferenceOpenHashMap<Class<? extends Annotation>, AnnotatedField<?>[]> groupAnnotatedFields(List<AnnotatedField<?>> annotatedFields) {

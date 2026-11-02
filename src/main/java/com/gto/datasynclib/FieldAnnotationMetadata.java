@@ -222,16 +222,27 @@ final class FieldAnnotationMetadata {
         }
     }
 
+    /**
+     * @return {@code true} when the field is on the disk path: {@code @SaveToDisk} is present and
+     * its {@link SaveToDisk#enabled()} is not off, so a disabled annotation only contributes its
+     * attributes (key, default value, listener, skip predicate, saveEmpty)
+     */
     boolean isSave() {
-        return saveToDisk != null;
+        return saveToDisk != null && saveToDisk.enabled();
     }
 
+    /**
+     * @return {@code true} when the field is on the server→client path, see {@link #isSave()}
+     */
     boolean isSyncToClient() {
-        return syncToClient != null;
+        return syncToClient != null && syncToClient.enabled();
     }
 
+    /**
+     * @return {@code true} when the field is on the client→server path, see {@link #isSave()}
+     */
     boolean isSyncToServer() {
-        return syncToServer != null;
+        return syncToServer != null && syncToServer.enabled();
     }
 
     boolean hasCustomCodec() {

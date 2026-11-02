@@ -5,6 +5,7 @@ import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.datastream.codec.ValueOps;
 import com.gto.datasynclib.field.access.AbstractFieldAccess;
+import com.gto.datasynclib.util.ByteBufUtil;
 import com.gto.datasynclib.util.HashUtil;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
@@ -60,7 +61,7 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
                 data.writeBoolean(false);
             } else {
                 data.writeBoolean(true);
-                data.writeByteArray(element.getFieldDataManager().writeToNetworkBuffer(side, writeAll));
+                ByteBufUtil.writeBigPayload(data, buf -> element.getFieldDataManager().writeToNetworkBuffer(side, buf, writeAll));
             }
         }
     }
@@ -69,7 +70,13 @@ public final class FieldDataHolderArrayAccess extends AbstractFieldAccess<IField
     protected void doReadBuffer(@NotNull LogicalSide side, IFieldDataHolder @NotNull [] instance, @NotNull FriendlyByteBuf data) {
         for (var element : instance) {
             if (data.readBoolean()) {
-                if (element != null) element.getFieldDataManager().readFromNetworkBuffer(side, data.readByteArray());
+                // Always consume the framed payload, even when this side has no element,
+                // otherwise the remaining entries would be read shifted by one payload.
+                ByteBufUtil.readBigPayload(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, data, buf -> {
+                    if (element != null) {
+                        element.getFieldDataManager().readFromNetworkBuffer(side, buf);
+                    }
+                });
             }
         }
     }

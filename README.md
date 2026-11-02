@@ -350,6 +350,10 @@ for (var annotated : storage.getAnnotatedFields(DirtyTracked.class)) {
   Without a factory, or when it returns `null`, `metadata()` is `null`.
 * `getAnnotatedFields(...)` returns the array the class's storage holds — not a copy, read-only, and
   a lookup allocates nothing; a shared empty array is returned when no field matches.
+* `getAnnotatedFieldDefinitions(...)` is that array reduced to the definitions, also built once with
+  the storage: it is what an annotation consumer that only needs the fields should keep, so it never
+  has to map the records on every write (the `@SaveToItem` payload does exactly that, and caches the
+  `saveOnClone` subset per class as well).
 * Registration validates the annotation: it must be `@Retention(RetentionPolicy.RUNTIME)` and
   `@Target(ElementType.FIELD)`, otherwise `IllegalArgumentException`. Registering the same annotation
   twice is a no-op.
@@ -371,7 +375,9 @@ public class MyMachineBlockEntity extends FieldDataHolderBlockEntity {
     @SaveToItem
     private int mode;          // written into the item on break, restored on place
 
-    @SaveToItem(skipWhen = "isUpgradeInactive", saveOnClone = false)
+    // the skip condition is the @SaveToDisk one; enabled = false keeps it out of the world save
+    @SaveToItem(saveOnClone = false)
+    @SaveToDisk(enabled = false, skipWhen = "isUpgradeInactive")
     private int upgradeMode;   // left out while inactive, and out of the clone item
 
     private boolean isUpgradeInactive(int mode) {
@@ -395,17 +401,21 @@ public class MyMachineBlock extends FieldDataHolderBlock {
 
 * Only the marked fields reach the item. `@SaveToItem` manages its field on its own (like
   `@AddToManager`), so `@SaveToDisk` is not required; a field carrying both is written to both places.
-* The payload lives in the item's **root tag** under `field_item` (a byte array) and
-  `field_item_dataVersion` — the same carrier format a save file holds. The item stays a plain block
+* The payload lives in the item's **root tag** under `fields` (a byte array) and
+  `fields_dataVersion` — the same carrier format a save file holds. The item stays a plain block
   item: nothing goes under `BlockEntityTag`.
-* Two attributes narrow it per field:
-  - `skipWhen = "methodName"` — evaluated with the field's current value before every write; returning
-    `true` keeps the field out of the item. Same rule as `@SaveToDisk(skipWhen = ...)`: signature
-    `(T) -> boolean`, `T` the field's managed type (the `toManaged` type with `@Conversion`), declared
-    on the field's class.
-  - `saveOnClone = false` — only a real drop carries it; the creative pick-block clone starts without
-    it. (The attribute cannot be named `clone`: an annotation element may not share a name with a
-    method `Object` declares.)
+* `saveOnClone = false` — only a real drop carries it; the creative pick-block clone starts without
+  it. (The attribute cannot be named `clone`: an annotation element may not share a name with a
+  method `Object` declares.)
+* A skip condition is the `@SaveToDisk` one, because the item payload is written through the save
+  path: `@SaveToDisk(enabled = false, skipWhen = "isUpgradeInactive")` on the field gates the item
+  (and the default-value/`saveEmpty` rules too) without persisting anything. The same switch exists on
+  `@SyncToClient`/`@SyncToServer` for a managed field that must stay out of one sync direction.
+  ```java
+  @SaveToItem
+  @SaveToDisk(enabled = false, defaultValue = "0", listener = "onModeLoaded")
+  private int mode;   // travels with the item, skips the default, never written to the save
+  ```
 * The block entity implements `IDropSave` (`FieldDataHolderBlockEntity` already does):
   `getDrops` → `saveToItem(tag, false)` on the block's own drop (the loot table result itself is not
   changed), `setPlacedBy` → `loadFromItem(tag)`, and `getCloneItemStack` →
@@ -421,9 +431,9 @@ public class MyMachineBlock extends FieldDataHolderBlock {
 
 | Annotation | Purpose | Key Attributes |
 |------------|---------|---------------|
-| `@SyncToClient` | Server→Client sync | `autoDetect` (default true), `scheduleUpdate`, `skipWhen`, `listener` |
-| `@SyncToServer` | Client→Server sync | `autoDetect` (default true), `scheduleUpdate`, `skipWhen`, `listener` |
-| `@SaveToDisk` | Disk persistence | `key`, `skipWhen`, `saveEmpty`, `defaultValue`, `defaultValueGetter`, `listener` (disk-load callback) |
+| `@SyncToClient` | Server→Client sync | `enabled` (default true), `autoDetect` (default true), `scheduleUpdate`, `skipWhen`, `listener` |
+| `@SyncToServer` | Client→Server sync | `enabled` (default true), `autoDetect` (default true), `scheduleUpdate`, `skipWhen`, `listener` |
+| `@SaveToDisk` | Disk persistence | `enabled` (default true), `key`, `skipWhen`, `saveEmpty`, `defaultValue`, `defaultValueGetter`, `listener` (disk-load callback) |
 | `@Access` | Force access-mode (for containers) | `instanceAsValue` |
 | `@AdditionalHolder` | Recursively scan nested object fields, or spawn a dedicated child manager | `childManager` (true = child-manager mode) |
 | `@Codec` | Custom serialization | `saveCodec` / `syncCodec` / `writeToValue` / `readFromValue` etc. |
@@ -431,7 +441,7 @@ public class MyMachineBlock extends FieldDataHolderBlock {
 | `@Strategy` | Custom change detection strategy | `value` (static field name) |
 | `@Generic` | Force generic-type factory resolution | — |
 | `@AddToManager` | Add to manager without auto sync/persist | — |
-| `@SaveToItem` | Field travels with the block's dropped item, restored on placement | — |
+| `@SaveToItem` | Field travels with the block's dropped item, restored on placement | `saveOnClone` |
 
 Annotations a mod defines itself are registered with
 `FieldDefinitionStorage.registerAnnotation(...)` and read back with `getAnnotatedFields(...)` — see
@@ -448,15 +458,17 @@ Server tick()
   │     ├── FieldDataManager.updateFieldDirtyFlags(SERVER, auto)
   │     │     └── Iterate syncToClientFields → detectChange()
   │     │           Compare current vs last snapshot → mark changed
-  │     ├── FieldDataManager.writeToNetworkBuffer(SERVER, writeAll)
+  │     ├── FieldDataManager.writeToNetworkBuffer(SERVER, buf, writeAll)
   │     │     ├── writeCustomSyncData()            → custom data
-  │     │     └── Iterate: writeVarInt(index) + value → byte[]
+  │     │     └── Iterate: writeVarInt(index) + value directly into the buffer
+  │     ├── ByteBufUtil.writeToBytes(FriendlyByteBuf::new, …) → packet byte[]
   │     └── CHANNEL.send(TRACKING_CHUNK, packet)
   │
 Client receive
   ├── handleBlockEntity()          (single handler; direction resolved from getOriginationSide())
         ├── applyBlockEntitySyncData(level, pos, data, CLIENT)
-        │     └── FieldDataManager.readFromNetworkBuffer(CLIENT, data)
+        │     └── ByteBufUtil.readFromBytes(FriendlyByteBuf::new, data, …)
+        │     └── FieldDataManager.readFromNetworkBuffer(CLIENT, buf)
         │           ├── readCustomSyncData()
         │           ├── while buf: readVarInt(index) → field.readFromBuffer()
         │           └── scheduleUpdate=true → scheduleUpdate()

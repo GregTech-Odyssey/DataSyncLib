@@ -309,6 +309,7 @@ for (var annotated : storage.getAnnotatedFields(DirtyTracked.class)) {
 * `FieldDefinitionStorage.AnnotatedField` 是 `(definition, annotation, metadata)` 三元组。一个注解可以标多个字段，一个字段也可以带多个已注册的注解。
 * metadata 工厂签名 `(lookup, definition, managedType, annotation) -> Object`：`lookup` 是字段声明类的私有访问 `Lookup`（可直接配 `ReflectUtil.createAdaptedMethodHandle` 建方法句柄），`definition` 是该字段的 `DataFieldDefinition`（`definition.field` 就是反射字段），`managedType` 是字段的管理类型（`@Conversion` 时是 `toManaged` 类型），返回值随便是什么都行，扫描时算一次就固定下来；不传工厂或返回 `null` 时 `metadata()` 为 `null`。
 * `getAnnotatedFields(...)` 直接返回类存储持有的数组 —— 不复制、只读，查询本身不构造新对象；没有匹配字段时返回共享的空数组。
+* `getAnnotatedFieldDefinitions(...)` 是同一批字段只留定义的数组，同样在建存储时一次算好：只关心字段的消费方（比如 `@SaveToItem` 的物品载荷）应该拿它，这样每次写入都不用再把记录映射一遍；物品载荷连 `saveOnClone` 的子集也按类缓存了。
 * 注册时会校验注解：必须是 `@Retention(RetentionPolicy.RUNTIME)` 且 `@Target(ElementType.FIELD)`，否则抛 `IllegalArgumentException`。重复注册是空操作。
 * 注册必须发生在目标类第一次被扫描之前（模组构造期）：类的存储是永久缓存的，后注册的注解不会回溯生效。
 * 只靠自定义注解被管理的字段只参与 `writeAllToValue`/`readAllFromValue` 这类全量路径 —— 不会自动同步，也不进增量存档，和 `@AddToManager` 完全一致。
@@ -323,7 +324,9 @@ public class MyMachineBlockEntity extends FieldDataHolderBlockEntity {
     @SaveToItem
     private int mode;          // 破坏时写进物品，放置时恢复
 
-    @SaveToItem(skipWhen = "isUpgradeInactive", saveOnClone = false)
+    // 跳过条件用 @SaveToDisk 那条；enabled = false 让它不进世界存档
+    @SaveToItem(saveOnClone = false)
+    @SaveToDisk(enabled = false, skipWhen = "isUpgradeInactive")
     private int upgradeMode;   // 升级未生效就不进物品；创造模式克隆的物品不带
 
     private boolean isUpgradeInactive(int mode) {
@@ -346,10 +349,14 @@ public class MyMachineBlock extends FieldDataHolderBlock {
 ```
 
 * 只有被标记的字段进物品。`@SaveToItem` 自己就会管理字段（等价 `@AddToManager`），所以不必同时写 `@SaveToDisk`；两者都写时两个地方都存。
-* 物品载荷放在物品**根 tag** 的 `field_item`（字节数组）和 `field_item_dataVersion` 里，格式和存档载荷一致；物品仍是普通方块物品，不碰 `BlockEntityTag`。
-* 两个注解属性：
-  - `skipWhen = "方法名"`：每次写入物品前用字段当前值判断，返回 `true` 就不把这个字段写进物品。规则和 `@SaveToDisk(skipWhen = ...)` 相同：签名 `(T) -> boolean`，`T` 是字段的管理类型（`@Conversion` 时是 `toManaged` 后的类型），方法声明在字段所在类上。
-  - `saveOnClone = false`：只在真实掉落时携带；创造模式中键取方块的克隆物品不带它（属性不能叫 `clone`，与 `Object#clone` 重名）。
+* 物品载荷放在物品**根 tag** 的 `fields`（字节数组）和 `fields_dataVersion` 里，格式和存档载荷一致；物品仍是普通方块物品，不碰 `BlockEntityTag`。
+* `saveOnClone = false`：只在真实掉落时携带；创造模式中键取方块的克隆物品不带它（属性不能叫 `clone`，与 `Object#clone` 重名）。
+* 跳过条件用的就是 `@SaveToDisk` 那条：物品载荷走的是存档同一条写入路径，所以 `@SaveToDisk(enabled = false, skipWhen = "isUpgradeInactive")` 既能挡住物品、又能用默认值/`saveEmpty` 规则，同时不落盘。`@SyncToClient` / `@SyncToServer` 也有同样的开关，用来让一个受管理的字段不参与某个方向的同步。
+  ```java
+  @SaveToItem
+  @SaveToDisk(enabled = false, defaultValue = "0", listener = "onModeLoaded")
+  private int mode;   // 随物品走、等于默认值就不进载荷、永远不写存档
+  ```
 * 方块实体实现 `IDropSave`（`FieldDataHolderBlockEntity` 已实现）：
   - `getDrops` → `saveToItem(tag, false)`，只写本方块自己的那一个掉落物，战利品表结果本身不改；
   - `setPlacedBy` → `loadFromItem(tag)`，放置时读回；
@@ -361,9 +368,9 @@ public class MyMachineBlock extends FieldDataHolderBlock {
 
 | 注解 | 作用 | 常用属性 |
 |------|------|---------|
-| `@SyncToClient` | 服务端→客户端同步 | `autoDetect`（默认 true）、`scheduleUpdate`、`skipWhen`、`listener` |
-| `@SyncToServer` | 客户端→服务端同步 | `autoDetect`（默认 true）、`scheduleUpdate`、`skipWhen`、`listener` |
-| `@SaveToDisk` | 磁盘持久化 | `key`（自定义键名）、`skipWhen`、`saveEmpty`、`defaultValue`、`listener`（磁盘加载回调） |
+| `@SyncToClient` | 服务端→客户端同步 | `enabled`（默认 true）、`autoDetect`（默认 true）、`scheduleUpdate`、`skipWhen`、`listener` |
+| `@SyncToServer` | 客户端→服务端同步 | `enabled`（默认 true）、`autoDetect`（默认 true）、`scheduleUpdate`、`skipWhen`、`listener` |
+| `@SaveToDisk` | 磁盘持久化 | `enabled`（默认 true）、`key`（自定义键名）、`skipWhen`、`saveEmpty`、`defaultValue`、`listener`（磁盘加载回调） |
 | `@Access` | 强制使用访问模式（容器类） | `instanceAsValue` |
 | `@AdditionalHolder` | 递归扫描嵌套对象字段，或为子对象生成独立子管理器 | `childManager`（true=子管理器模式） |
 | `@Codec` | 自定义序列化方式 | `saveCodec` / `syncCodec` / `writeToValue` 等 |
@@ -371,7 +378,7 @@ public class MyMachineBlock extends FieldDataHolderBlock {
 | `@Strategy` | 自定义变更检测策略 | `value`（static 字段名） |
 | `@Generic` | 强制使用泛型工厂链 | — |
 | `@AddToManager` | 加入管理但不自动同步/持久化 | — |
-| `@SaveToItem` | 字段随方块掉落物保存，放置时恢复 | — |
+| `@SaveToItem` | 字段随方块掉落物保存，放置时恢复 | `saveOnClone` |
 
 外部模组自己定义的注解用 `FieldDefinitionStorage.registerAnnotation(...)` 注册，再用
 `getAnnotatedFields(...)` 读回来 —— 见[高级用法：扩展注解](#高级用法扩展注解)。
@@ -387,15 +394,17 @@ public class MyMachineBlock extends FieldDataHolderBlock {
   │     ├── FieldDataManager.updateFieldDirtyFlags(SERVER, auto)
   │     │     └── 遍历 syncToClientFields → detectChange()
   │     │           比较当前值与上次快照 → 标记 changed
-  │     ├── FieldDataManager.writeToNetworkBuffer(SERVER, writeAll)
+  │     ├── FieldDataManager.writeToNetworkBuffer(SERVER, buf, writeAll)
   │     │     ├── writeCustomSyncData()         → 自定义数据
-  │     │     └── 遍历: writeVarInt(索引) + 字段值 → byte[]
+  │     │     └── 遍历: writeVarInt(索引) + 字段值，直接写进传入的 buffer
+  │     ├── ByteBufUtil.writeToBytes(FriendlyByteBuf::new, …) → 包的 byte[]
   │     └── CHANNEL.send(TRACKING_CHUNK, packet)
   │
 客户端接收
   ├── handleBlockEntity()       （单一处理器，方向由 getOriginationSide() 判定）
         ├── applyBlockEntitySyncData(level, pos, data, CLIENT)
-        │     └── FieldDataManager.readFromNetworkBuffer(CLIENT, data)
+        │     └── ByteBufUtil.readFromBytes(FriendlyByteBuf::new, data, …)（零拷贝视图）
+        │     └── FieldDataManager.readFromNetworkBuffer(CLIENT, buf)
         │           ├── readCustomSyncData()
         │           ├── while buf: readVarInt(索引) → field.readFromBuffer()
         │           └── scheduleUpdate=true → scheduleUpdate()

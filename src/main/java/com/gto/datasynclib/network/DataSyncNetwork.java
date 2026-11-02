@@ -8,9 +8,11 @@ import com.gto.datasynclib.remote.RemoteBlockEntityPacket;
 import com.gto.datasynclib.remote.RemoteEntityPacket;
 import com.gto.datasynclib.remote.RemoteInvoker;
 import com.gto.datasynclib.remote.RemoteNetwork;
+import com.gto.datasynclib.util.ByteBufUtil;
 import lombok.experimental.UtilityClass;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
@@ -113,7 +115,7 @@ public class DataSyncNetwork {
     private void applyBlockEntitySyncData(@NotNull Level level, @NotNull BlockPos pos, byte @NotNull [] data, LogicalSide side) {
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof IFieldDataHolder holder && data.length > 0) {
-            holder.getFieldDataManager().readFromNetworkBuffer(side, data);
+            ByteBufUtil.readFromBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, data, buf -> holder.getFieldDataManager().readFromNetworkBuffer(side, buf));
             if (side.isServer()) {
                 be.setChanged();
             }
@@ -143,7 +145,7 @@ public class DataSyncNetwork {
     private void applyEntitySyncData(@NotNull Level level, int entityId, byte @NotNull [] data, LogicalSide side) {
         Entity entity = level.getEntity(entityId);
         if (entity instanceof IFieldDataHolder holder && data.length > 0) {
-            holder.getFieldDataManager().readFromNetworkBuffer(side, data);
+            ByteBufUtil.readFromBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, data, buf -> holder.getFieldDataManager().readFromNetworkBuffer(side, buf));
         }
     }
 
@@ -163,7 +165,7 @@ public class DataSyncNetwork {
                 && be.getLevel() instanceof ServerLevel level
                 && holder.getFieldDataManager().hasSyncFields(LogicalSide.SERVER)
                 && holder.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, autoDetectOnly)) {
-            byte[] data = holder.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, all);
+            byte[] data = ByteBufUtil.writeToBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, buf -> holder.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, buf, all));
             var packet = new BlockEntitySyncPacket(be.getBlockPos(), data);
             level.getServer().execute(() ->
                     CHANNEL.send(PacketDistributor.TRACKING_CHUNK.with(() -> level.getChunkAt(be.getBlockPos())), packet));
@@ -187,7 +189,7 @@ public class DataSyncNetwork {
         if (be instanceof IFieldDataHolder holder
                 && holder.getFieldDataManager().hasSyncFields(LogicalSide.CLIENT)
                 && holder.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.CLIENT, autoDetectOnly)) {
-            byte[] data = holder.getFieldDataManager().writeToNetworkBuffer(LogicalSide.CLIENT, all);
+            byte[] data = ByteBufUtil.writeToBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, buf -> holder.getFieldDataManager().writeToNetworkBuffer(LogicalSide.CLIENT, buf, all));
             var packet = new BlockEntitySyncPacket(be.getBlockPos(), data);
             Minecraft.getInstance().execute(() -> CHANNEL.sendToServer(packet));
         }
@@ -210,7 +212,7 @@ public class DataSyncNetwork {
                 && entity.level() instanceof ServerLevel level
                 && holder.getFieldDataManager().hasSyncFields(LogicalSide.SERVER)
                 && holder.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, autoDetectOnly)) {
-            byte[] data = holder.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, all);
+            byte[] data = ByteBufUtil.writeToBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, buf -> holder.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, buf, all));
             var packet = new EntitySyncPacket(entity.getId(), data);
             level.getServer().execute(() ->
                     CHANNEL.send(PacketDistributor.TRACKING_ENTITY.with(() -> entity), packet));
@@ -233,7 +235,7 @@ public class DataSyncNetwork {
         if (entity instanceof IFieldDataHolder holder
                 && holder.getFieldDataManager().hasSyncFields(LogicalSide.CLIENT)
                 && holder.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.CLIENT, autoDetectOnly)) {
-            byte[] data = holder.getFieldDataManager().writeToNetworkBuffer(LogicalSide.CLIENT, all);
+            byte[] data = ByteBufUtil.writeToBytes(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, buf -> holder.getFieldDataManager().writeToNetworkBuffer(LogicalSide.CLIENT, buf, all));
             var packet = new EntitySyncPacket(entity.getId(), data);
             Minecraft.getInstance().execute(() -> CHANNEL.sendToServer(packet));
         }

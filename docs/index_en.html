@@ -489,12 +489,31 @@ li { margin: 4px 0; }
     <thead><tr><th>Method</th><th>Description</th></tr></thead>
     <tbody>
         <tr><td>updateFieldDirtyFlags(side, autoDetectOnly)</td><td>Iterates sync fields calling detectChange. Returns true if any change or dirty flag found</td></tr>
-        <tr><td>writeToNetworkBuffer(side, writeAll)</td><td>Serializes dirty fields to byte[]. writeAll=true writes all fields</td></tr>
-        <tr><td>readFromNetworkBuffer(side, data)</td><td>Deserializes byte[] and restores field values, triggers listener and scheduleUpdate</td></tr>
+        <tr><td>writeToNetworkBuffer(side, buf, writeAll)</td><td>Writes the sync payload straight into a caller-provided <code>FriendlyByteBuf</code> (the packet's own buffer, or a slice of it): a VarInt field index plus that field's bytes per entry. writeAll=true writes every field, false only the changed ones; the dirty flags of the written fields are cleared</td></tr>
+        <tr><td>readFromNetworkBuffer(side, buf)</td><td>Reads a <code>FriendlyByteBuf</code> up to its readable end and restores the fields, triggering listener and scheduleUpdate; hand it <code>buf.readSlice(len)</code> to decode in place (the slice shares its parent's byte[], no copy)</td></tr>
+        <tr><td>writeFieldToValue(field, ops) / writeFieldsToValue(ops, fields...)</td><td>The disk form of chosen fields: one field returns a carrier value, several return a key→value string map (filtered by the <code>@SaveToDisk</code> skipWhen/default/saveEmpty rules)</td></tr>
+        <tr><td>readFieldFromValue(data, ops, field) / readFieldsFromValue(data, ops, fields...)</td><td>The read side of the pair above; fields absent from the payload keep their value</td></tr>
+        <tr><td>writeFieldsToBuffer(side, buf, fields...)</td><td>Writes only the named fields (definitions or field names) into the buffer, back to back: no field index, no custom sync data, so it is the compact "push these fields now" payload. Values are positional — both sides name the same fields in the same order</td></tr>
+        <tr><td>readFieldsFromBuffer(side, buf, fields...)</td><td>Applies such a payload in that same order, through the fields' listeners and the scheduleUpdate path; fields resolve through the manager's map, so an unmanaged name is rejected</td></tr>
         <tr><td>writeToValue()</td><td>Serializes all @SaveToDisk fields to carrier string map</td></tr>
         <tr><td>readFromValue(data, JavaValueOps.create(dataVersion))</td><td>Deserializes and restores all persisted fields from carrier string map</td></tr>
         <tr><td>markFieldsForSync(fields...)</td><td>Marks fields as dirty by DataFieldDefinition or field name string</td></tr>
         <tr><td>hasSyncFields(side) / hasSaveFields()</td><td>Query whether managed fields of the given type exist</td></tr>
+    </tbody>
+</table>
+
+<h3 id="bytebuf-util">ByteBufUtil (buffer / byte[] boundaries)</h3>
+<p>Sync payloads are read and written in place in a <code>FriendlyByteBuf</code>; only a payload that must exist as an array — a packet's bytes, an NBT byte array — goes through <code>ByteBufUtil</code>. Reads always hand out a <code>readSlice</code> child buffer that shares its parent's byte[].</p>
+<table>
+    <thead><tr><th>Method</th><th>Description</th></tr></thead>
+    <tbody>
+        <tr><td>toFriendlyByteBuf(buf)</td><td>Returns the argument when it already is a <code>FriendlyByteBuf</code>, otherwise a view over it (no bytes copied)</td></tr>
+        <tr><td>FRIENDLY_BYTE_BUF_WRAPPER</td><td>A ready-made wrapper constant (<code>FriendlyByteBuf::new</code>) for the <code>wrapper</code> parameters above</td></tr>
+        <tr><td>getBytes(buf)</td><td>Copies the buffer's readable bytes into a <code>byte[]</code> (a shared empty array when there are none)</td></tr>
+        <tr><td>writeToBytes(consumer) / writeToBytes(wrapper, consumer)</td><td>Writes into a temporary buffer and returns its bytes; the <code>wrapper</code> form gives the consumer a <code>FriendlyByteBuf</code> view (<code>FriendlyByteBuf::new</code>)</td></tr>
+        <tr><td>readFromBytes(wrapper, data, consumer) / readFromBytes(data, consumer)</td><td>Wraps the <code>byte[]</code> (no copy) and hands it to the consumer; an empty array is skipped</td></tr>
+        <tr><td>writePayload(buf, consumer) / readPayload(buf, consumer)</td><td>A nested payload framed with a <code>short</code> length (≤65535); the reader gets a slice, and the outer reader index lands right after it</td></tr>
+        <tr><td>writeBigPayload(buf, consumer) / readBigPayload(buf, consumer)</td><td>The same with an <code>int</code> length prefix</td></tr>
     </tbody>
 </table>
 
@@ -854,6 +873,7 @@ CustomTypes <strong>wraps</strong> the original NBT object directly (zero-copy),
 <table>
     <thead><tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
     <tbody>
+        <tr><td>enabled</td><td>boolean</td><td>true</td><td>Whether this annotation's sync path is on. With <code>false</code> the field stays managed and the other attributes (autoDetect, scheduleUpdate, skipWhen, listener) are still parsed, but the field is never sent in this direction</td></tr>
         <tr><td>scheduleUpdate</td><td>boolean</td><td>false</td><td>Whether to trigger IFieldDataHolder.scheduleUpdate() on change</td></tr>
         <tr><td>autoDetect</td><td>boolean</td><td>true</td><td>Auto-detect changes (via dirty flag/value comparison). Set false to require manual markFieldsForSync</td></tr>
         <tr><td>skipWhen</td><td>String</td><td>""</td><td>Skip-predicate method name, signature T→boolean. Returning true skips this field for this sync round</td></tr>
@@ -866,6 +886,7 @@ CustomTypes <strong>wraps</strong> the original NBT object directly (zero-copy),
 <table>
     <thead><tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
     <tbody>
+        <tr><td>enabled</td><td>boolean</td><td>true</td><td>Whether this annotation's sync path is on. With <code>false</code> the field stays managed and the other attributes are still parsed, but the field is never sent in this direction</td></tr>
         <tr><td>autoDetect</td><td>boolean</td><td>true</td><td>Whether this field takes part in automatic change detection (<code>updateFieldDirtyFlags(side, autoDetectOnly=true)</code>). Set false to require manual markFieldsForSync</td></tr>
         <tr><td>scheduleUpdate</td><td>boolean</td><td>false</td><td>Trigger server-side <code>scheduleUpdate(LogicalSide)</code> after receiving sync</td></tr>
         <tr><td>skipWhen</td><td>String</td><td>""</td><td>Skip-predicate method name, signature T→boolean. Returning true skips this field for this sync round</td></tr>
@@ -878,6 +899,7 @@ CustomTypes <strong>wraps</strong> the original NBT object directly (zero-copy),
 <table>
     <thead><tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
     <tbody>
+        <tr><td>enabled</td><td>boolean</td><td>true</td><td>Whether the disk path is on. With <code>false</code> the field stays managed and key / defaultValue / defaultValueGetter / saveEmpty / skipWhen / listener are still parsed and apply to the item payload, but the world save never stores it</td></tr>
         <tr><td>key</td><td>String</td><td>""</td><td>Custom storage key name; uses field name if empty</td></tr>
         <tr><td>skipWhen</td><td>String</td><td>""</td><td>Skip-predicate method name; returning true keeps the field out of the saved data</td></tr>
         <tr><td>saveEmpty</td><td>boolean</td><td>false</td><td>Whether to write null/empty collection/empty array values</td></tr>
@@ -898,7 +920,7 @@ CustomTypes <strong>wraps</strong> the original NBT object directly (zero-copy),
         <tr><td>@Strategy</td><td>FIELD</td><td>Specifies the Hash.Strategy for change detection, referencing a static field by name</td></tr>
         <tr><td>@Generic</td><td>FIELD</td><td>Forces generic type handling for the field. Use when the field is generic but auto-detection fails</td></tr>
         <tr><td>@AdditionalHolder</td><td>FIELD</td><td>Marks a nested field: by default its internally annotated fields are flattened into the current class's FieldDataManager; with <code>childManager=true</code> the sub-object gets its own dedicated FieldDataManager child manager and is not flattened</td></tr>
-        <tr><td>@SaveToItem</td><td>FIELD</td><td>The field value is saved into the block's dropped item and restored on placement. The library registers it through <code>registerAnnotation</code>; the block entity side is <code>IDropSave</code>, and extending <code>FieldDataHolderBlock</code> handles drop/placement/creative pick-block, leaving the loot table unchanged. Attributes: <code>skipWhen</code> (skip predicate), <code>saveOnClone</code> (write into a clone item, default true)</td></tr>
+        <tr><td>@SaveToItem</td><td>FIELD</td><td>The field value is saved into the block's dropped item and restored on placement. The library registers it through <code>registerAnnotation</code>; the block entity side is <code>IDropSave</code>, and extending <code>FieldDataHolderBlock</code> handles drop/placement/creative pick-block, leaving the loot table unchanged. Attribute: <code>saveOnClone</code> (write into a clone item, default true); the skip condition is <code>@SaveToDisk(skipWhen = ...)</code></td></tr>
     </tbody>
 </table>
 
@@ -928,6 +950,7 @@ FieldDefinitionStorage.registerAnnotation(DirtyTracked.<span class="kw">class</s
         <tr><td>registerAnnotation(annotationType)</td><td>Registers a mod's own annotation. It must be <code>@Retention(RetentionPolicy.RUNTIME)</code> and <code>@Target(ElementType.FIELD)</code>, otherwise <code>IllegalArgumentException</code> is thrown; registering twice is a no-op. Register before the target class is first scanned — a class's storage is cached for its lifetime, so a later registration is not retroactive</td></tr>
         <tr><td>registerAnnotation(annotationType, metadataFactory)</td><td>Also registers a metadata factory: signature <code>(lookup, definition, managedType, annotation) -&gt; Object</code>, called once per annotated field during the scan and stored as <code>AnnotatedField#metadata()</code>. <code>lookup</code> is a private-access Lookup for the declaring class (usable with <code>ReflectUtil.createAdaptedMethodHandle</code>), <code>definition</code> is the field's <code>DataFieldDefinition</code> (<code>definition.field</code> is the reflected field) and <code>managedType</code> is the field's managed type (the <code>toManaged</code> type with <code>@Conversion</code>). Without a factory, or when it returns <code>null</code>, <code>metadata()</code> is <code>null</code></td></tr>
         <tr><td>getAnnotatedFields(annotationType)</td><td>Returns <code>AnnotatedField&lt;A&gt;[]</code>; each entry exposes <code>annotation()</code> (the annotation instance), <code>definition()</code> (that field's definition) and <code>metadata()</code> (the factory's result). The array is the storage's own (not copied, read-only). One annotation may mark several fields and one field may carry several registered annotations; the class's own fields come first, inherited ones after</td></tr>
+        <tr><td>getAnnotatedFieldDefinitions(annotationType)</td><td>The same fields reduced to <code>DataFieldDefinition&lt;?&gt;[]</code>, also built once with the storage: a consumer that only needs the fields (the item payload, for instance) keeps it and never maps the <code>AnnotatedField</code> records again</td></tr>
         <tr><td>hasAnnotatedFields(annotationType)</td><td>Whether any field of the class carries that extension annotation</td></tr>
         <tr><td>getAnnotationTypes()</td><td>All extension annotation types present on the class's fields</td></tr>
     </tbody>
@@ -935,14 +958,17 @@ FieldDefinitionStorage.registerAnnotation(DirtyTracked.<span class="kw">class</s
 <p>A field managed by the extension annotation alone (with no <code>@SaveToDisk</code>/<code>@SyncToClient</code>/<code>@SyncToServer</code>) behaves exactly like <code>@AddToManager</code>: it is resolved through the normal factory chain and takes part in the bulk <code>writeAllToValue</code>/<code>readAllFromValue</code> paths, but is never synced automatically or saved incrementally. The library's own <code>@SaveToItem</code> works this way: its attributes are parsed by the <code>SaveToItemMetadata::create</code> factory into a <code>SaveToItemMetadata</code> kept in <code>metadata()</code>.</p>
 
 <h3 id="an-save-to-item">@SaveToItem (state carried by the item)</h3>
-<p>Mark a field with <code>@SaveToItem</code> and its value travels with the block's dropped item, coming back when the item is placed; unmarked fields (even <code>@SaveToDisk</code> ones) stay out of the item. The payload lives in the item's <strong>root tag</strong> under <code>field_item</code> (a byte array) and <code>field_item_dataVersion</code>, so the item stays a plain block item. The block entity implements <code>IDropSave</code> and the block calls it from <code>getDrops</code>/<code>setPlacedBy</code>/<code>getCloneItemStack</code> — the GregTech Modern <code>IDropSaveMachine</code> shape. Extending <code>FieldDataHolderBlock</code> provides all three hooks; the loot table itself is not changed. The annotation also carries <code>skipWhen</code> (a predicate evaluated on every write) and <code>saveOnClone</code> (whether the field is written into a creative pick-block clone).</p>
+<p>Mark a field with <code>@SaveToItem</code> and its value travels with the block's dropped item, coming back when the item is placed; unmarked fields (even <code>@SaveToDisk</code> ones) stay out of the item. The payload lives in the item's <strong>root tag</strong> under <code>fields</code> (a byte array) and <code>fields_dataVersion</code>, so the item stays a plain block item. The block entity implements <code>IDropSave</code> and the block calls it from <code>getDrops</code>/<code>setPlacedBy</code>/<code>getCloneItemStack</code> — the GregTech Modern <code>IDropSaveMachine</code> shape. Extending <code>FieldDataHolderBlock</code> provides all three hooks; the loot table itself is not changed. The annotation itself has one attribute, <code>saveOnClone</code> (whether the field is written into a creative pick-block clone).</p>
+<div class="note"><strong>Skip condition:</strong> the item payload is written through the same path a save uses, so it is the <code>@SaveToDisk</code> <code>skipWhen</code> — add <code>enabled = false</code> to keep it out of the world save.</div>
+<div class="note"><strong>Want the <code>@SaveToDisk</code> attributes without persisting?</strong> Write <code>@SaveToDisk(enabled = false, defaultValue = "0", listener = "onModeLoaded")</code>: the field stays managed, and the default-value filter, <code>skipWhen</code>, <code>saveEmpty</code> and the load listener still apply to the item payload, while the world save never stores it. <code>@SyncToClient</code>/<code>@SyncToServer</code> have the same <code>enabled</code> switch.</div>
 <pre><code><span class="kw">public class</span> <span class="typ">MyMachineBlockEntity</span> <span class="kw">extends</span> <span class="typ">FieldDataHolderBlockEntity</span> {
 
     <span class="kw">@SaveToItem</span>
     <span class="kw">private int</span> mode;       <span class="cmt">// written into the item on break, restored on place</span>
 
-    <span class="kw">@SaveToItem</span>(skipWhen = <span class="str">"isUpgradeInactive"</span>, saveOnClone = <span class="kw">false</span>)
-    <span class="kw">private int</span> upgradeMode; <span class="cmt">// left out while inactive, and out of the clone item</span>
+    <span class="kw">@SaveToItem</span>(saveOnClone = <span class="kw">false</span>)
+    <span class="kw">@SaveToDisk</span>(enabled = <span class="kw">false</span>, skipWhen = <span class="str">"isUpgradeInactive"</span>)
+    <span class="kw">private int</span> upgradeMode; <span class="cmt">// left out while inactive, out of the clone item, never saved</span>
 
     <span class="kw">private boolean</span> isUpgradeInactive(<span class="kw">int</span> mode) { <span class="kw">return</span> mode &lt; <span class="num">0</span>; }
 
@@ -962,8 +988,8 @@ FieldDefinitionStorage.registerAnnotation(DirtyTracked.<span class="kw">class</s
     <thead><tr><th>Member</th><th>Description</th></tr></thead>
     <tbody>
         <tr><td>@SaveToItem</td><td>Field annotation. It is a management marker on its own (like <code>@AddToManager</code>), so <code>@SaveToDisk</code> is optional; a field carrying both is stored in both places. The library registers it in mod construction through <code>FieldDefinitionStorage.registerAnnotation</code></td></tr>
-        <tr><td>@SaveToItem#skipWhen</td><td>Name of a skip predicate, signature <code>(T) -&gt; boolean</code> (<code>T</code> is the field's managed type, the <code>toManaged</code> type with <code>@Conversion</code>), declared on the field's class; returning <code>true</code> keeps the field out of this write. Same rule as <code>@SaveToDisk#skipWhen</code>, but it only governs the item payload</td></tr>
         <tr><td>@SaveToItem#saveOnClone</td><td>Defaults to <code>true</code>; with <code>false</code> a real drop still carries the field while the creative pick-block clone does not (the attribute cannot be named <code>clone</code>, which collides with <code>Object#clone</code>)</td></tr>
+        <tr><td>@SaveToItem skip condition</td><td>There is no <code>skipWhen</code> of its own: the item payload goes through the save write path, so a field uses <code>@SaveToDisk(skipWhen = ...)</code>, with <code>enabled = false</code> when it should only gate the item (the payload's default-value filter, <code>saveEmpty</code> and load listener come from that annotation too)</td></tr>
         <tr><td>IDropSave (block entity side)</td><td><code>saveToItem(tag, clone)</code> writes the state into the item root tag, <code>loadFromItem(tag)</code> reads it back, <code>modifyDrops(drops)</code> adjusts the drops before the payload is attached, and <code>clone</code> tells creative pick-block apart from a real drop. <code>FieldDataHolderBlockEntity</code> implements it</td></tr>
         <tr><td>FieldDataHolderBlock (block side)</td><td><code>getDrops</code> → <code>saveToItem(tag, false)</code> on this block's own drop, clearing an empty tag again; <code>setPlacedBy</code> → server-side <code>loadFromItem(tag)</code>; <code>getCloneItemStack</code> → <code>saveToItem(tag, true)</code>. A block with its own base class calls the static helpers <code>IDropSave.getDrops(...)</code> / <code>IDropSave.setPlacedBy(...)</code> / <code>IDropSave.getCloneItemStack(...)</code> instead</td></tr>
         <tr><td>FieldDataHolderBlockEntity#hasItemFields()</td><td>Whether the class has any <code>@SaveToItem</code> field</td></tr>
@@ -980,7 +1006,7 @@ FieldDefinitionStorage.registerAnnotation(DirtyTracked.<span class="kw">class</s
         <tr><td><code>getUpdateTag()</code></td><td>Overrides vanilla to include <code>@SyncToClient</code> fields under <code>"field_sync"</code>. New players receive current state on chunk load</td></tr>
         <tr><td><code>saveAdditional(tag)</code></td><td>Writes <code>VERSION</code> and <code>"field_save"</code> — serialized <code>@SaveToDisk</code> fields</td></tr>
         <tr><td><code>load(tag)</code></td><td>Prefers <code>"field_sync"</code> (chunk sync), falls back to <code>"field_save"</code> (disk restore). Sync-first ensures fresh state for new players</td></tr>
-        <tr><td><code>saveToItem(tag, clone)</code></td><td>Writes the <code>@SaveToItem</code> fields into the item root tag (<code>field_item</code> + version); called by <code>FieldDataHolderBlock</code> for drops and creative pick-block</td></tr>
+        <tr><td><code>saveToItem(tag, clone)</code></td><td>Writes the <code>@SaveToItem</code> fields into the item root tag (<code>fields</code> + version); called by <code>FieldDataHolderBlock</code> for drops and creative pick-block</td></tr>
         <tr><td><code>loadFromItem(tag)</code></td><td>Reads the <code>@SaveToItem</code> fields back from the item root tag; called by <code>FieldDataHolderBlock#setPlacedBy</code> on placement</td></tr>
     </tbody>
 </table>

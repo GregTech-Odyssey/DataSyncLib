@@ -84,16 +84,41 @@ class TestBlockEntity extends FieldDataHolderBlockEntity {
      * {@code @SaveToItem} attributes: the field is left out while {@link #skipItemSave(int)} says so,
      * and it is never written into a creative pick-block clone. {@code TestBlockEntityTests} checks
      * both filters.
+     *
+     * <p>The skip predicate lives on the switched-off {@code @SaveToDisk}: the item payload is written
+     * through the same path a save uses, so its {@code skipWhen} applies to the item, and
+     * {@code enabled = false} keeps the field out of the world save.</p>
      */
-    @SaveToItem(skipWhen = "skipItemSave", saveOnClone = false)
+    @SaveToItem(saveOnClone = false)
+    @SaveToDisk(enabled = false, skipWhen = "skipItemSave")
     int itemConditional;
 
     /**
-     * Skip predicate referenced by {@code @SaveToItem(skipWhen = "skipItemSave")}: the field is left
-     * out of the item while it is negative.
+     * Skip predicate referenced by {@code @SaveToDisk(skipWhen = "skipItemSave")}: the field is left
+     * out of both the item and the (disabled) save while it is negative.
      */
     boolean skipItemSave(int value) {
         return value < 0;
+    }
+
+    /**
+     * {@code @SaveToItem} with an {@code enabled = false} {@code @SaveToDisk}: the value travels with
+     * the item, and the switched-off annotation still supplies its default-value filter and its load
+     * listener, while the field never appears in the world save. {@code TestBlockEntityTests} checks
+     * all three.
+     */
+    @SaveToItem
+    @SaveToDisk(enabled = false, defaultValue = "3", listener = "onItemWithoutSaveLoaded")
+    int itemWithoutSave;
+
+    /**
+     * Listener target of {@link #itemWithoutSave}: fires when the value comes back from the item,
+     * never from a disk load.
+     */
+    int itemWithoutSaveLoaded = -1;
+
+    void onItemWithoutSaveLoaded(int value) {
+        itemWithoutSaveLoaded = value;
     }
 
     /**

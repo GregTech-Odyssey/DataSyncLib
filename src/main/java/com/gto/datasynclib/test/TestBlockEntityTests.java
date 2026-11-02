@@ -119,7 +119,7 @@ public final class TestBlockEntityTests {
         for (var key : List.of("i", "uuids", "stacks", "stack", "fluid", "tanks", "directions", "uuidSet", "map", "aabb", "a",
                 "b", "ints", "floats", "intList", "object2IntMap", "handler", "handlerArray", "module",
                 "globalPos", "sectionPos", "vec3i", "withDefault", "skipped", "loaded", "tagData", "itemOnly",
-                "itemConditional")) {
+                "itemConditional", "itemWithoutSave")) {
             expect("definitions.key." + key, manager.getFieldDefinition(key) != null, true);
         }
 
@@ -539,16 +539,20 @@ public final class TestBlockEntityTests {
      * item tag, the GregTech Modern {@code IDropSaveMachine} shape; {@link FieldDataHolderBlock}
      * calls it from {@code getDrops} and {@code getCloneItemStack}, and
      * {@code be.loadFromItem(tag)} from {@code setPlacedBy}. The suite drives those two calls
-     * directly — the block hooks themselves need a {@code Level} — and covers the two attributes:
-     * {@code skipWhen} removes a field whose predicate says so, {@code clone = false} keeps a field
-     * out of the pick-block copy, and unmarked fields never reach the item at all.</p>
+     * directly — the block hooks themselves need a {@code Level} — and covers the attribute and the
+     * rules the payload inherits from {@code @SaveToDisk}: {@code saveOnClone = false} keeps a field
+     * out of the pick-block copy, {@code skipWhen} removes a field whose predicate says so, the
+     * default-value filter applies, and unmarked fields never reach the item at all.</p>
      */
     private void saveToItem() {
         TestBlockEntity src = newEntity();
         src.itemOnly = 42;
         src.i = 7;
+        // equals the declared default of the switched-off @SaveToDisk below, so it stays out of the
+        // payload and the exact key sets asserted here keep their shape
+        src.itemWithoutSave = 3;
 
-        // skipWhen = "skipItemSave" → a negative value is left out of the item.
+        // @SaveToDisk(skipWhen = "skipItemSave") → a negative value is left out of the item.
         src.itemConditional = -1;
         var skippedTag = new CompoundTag();
         src.saveToItem(skippedTag, false);
@@ -579,6 +583,19 @@ public final class TestBlockEntityTests {
             expect("item.metadata." + name + ".saveOnClone", !name.equals("itemConditional"), metadata.saveOnClone());
         }
 
+        // The definition view of the annotated fields is built once with the class's storage, so the
+        // item path never maps the AnnotatedField records again: same array, same order, same entries.
+        var annotatedItemFields = FieldDefinitionStorage.get(TestBlockEntity.class).getAnnotatedFields(SaveToItem.class);
+        var itemDefinitions = FieldDefinitionStorage.get(TestBlockEntity.class).getAnnotatedFieldDefinitions(SaveToItem.class);
+        expect("item.definitionCacheSameArray", true,
+                itemDefinitions == FieldDefinitionStorage.get(TestBlockEntity.class).getAnnotatedFieldDefinitions(SaveToItem.class));
+        expect("item.definitionCacheSize", annotatedItemFields.length, itemDefinitions.length);
+        boolean sameDefinitions = true;
+        for (var i = 0; i < annotatedItemFields.length; i++) {
+            sameDefinitions &= annotatedItemFields[i].definition() == itemDefinitions[i];
+        }
+        expect("item.definitionCacheOrder", true, sameDefinitions);
+
         // Reading the tag back applies the fields the payload carries.
         TestBlockEntity dst = newEntity();
         dst.loadFromItem(tag);
@@ -590,6 +607,31 @@ public final class TestBlockEntityTests {
         cloneDst.loadFromItem(cloneTag);
         expect("item.cloneLoaded", 42, cloneDst.itemOnly);
         expect("item.cloneConditionalUntouched", 0, cloneDst.itemConditional);
+        // The default-value filter of the switched-off @SaveToDisk kept the field out of every tag,
+        // so loading one leaves it (and its listener) untouched.
+        expect("item.disabledSaveDefaultSkipped", false, payloadKeys(tag).contains("itemWithoutSave"));
+        expect("item.disabledSaveAbsentUntouched", 0, dst.itemWithoutSave);
+        expect("item.disabledSaveListenerNotFired", -1, dst.itemWithoutSaveLoaded);
+
+        // A value other than the default is carried, and the disabled annotation's load listener
+        // fires on the item read.
+        src.itemWithoutSave = 7;
+        var carriedTag = new CompoundTag();
+        src.saveToItem(carriedTag, false);
+        expect("item.disabledSaveCarried", true, payloadKeys(carriedTag).contains("itemWithoutSave"));
+        TestBlockEntity disabledDst = newEntity();
+        disabledDst.loadFromItem(carriedTag);
+        expect("item.disabledSaveLoaded", 7, disabledDst.itemWithoutSave);
+        expect("item.disabledSaveListenerFired", 7, disabledDst.itemWithoutSaveLoaded);
+
+        // ...and the disabled annotation keeps its field off the incremental save while the bulk
+        // path still carries it.
+        var saveData = JavaValueOps.INSTANCE.getStringMap(
+                src.getFieldDataManager().writeToValue(JavaValueOps.INSTANCE));
+        expect("disk.disabledSaveSkipped", false, saveData.containsKey("itemWithoutSave"));
+        var bulkData = JavaValueOps.INSTANCE.getStringMap(
+                src.getFieldDataManager().writeAllToValue(JavaValueOps.INSTANCE));
+        expect("diskAll.disabledSaveCarried", true, bulkData.containsKey("itemWithoutSave"));
 
         // A holder that marks no field writes nothing, so the block base can drop an empty tag.
         var plainHolder = new FieldDataHolderBlockEntity(ModBlockEntities.TEST_BLOCK_ENTITY.get(), POS,
@@ -637,28 +679,31 @@ public final class TestBlockEntityTests {
     /**
      * Full network round-trip in both directions.
      *
-     * <p><b>Usage:</b> the sender calls {@code writeToNetworkBuffer(side, true)} and the receiver applies
-     * the bytes with {@code readFromNetworkBuffer(oppositeSide, bytes)}. {@code LogicalSide.SERVER}
+     * <p><b>Usage:</b> the sender serializes into a packet buffer with
+     * {@code writeToNetworkBuffer(side, buf, true)} and the receiver applies the bytes with
+     * {@code readFromNetworkBuffer(oppositeSide, buf)}; the suite goes through the
+     * {@code byte[]} boundary with {@link #syncBytes(FieldDataManager, LogicalSide, boolean)} and
+     * {@link #readSyncBytes(FieldDataManager, LogicalSide, byte[])}. {@code LogicalSide.SERVER}
      * serializes {@code @SyncToClient} fields, {@code LogicalSide.CLIENT} serializes
      * {@code @SyncToServer} ones (here the {@code ObjNotifiableHolder} field).</p>
      */
     private void networkFull() {
         TestBlockEntity src = mutate(newEntity());
-        byte[] server = src.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true);
+        byte[] server = syncBytes(src.getFieldDataManager(), LogicalSide.SERVER, true);
 
         TestBlockEntity client = newEntity();
         clear(client);
-        client.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, server);
+        readSyncBytes(client.getFieldDataManager(), LogicalSide.CLIENT, server);
         expectSynced("netFull", src, client);
 
         // Client → server direction: only @SyncToServer fields, and the listener must fire.
         TestBlockEntity sender = newEntity();
         sender.objectHolder.value = "from-client";
-        byte[] toServer = sender.getFieldDataManager().writeToNetworkBuffer(LogicalSide.CLIENT, true);
+        byte[] toServer = syncBytes(sender.getFieldDataManager(), LogicalSide.CLIENT, true);
 
         TestBlockEntity receiver = newEntity();
         receiver.b.receiverCalls = 0;
-        receiver.getFieldDataManager().readFromNetworkBuffer(LogicalSide.SERVER, toServer);
+        readSyncBytes(receiver.getFieldDataManager(), LogicalSide.SERVER, toServer);
         expect("netFull.toServer", sender.objectHolder.value, receiver.objectHolder.value);
     }
 
@@ -674,45 +719,45 @@ public final class TestBlockEntityTests {
      */
     private void networkIncremental() {
         TestBlockEntity src = mutate(newEntity());
-        byte[] full = src.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true);
+        byte[] full = syncBytes(src.getFieldDataManager(), LogicalSide.SERVER, true);
 
         // One small change only → the incremental buffer must be far smaller than the full one.
         src.synced = 31337;
         src.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true);
-        byte[] incremental = src.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, false);
+        byte[] incremental = syncBytes(src.getFieldDataManager(), LogicalSide.SERVER, false);
         expect("netIncremental.notEmpty", incremental.length > 0, true);
         expect("netIncremental.smallerThanFull", incremental.length < full.length, true);
 
         // Applying it to a client that already has the full state updates just that field.
         TestBlockEntity client = newEntity();
         clear(client);
-        client.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, full);
-        client.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, incremental);
+        readSyncBytes(client.getFieldDataManager(), LogicalSide.CLIENT, full);
+        readSyncBytes(client.getFieldDataManager(), LogicalSide.CLIENT, incremental);
         expect("netIncremental.applied", src.synced, client.synced);
         expectSynced("netIncremental.clientState", src, client);
 
         // A single changed slot of an INBTSerializable array must not re-send the other slots.
         TestBlockEntity arrayFull = mutate(newEntity());
-        byte[] arrayFullBytes = arrayFull.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true);
+        byte[] arrayFullBytes = syncBytes(arrayFull.getFieldDataManager(), LogicalSide.SERVER, true);
         arrayFull.handlerArray[1].setStackInSlot(0, new ItemStack(Items.EMERALD, 9));
         arrayFull.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true);
-        byte[] arrayIncremental = arrayFull.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, false);
+        byte[] arrayIncremental = syncBytes(arrayFull.getFieldDataManager(), LogicalSide.SERVER, false);
         expect("netIncremental.arraySmaller", arrayIncremental.length < arrayFullBytes.length, true);
 
         // markFieldsForSync forces a field with autoDetect = false to be sent. The entity is primed
         // first, because a brand-new one reports every field as changed on its first check.
         TestBlockEntity manual = mutate(newEntity());
         manual.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true);
-        manual.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true);
+        syncBytes(manual.getFieldDataManager(), LogicalSide.SERVER, true);
         manual.manual = 4711;
         manual.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true);
         expect("netIncremental.manualNotAutoDetected",
-                manual.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, false).length, 0);
+                syncBytes(manual.getFieldDataManager(), LogicalSide.SERVER, false).length, 0);
         manual.getFieldDataManager().markFieldsForSync("manual");
-        byte[] marked = manual.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, false);
+        byte[] marked = syncBytes(manual.getFieldDataManager(), LogicalSide.SERVER, false);
         expect("netIncremental.manualAfterMark", marked.length > 0, true);
         TestBlockEntity manualClient = newEntity();
-        manualClient.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, marked);
+        readSyncBytes(manualClient.getFieldDataManager(), LogicalSide.CLIENT, marked);
         expect("netIncremental.manualValue", manual.manual, manualClient.manual);
     }
 
@@ -742,12 +787,12 @@ public final class TestBlockEntityTests {
         // Sync listener: invoked as (newValue, oldValue) on the receiving side.
         TestBlockEntity sender = newEntity();
         sender.synced = 99;
-        byte[] bytes = sender.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true);
+        byte[] bytes = syncBytes(sender.getFieldDataManager(), LogicalSide.SERVER, true);
 
         TestBlockEntity receiver = newEntity();
         receiver.syncedListenerCalls = 0;
         receiver.lastSyncedOld = -1;
-        receiver.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, bytes);
+        readSyncBytes(receiver.getFieldDataManager(), LogicalSide.CLIENT, bytes);
         expect("listener.syncCalls", receiver.syncedListenerCalls, 1);
         expect("listener.syncOldValue", receiver.lastSyncedOld, 0);
         expect("listener.syncNewValue", receiver.synced, 99);
@@ -755,12 +800,12 @@ public final class TestBlockEntityTests {
         // Nested holder: reading B's ObjNotifiableHolder fires its receiver listener.
         TestBlockEntity nestedSender = newEntity();
         nestedSender.b.c.value = "nested";
-        byte[] nestedBytes = nestedSender.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true);
+        byte[] nestedBytes = syncBytes(nestedSender.getFieldDataManager(), LogicalSide.SERVER, true);
 
         TestBlockEntity nestedReceiver = newEntity();
         nestedReceiver.b.receiverCalls = 0;
         nestedReceiver.b.lastReceived = null;
-        nestedReceiver.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, nestedBytes);
+        readSyncBytes(nestedReceiver.getFieldDataManager(), LogicalSide.CLIENT, nestedBytes);
         expect("listener.nestedCalls", nestedReceiver.b.receiverCalls, 1);
         expect("listener.nestedValue", nestedReceiver.b.lastReceived, "nested");
     }
@@ -783,7 +828,7 @@ public final class TestBlockEntityTests {
         expect("dirty.stickyUntilWrite", manager.updateFieldDirtyFlags(LogicalSide.SERVER, true), true);
         expect("dirty.managerFlag", manager.isChanged(), true);
 
-        byte[] written = manager.writeToNetworkBuffer(LogicalSide.SERVER, false);
+        byte[] written = syncBytes(manager, LogicalSide.SERVER, false);
         expect("dirty.written", written.length > 0, true);
         expect("dirty.clearedAfterWrite", manager.isChanged(), false);
         expect("dirty.noChangeAfterWrite", manager.updateFieldDirtyFlags(LogicalSide.SERVER, true), false);
@@ -791,7 +836,7 @@ public final class TestBlockEntityTests {
         // Explicit marking by name and by definition.
         manager.markFieldsForSync("synced");
         expect("dirty.markByName", manager.updateFieldDirtyFlags(LogicalSide.SERVER, true), true);
-        manager.writeToNetworkBuffer(LogicalSide.SERVER, false);
+        syncBytes(manager, LogicalSide.SERVER, false);
         manager.clearAllChangeMarks();
         expect("dirty.clearAll", manager.isChanged(), false);
         expect("dirty.clearAllClearsFields", manager.updateFieldDirtyFlags(LogicalSide.SERVER, true), false);
@@ -894,9 +939,9 @@ public final class TestBlockEntityTests {
         expect("child.name", dst.module.name, "child");
         expect("child.values", dst.module.values, List.of(3, 4));
 
-        byte[] bytes = src.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, true);
+        byte[] bytes = syncBytes(src.getFieldDataManager(), LogicalSide.SERVER, true);
         TestBlockEntity client = newEntity();
-        client.getFieldDataManager().readFromNetworkBuffer(LogicalSide.CLIENT, bytes);
+        readSyncBytes(client.getFieldDataManager(), LogicalSide.CLIENT, bytes);
         expect("child.netTicks", client.module.ticks, 900);
         expect("child.netValues", client.module.values, List.of(3, 4));
 
@@ -1311,7 +1356,34 @@ public final class TestBlockEntityTests {
      */
     private void prime(TestBlockEntity be) {
         be.getFieldDataManager().updateFieldDirtyFlags(LogicalSide.SERVER, true);
-        be.getFieldDataManager().writeToNetworkBuffer(LogicalSide.SERVER, false);
+        syncBytes(be.getFieldDataManager(), LogicalSide.SERVER, false);
+    }
+
+    /**
+     * Serializes a holder's sync payload into a {@code byte[]} through
+     * {@link ByteBufUtil#writeToBytes(java.util.function.Function, java.util.function.Consumer)} — the shape
+     * a packet carries. The suite drives the manager directly, so it bridges the buffer the manager writes
+     * into and the array the rest of the assertions compare.
+     *
+     * @param manager  the holder's manager
+     * @param side     the direction to serialize ({@code SERVER} for {@code @SyncToClient} fields)
+     * @param writeAll {@code true} for a full write, {@code false} for an incremental one
+     * @return the payload
+     */
+    private static byte[] syncBytes(FieldDataManager manager, LogicalSide side, boolean writeAll) {
+        return ByteBufUtil.writeToBytes(FriendlyByteBuf::new, buf -> manager.writeToNetworkBuffer(side, buf, writeAll));
+    }
+
+    /**
+     * Applies a payload produced by {@link #syncBytes(FieldDataManager, LogicalSide, boolean)}: the array is
+     * wrapped, not copied, and read in place.
+     *
+     * @param manager the receiving holder's manager
+     * @param side    the direction being read ({@code CLIENT} for {@code @SyncToClient} fields)
+     * @param data    the payload
+     */
+    private static void readSyncBytes(FieldDataManager manager, LogicalSide side, byte[] data) {
+        ByteBufUtil.readFromBytes(FriendlyByteBuf::new, data, buf -> manager.readFromNetworkBuffer(side, buf));
     }
 
     /**

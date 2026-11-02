@@ -5,6 +5,7 @@ import com.gto.datasynclib.DataFieldDefinition;
 import com.gto.datasynclib.IFieldDataHolder;
 import com.gto.datasynclib.LogicalSide;
 import com.gto.datasynclib.datastream.codec.ValueOps;
+import com.gto.datasynclib.util.ByteBufUtil;
 import net.minecraft.network.FriendlyByteBuf;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -109,14 +110,14 @@ public final class ChildManagerAccess<T> extends AbstractFieldAccess<T> {
     protected void doWriteBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull FriendlyByteBuf data, boolean writeAll) {
         var holder = asHolder(instance);
         if (holder == null) return;
-        data.writeByteArray(holder.getFieldDataManager().writeToNetworkBuffer(side, writeAll));
+        ByteBufUtil.writeBigPayload(data, buf -> holder.getFieldDataManager().writeToNetworkBuffer(side, buf, writeAll));
     }
 
     @Override
     protected void doReadBuffer(@NotNull LogicalSide side, @NotNull T instance, @NotNull FriendlyByteBuf data) {
         var holder = asHolder(instance);
         if (holder == null) return;
-        holder.getFieldDataManager().readFromNetworkBuffer(side, data.readByteArray());
+        ByteBufUtil.readBigPayload(ByteBufUtil.FRIENDLY_BYTE_BUF_WRAPPER, data, buf -> holder.getFieldDataManager().readFromNetworkBuffer(side, buf));
     }
 
     @Override

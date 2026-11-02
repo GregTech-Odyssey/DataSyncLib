@@ -37,6 +37,22 @@ import java.lang.annotation.Target;
 public @interface SyncToServer {
 
     /**
+     * Whether this annotation's own path is switched on: {@code true} (the default) synchronizes
+     * the field to the server; {@code false} keeps the rest of the annotation —
+     * {@link #autoDetect()}, {@link #scheduleUpdate()}, {@link #skipWhen()} and
+     * {@link #listener()} — but never sends the field.
+     *
+     * <p>Use it for a field that is managed for another reason (an
+     * {@link com.gto.datasynclib.blockentity.SaveToItem @SaveToItem} payload, {@code @AddToManager},
+     * or the bulk {@code writeAllToValue} path) but must not be part of the client→server traffic.
+     * The field stays <em>managed</em>; only this path is off.</p>
+     *
+     * @return {@code true} to synchronize this field, {@code false} to only keep the annotation's
+     * attributes
+     */
+    boolean enabled() default true;
+
+    /**
      * Determines whether to trigger an update notification when the field value changes.
      * When set to true, the server will be notified of the change through
      * {@link com.gto.datasynclib.IFieldDataHolder#scheduleUpdate(com.gto.datasynclib.LogicalSide)},
